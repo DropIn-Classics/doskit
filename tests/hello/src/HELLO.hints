@@ -1,0 +1,30 @@
+; HELLO.EXE, the kit's test program (tests/hello/HELLO.ASM)
+; Hints for tools/disasm.py; numbers are hex.
+
+exe HELLO/HELLO.EXE
+
+; the segments, from the relocation (MOV AX,DATA at CODE:0001) and the
+; header (SS:SP = 0007:0100)
+segment CODE  0000 CODE
+segment DATA  0005 DATA
+segment STACK 0007 STACK stack size=100
+
+relocorder CODE
+
+code CODE:0000 start
+
+; offsets in DATA the analysis takes for numbers: the string for INT 21h
+; AH=9 (MOV DX), the table's address in CALL [SI+steps]
+dptr CODE:0005 DATA
+dptr CODE:001C DATA
+
+; the table of near pointers the loop at CODE:0017 calls through
+; (CALL [SI+steps]); gaps.py showed CODE:002B's address as a word there
+words DATA:0016 2 CODE
+name  DATA:0016 steps
+name  DATA:0014 counter
+name  DATA:0000 greeting
+name  CODE:0018 next_step
+name  CODE:002B fill_band
+name  CODE:0039 fill_dot
+comment CODE:0026 the end: INT 21h AH=4Ch (tests/selftest.py compares here)

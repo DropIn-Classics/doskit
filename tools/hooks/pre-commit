@@ -1,0 +1,18 @@
+#!/bin/sh
+# The kit's own hook.  Installed with: git config core.hooksPath tools/hooks
+# (once per clone).  See AGENTS.md.
+
+# no game files, no programs or data (the tests make theirs in build/)
+pat='^(game|build)/|\.(exe|com|ovl|sdr|mod|fli|flc|vga|ogg|gog|iso|bin|cue|256|016)$'
+if git diff --cached --name-only --diff-filter=ACMR | grep -Eiq "$pat"; then
+    echo "pre-commit: game or program files staged:" >&2
+    git diff --cached --name-only --diff-filter=ACMR | grep -Ei "$pat" >&2
+    exit 1
+fi
+
+if git diff --cached --name-only | grep -Eq '^(tools|runtime|template|tests)/'; then
+    py=python3
+    command -v python3 >/dev/null 2>&1 || py=python
+    exec $py tests/selftest.py
+fi
+exit 0
