@@ -2,13 +2,13 @@
 
 1. The repository, from the template:
 
-       python3 doskit/tools/new_project.py ~/mygame "My Game" mygame \
-           --marker GAME/GAME.EXE --kit https://github.com/OWNER/doskit.git
+       python3 ~/doskit/tools/new_project.py ~/mygame "My Game" mygame \
+           --marker GAME/GAME.EXE
 
    It copies template/, fills in the game's name everywhere (PROVENANCE.md
    among them), runs `git init`, enables the hook and adds the kit as the
-   submodule `doskit/` (without --kit from the local kit's folder). Nothing
-   is committed: look at it, then make the first commit.
+   submodule `doskit/` from its GitHub repository (--kit names another
+   URL). Nothing is committed: look at it, then make the first commit.
 
 2. PROVENANCE.md: read it; it is binding for everyone working on the
    project, people and agents alike, and it goes into every package the

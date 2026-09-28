@@ -13,7 +13,8 @@ The template's placeholders are filled in: {{NAME}}, {{SLUG}}, {{ENV}}
 (SLUG_GAME in upper case, the environment variable naming the game's
 folder), {{MARKER}}, {{DATE}}.  Then `git init`, the hook enabled
 (core.hooksPath hooks) and the kit added as the submodule `doskit` from
---kit (default: this kit's own folder; it needs a commit).  Nothing is
+--kit (default: the kit's repository on GitHub, KIT_URL; a local folder
+works too, but its path then stands in .gitmodules).  Nothing is
 committed.  Every project carries PROVENANCE.md; check.py insists on it.
 """
 import argparse, datetime, os, re, shutil, subprocess, sys
@@ -22,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from kit import KIT
 
 TEMPLATE = os.path.join(KIT, 'template')
+KIT_URL = 'git@github.com:mindphluxnet/doskit.git'
 
 
 def fill(dst, values):
@@ -48,7 +50,7 @@ def main():
     ap.add_argument('name')
     ap.add_argument('slug')
     ap.add_argument('--marker', default='')
-    ap.add_argument('--kit', default=KIT)
+    ap.add_argument('--kit', default=KIT_URL)
     ap.add_argument('--no-submodule', action='store_true')
     a = ap.parse_args()
     if not re.fullmatch(r'[a-z][a-z0-9_-]*', a.slug):
