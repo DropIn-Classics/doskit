@@ -27,8 +27,8 @@ extern uint8_t mem[MEM_SIZE];
 
 /* The PSP dosrun gives the first program it starts (the image follows at
  * PSP + 10h): its MCB at 0060h, the environment's block before the PSP.
- * 0067h for the programs of pddnative, the first port; `-log` of the
- * entry point in dosrun shows it for another. */
+ * 0067h for the programs ported so far; `-log` of the entry point in
+ * dosrun shows it for another. */
 #define RM_LOAD_PSP 0x0067u
 /* the end of conventional memory the arena reaches */
 #define RM_TOP 0xA000u

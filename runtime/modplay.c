@@ -93,9 +93,9 @@ void modplay_set_position(int pos)
         micromod_set_position(pos);
 }
 
-/* As Frontline Design's SBLASTER.SDR does it (INT 66h AL=10h): the
- * position one less than `pos` at once (and
- * returned so by a second call before the next tick), the row counter to
+/* As a DOS MOD driver's "go to position" call can do it: the position
+ * one less than `pos` at once (and returned so by a second call before
+ * the next tick), the row counter to
  * 1, so the next tick plays the row after the current one and then goes
  * to `pos`; a jump the rows asked for is already the position */
 int modplay_jump(int pos)

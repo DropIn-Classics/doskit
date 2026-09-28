@@ -1,7 +1,7 @@
 # The method
 
 How a DOS game is taken from its shipped programs to a native port with
-the kit, and what was learned doing it for Pinball Dreams (pddnative).
+the kit, and what was learned doing it for the first game.
 Each step says what the tools do and what they leave to the person (or
 agent) doing it.
 
@@ -185,7 +185,7 @@ with its picture number, which becomes a key script for dosrun (time =
 start + picture / rate: find the start and the rate once with `-log` on
 the original's frame wait).
 A project may want a `portcmp.py` that does all this for one key script
-(pddnative has one; it is not generic yet).
+(not in the kit yet: the one made so far is tied to its game).
 
 **The frame.** A DOS game's frame is paced by the retrace or a timer
 tick (often a sound driver's callback). frame.c keeps the video mode's

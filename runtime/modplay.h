@@ -30,15 +30,14 @@ void modplay_skip_ticks(int ticks);
 void modplay_set_position(int pos);
 
 /* at the next tick the module plays its next row and then goes on at
- * position `pos` (as Frontline Design's SBLASTER.SDR does it for INT 66h
- * AL=10h); the position it plays now */
+ * position `pos` (as a DOS MOD driver's "go to position" call can do
+ * it); the position it plays now */
 int modplay_jump(int pos);
 
 /* a pattern jump (Bxx) goes on at the position `hook` returns for its
- * target, and is ignored while a jump is pending in the row (as
- * SBLASTER.SDR does, a game's hook through its INT 66h AL=13h); the hook
- * runs on the audio thread.  NULL: micromod's
- * own jumps */
+ * target, and is ignored while a jump is pending in the row (as a DOS MOD
+ * driver that calls the game back at pattern jumps can do it); the hook
+ * runs on the audio thread.  NULL: micromod's own jumps */
 void modplay_set_jump_hook(int (*hook)(int pos));
 
 /* a pattern cell played at once in channel `chan` (from 0): the period

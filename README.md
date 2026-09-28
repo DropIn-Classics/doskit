@@ -2,8 +2,7 @@
 
 Tools and a C runtime for porting DOS games: from the shipped programs
 to readable C that runs natively and needs the player's own installed
-copy of the game for its data. Made from the parts of
-[pddnative](https://github.com/mindphluxnet/pddnative) (Pinball Dreams)
+copy of the game for its data. Made from the parts of an earlier port
 that are not about one game, so the next port does not start from
 nothing.
 
@@ -85,12 +84,11 @@ On Windows `python` for `python3`; the runner builds with MSVC
 
 ## Status
 
-Taken from pddnative on 2026-09-29 and made independent of it. Checked:
-the kit's tools rebuild pddnative's four programs byte for byte (with
-the `asm` switches in their hints), `symmap.py` writes the same names as
-pddnative's own header, `dosrun` gives the same memory hashes and
-pictures as pddnative's runner on a table program and the intro, and
-`tests/selftest.py` passes on macOS (clang, SDL2 framework). Not checked:
+Made independent of the earlier port on 2026-09-29. Checked: the kit's
+tools rebuild that port's four programs (hand-written assembly) byte for
+byte (with the `asm` switches in their hints), `symmap.py` writes the
+same names as its own header, `dosrun` gives the same memory hashes and
+pictures as its runner did, and `tests/selftest.py` passes on macOS (clang, SDL2 framework). Not checked:
 the runtime and the runner built on Windows and Linux in this form, and
 any program not written in assembly (compiled C programs, COM files,
 overlays, protected mode: see docs/METHOD.md, "Limits").
