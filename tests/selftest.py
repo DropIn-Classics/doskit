@@ -41,8 +41,10 @@ In build/selftest (a project as a game's would be, see kit.py):
      (modes 0Dh and 0Eh planar at A0000h, back to text) and says
      "vgamode ok"; SB16.EXE, which checks the runner's
      Sound Blaster 16 (the DSP's reset, the mixer's IRQ and DMA, a 16-bit
-     transfer on DMA 5 and an 8-bit one on DMA 1, each ending in IRQ 7)
-     and says "sb16 ok", its -wav holding the 80 samples it played; the
+     transfer on DMA 5 and an 8-bit one on DMA 1, each ending in IRQ 7,
+     and a 16-bit one started with DMA 5 masked, which waits for the
+     unmask) and says "sb16 ok", its -wav holding the 144 samples it
+     played; the
      same with a -log on its wait loop and with a -shot during the wait
      leaves the same memory (looking does not change a run);
   4. the C runtime: tests/hello/port.c (HELLO in C over rmem.h and vga.h,
@@ -385,7 +387,8 @@ def main():
     samples = list(struct.unpack('<%dh' % ((len(data) - 44) // 2), data[44:]))
     rate = struct.unpack('<I', data[24:28])[0]
     print(f'sb16.wav: {len(samples)} samples at {rate} Hz')
-    if rate != 8000 or samples != [0x1000 * 3 // 4] * 64 + [0x40 * 256 * 3 // 4] * 16:
+    if rate != 8000 or samples != ([0x1000 * 3 // 4] * 64 + [0x40 * 256 * 3 // 4] * 16
+                           + [0x1000 * 3 // 4] * 64):
         raise SystemExit('selftest FAILED: SB16.EXE\'s -wav (the samples the Sound Blaster played)')
     # looking does not change the run: a -log on the loop that waits for the
     # Sound Blaster's interrupt (hit every third instruction) and a -shot

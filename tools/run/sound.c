@@ -134,8 +134,9 @@ uint8_t dma_read(uint16_t p){
 }
 
 /* Pull one byte (channels 0-3) or word (4-7) across the channel.  Returns
- * -1 when the channel is masked: a block that ended and is not auto-init
- * masks it (so the caller knows to stop). */
+ * -1 when the channel is masked (a block that ended and is not auto-init
+ * masks it): the card gets nothing and waits, as on hardware, until it is
+ * unmasked. */
 static int dma_fetch(int c, int *end_of_block){
     uint32_t phys;
     int b;
@@ -380,12 +381,12 @@ uint8_t sb_read(uint16_t p){
 }
 
 /* One unit of the running transfer as a signed 16-bit sample, or -99999
- * when the channel stopped.  A 16-bit transfer on an 8-bit channel would
+ * while the channel is masked.  A 16-bit transfer on an 8-bit channel would
  * take two bytes; the channels here are fixed, so it does not happen. */
-#define SB_STOPPED (-99999)
+#define SB_WAITING (-99999)
 static int sb_unit(int *eob){
     int b = dma_fetch(sb_channel(), eob);
-    if(b < 0) return SB_STOPPED;
+    if(b < 0) return SB_WAITING;
     if(sb.bits16) return sb.is_signed ? (int)(int16_t)b : b - 32768;
     return (sb.is_signed ? (int)(int8_t)b : b - 128) * 256;
 }
@@ -418,7 +419,10 @@ void sb_tick(void){
         int ch, n = sb.stereo ? 2 : 1, sum = 0;
         for(ch = 0; ch < n && sb.playing; ch++){
             int eob, s = sb_unit(&eob);
-            if(s == SB_STOPPED){ sb.playing = 0; break; }
+            /* a masked channel (a driver's pause masks it) holds the
+             * transfer where it is: no samples, the frames due are
+             * dropped as for a halted DSP, and it goes on when unmasked */
+            if(s == SB_WAITING){ due = 0; break; }
             sum += s;
             /* What ends a transfer, and so interrupts: the DSP's own unit
              * count, which is the card's job on hardware.  The controller's

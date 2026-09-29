@@ -6,6 +6,10 @@
 ;      interrupt, and DMA 5's address has moved on by the 64 words,
 ;   4. C0h (8-bit, single-cycle, unsigned mono) over 16 bytes on DMA 1:
 ;      IRQ 7 again, mixer 82h says 8-bit interrupt, the address 16 on,
+;   5. B0h over 64 words on DMA 5 again, started with the channel masked
+;      (as a driver's pause leaves it): no interrupt while it stays masked
+;      for longer than the transfer takes, then unmasked it runs to its
+;      end and IRQ 7 comes, the address 64 words on,
 ; and prints "sb16 ok", or "sb16 FAILED" and the number of the check
 ; that failed.  The interrupt handler acknowledges both kinds (22Eh,
 ; 22Fh).  selftest.py runs it with -wav and checks the 80 samples that
@@ -150,6 +154,57 @@ check4:	; 4. DMA 1, 8-bit
 	SUB CX,SI
 	CMP CX,16
 	JNE fail_b
+	JMP check5
+fail_c:	JMP failed
+check5:	; 5. DMA 5 masked while the DSP runs
+	MOV BL,'5'
+	CALL buf_phys16
+	MOV SI,AX
+	MOV AL,05H
+	OUT 0D4H,AL
+	OUT 0D8H,AL
+	MOV AL,49H
+	OUT 0D6H,AL
+	MOV AL,DL
+	OUT 8BH,AL
+	MOV AX,SI
+	OUT 0C4H,AL
+	MOV AL,AH
+	OUT 0C4H,AL
+	MOV AL,63
+	OUT 0C6H,AL
+	MOV AL,0
+	OUT 0C6H,AL
+	MOV AL,0B0H
+	CALL dsp_write
+	MOV AL,10H
+	CALL dsp_write
+	MOV AL,63
+	CALL dsp_write
+	MOV AL,0
+	CALL dsp_write
+	; about 20 ms at the runner's 6 million instructions a second; the
+	; 64 words take 8 ms at 8000 Hz
+	MOV AL,irqs
+	MOV CX,0
+masked_wait:
+	LOOP masked_wait
+	CMP AL,irqs
+	JNE fail_c
+	MOV AL,01H
+	OUT 0D4H,AL
+	CALL wait_irq
+	JC fail_c
+	TEST irq_status,02H
+	JE fail_c
+	OUT 0D8H,AL
+	IN AL,0C4H
+	MOV CL,AL
+	IN AL,0C4H
+	MOV CH,AL
+	SUB CX,SI
+	CMP CX,64
+	JNE fail_c
 	MOV DX,OFFSET text_ok
 	MOV AH,9
 	INT 21H
