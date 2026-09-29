@@ -1,6 +1,6 @@
 /* dosrun - a headless PC for running the shipped programs of a DOS game.
  * The emulation core: cpu.c (386: real, protected and V86 mode), vga.c, dev.c (PIC,
- * PIT, keyboard controller), bios.c, sound.c (DMA, Sound Blaster),
+ * PIT, keyboard controller), bios.c, sound.c (DMA, Sound Blaster 16),
  * vgafont.c, png.c; dos.c is the DOS layer (memory, EXEC, files), mscdex.c
  * the CD-ROM extensions.  main.c
  * is the session: options, the loop, what is written out.
@@ -184,6 +184,7 @@ extern int cd_log;                    /* -cd: print the CD requests */
 void sound_init(void);
 void sound_wav_open(const char *path);
 void sound_wav_close(void);
+int dma_is_port(uint16_t p);          /* the DMA controllers' and page registers' ports */
 void dma_write(uint16_t p, uint8_t v);
 uint8_t dma_read(uint16_t p);
 void sb_write(uint16_t p, uint8_t v);

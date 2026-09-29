@@ -47,6 +47,8 @@
  *   -vram FILE       write the 256 KB of video memory (planes interleaved,
  *                    byte 4*o+p = plane p, offset o) at the end
  *   -wav FILE        what the Sound Blaster played
+ *   -sb              the Sound Blaster's resets, transfers and unknown DSP
+ *                    commands on stderr
  *   -dos             print every INT 21h call
  *   -cue FILE        the CD's tracks from a cue sheet (GOG's game.inst):
  *                    audio tracks the program can ask for and play; the
@@ -396,6 +398,7 @@ int main(int argc, char **argv){
         else if(!strcmp(a,"-intwatch")){ NEED(1); int_watch = (int)strtol(argv[++i], NULL, 16); }
         else if(!strcmp(a,"-prof")) prof_on = 1;
         else if(!strcmp(a,"-vgastate")) vga_state = 1;
+        else if(!strcmp(a,"-sb")) sound_debug = 1;
         else if(!strcmp(a,"-v")) trace_level = 1;
         else if(a[0]=='-') die("unknown option %s", a);
         else snprintf(prog, sizeof(prog), "%s", a);

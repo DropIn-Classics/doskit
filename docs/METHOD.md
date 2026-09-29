@@ -118,8 +118,9 @@ run or marked as read from the code ("presumably", "not checked").
 in `dosrun`: a 386 CPU (real mode; protected mode without paging and
 task switches, V86 mode; see the top of "protected mode" in
 tools/run/cpu.c; INT 15h AH=87h/88h/89h), VGA (planar, chain-4, Mode X, the
-retrace), PIT/PIC/keyboard, BIOS, the 8237 DMA and a Sound Blaster DSP
-(so the game's own sound drivers run), and a small DOS whose drives are
+retrace), PIT/PIC/keyboard, BIOS, both 8237 DMA controllers and a Sound Blaster 16
+(DSP and mixer configuration, so the game's own sound drivers run; `-wav`
+writes what it played, `-sb` its transfers), and a small DOS whose drives are
 all the game's files with a writable layer in `build/run/state`, each
 drive with its own current directory; programs start on D:. Everything
 runs on an emulated clock (6 M instructions a second by default):

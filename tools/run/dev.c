@@ -257,7 +257,7 @@ uint8_t io_r8(uint16_t p){
     case 0x201: return 0xF0;                    /* game port: nothing attached */
     case 0x388: case 0x389: return opl_status();
     }
-    if(p < 0x10 || p==0x81 || p==0x82 || p==0x83 || p==0x87) return dma_read(p);
+    if(dma_is_port(p)) return dma_read(p);
     if(p>=0x3B0 && p<=0x3DF) return vga_io_r(p);
     if(p>=0x220 && p<=0x22F) return sb_read(p);
     trc("[io] read of unknown port %03X from %04X:%04X\n", p, cpu.sreg[S_CS], (unsigned)insn_ip);
@@ -282,7 +282,7 @@ void io_w8(uint16_t p, uint8_t v){
     case 0x388: adlib_idx = v; return;
     case 0x389: opl_write(adlib_idx, v); return;
     }
-    if(p < 0x10 || p==0x81 || p==0x82 || p==0x83 || p==0x87){ dma_write(p,v); return; }
+    if(dma_is_port(p)){ dma_write(p,v); return; }
     if(p>=0x3B0 && p<=0x3DF){ vga_io_w(p,v); return; }
     if(p>=0x220 && p<=0x22F){ sb_write(p,v); return; }
     if(p==0x60){

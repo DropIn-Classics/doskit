@@ -11,7 +11,8 @@ In build/selftest (a project as a game's would be, see kit.py):
      32-bit, the same way into a pMAX image, build/files/FLAT.386 (as a
      project's tool would unpack it); tests/pmode/PMODE.ASM into
      game/PMODE/PMODE.EXE, tests/cdrom/CDROM.ASM into game/CDROM/CDROM.EXE,
-     tests/vgamode/VGAMODE.ASM into game/VGAMODE/VGAMODE.EXE;
+     tests/vgamode/VGAMODE.ASM into game/VGAMODE/VGAMODE.EXE,
+     tests/sb16/SB16.ASM into game/SB16/SB16.EXE;
   2. check.py: disasm.py makes their sources from tests/hello/src/HELLO.hints
      and tests/flat/src/FLAT.hints, build.py rebuilds them byte for byte;
      PROVENANCE.md (the template's) is there; the names header symmap.py
@@ -29,7 +30,10 @@ In build/selftest (a project as a game's would be, see kit.py):
      (-cue: a data track and two audio tracks, WAVE and Ogg, made here),
      whose table the runner prints as expected; VGAMODE.EXE, which checks
      the runner's BIOS mode set (modes 0Dh and 0Eh planar at A0000h, back
-     to text) and says "vgamode ok";
+     to text) and says "vgamode ok"; SB16.EXE, which checks the runner's
+     Sound Blaster 16 (the DSP's reset, the mixer's IRQ and DMA, a 16-bit
+     transfer on DMA 5 and an 8-bit one on DMA 1, each ending in IRQ 7)
+     and says "sb16 ok", its -wav holding the 80 samples it played;
   4. the C runtime: tests/hello/port.c (HELLO in C over rmem.h and vga.h,
      on plat_null.c) built with cc, run on the same program; its memory
      compared with the runner's by memcmp.py (CODE, DATA and video memory;
@@ -182,7 +186,8 @@ def main():
 
     step('1. HELLO.EXE assembled and linked')
     print(f'{make_exe()} bytes; FLAT.386 {make_flat()} bytes; PMODE.EXE {make_exe("PMODE")} bytes; '
-          f'CDROM.EXE {make_exe("CDROM")} bytes; VGAMODE.EXE {make_exe("VGAMODE")} bytes')
+          f'CDROM.EXE {make_exe("CDROM")} bytes; VGAMODE.EXE {make_exe("VGAMODE")} bytes; '
+          f'SB16.EXE {make_exe("SB16")} bytes')
     shutil.copy(os.path.join(HERE, 'hello', 'src', 'HELLO.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'flat', 'src', 'FLAT.hints'), os.path.join(PROJ, 'src'))
     # every project carries PROVENANCE.md (check.py insists)
@@ -281,6 +286,22 @@ def main():
     if 'con: vgamode ok' not in out:
         print(out)
         raise SystemExit('selftest FAILED: VGAMODE.EXE (the runner\'s BIOS mode set)')
+    wav = os.path.join(b, 'sb16.wav')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-wav', wav, 'SB16/SB16.EXE'])
+    print('\n'.join(l for l in out.splitlines() if l.startswith('con:')))
+    if 'con: sb16 ok' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: SB16.EXE (the runner\'s Sound Blaster 16)')
+    # 64 words of 1000h (signed 16-bit), 16 bytes of C0h (unsigned 8-bit),
+    # both at 3/4 in the WAV (the runner's headroom), 8000 Hz
+    import struct
+    with open(wav, 'rb') as f:
+        data = f.read()
+    samples = list(struct.unpack('<%dh' % ((len(data) - 44) // 2), data[44:]))
+    rate = struct.unpack('<I', data[24:28])[0]
+    print(f'sb16.wav: {len(samples)} samples at {rate} Hz')
+    if rate != 8000 or samples != [0x1000 * 3 // 4] * 64 + [0x40 * 256 * 3 // 4] * 16:
+        raise SystemExit('selftest FAILED: SB16.EXE\'s -wav (the samples the Sound Blaster played)')
 
     step('4. the C port over the runtime, compared (memcmp.py)')
     exe = os.path.join(b, 'port')
