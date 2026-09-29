@@ -386,9 +386,12 @@ class Analysis:
         """Word variables that hold offsets: a variable loaded into a
         register that then addresses memory (or is called) holds offsets
         of that segment, so every constant stored into it is written as an
-        offset.  Returns new code seeds."""
+        offset.  Returns new code seeds: the constants of a variable that
+        is only called or jumped through (one that addresses memory can
+        point at data in the code segment, all data in a flat program)."""
         order = sorted(self.insns)
         votes = {}
+        called, addressed = set(), set()
         for i, k in enumerate(order):
             ins = self.insns[k]
             ci = ins.ci
@@ -399,6 +402,7 @@ class Analysis:
             if ci.mnemonic in ('call', 'jmp') and ops[0].type == x86.X86_OP_MEM \
                     and ops[0].size == self.w and not ops[0].mem.base and not ops[0].mem.index:
                 votes.setdefault(ref, set()).add(k[0])
+                called.add(ref)
                 continue
             if not (ci.mnemonic == 'mov' and len(ops) == 2 and ops[0].type == x86.X86_OP_REG
                     and ops[0].size == self.w and ops[1].type == x86.X86_OP_MEM
@@ -413,6 +417,7 @@ class Analysis:
                 if c2.mnemonic in ('call', 'jmp') and c2.operands and \
                         c2.operands[0].type == x86.X86_OP_REG and c2.operands[0].reg == r:
                     votes.setdefault(ref, set()).add(k2[0])
+                    called.add(ref)
                     break
                 used = None
                 for op in c2.operands:
@@ -422,6 +427,7 @@ class Analysis:
                             used = '?'
                 if used:
                     votes.setdefault(ref, set()).add(used)
+                    addressed.add(ref)
                     break
                 try:
                     written = c2.regs_access()[1]
@@ -454,7 +460,10 @@ class Analysis:
             if v == 0 or v > T.size:
                 continue
             ins.refs['imm'] = (t, v)
-            if T.cls == 'CODE':
+            # a var hint to CODE says code; found by the analysis, a
+            # variable that is called and never addresses memory
+            code = ref in self.h.vars or ref in called and ref not in addressed
+            if T.cls == 'CODE' and code:
                 self.label(t, v, 'code')
                 if (t, v) not in self.insns:
                     seeds.append((t, v, self.dflt_ds, None))
