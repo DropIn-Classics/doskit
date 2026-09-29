@@ -33,7 +33,9 @@ In build/selftest (a project as a game's would be, see kit.py):
      to text) and says "vgamode ok"; SB16.EXE, which checks the runner's
      Sound Blaster 16 (the DSP's reset, the mixer's IRQ and DMA, a 16-bit
      transfer on DMA 5 and an 8-bit one on DMA 1, each ending in IRQ 7)
-     and says "sb16 ok", its -wav holding the 80 samples it played;
+     and says "sb16 ok", its -wav holding the 80 samples it played; the
+     same with a -log on its wait loop and with a -shot during the wait
+     leaves the same memory (looking does not change a run);
   4. the C runtime: tests/hello/port.c (HELLO in C over rmem.h and vga.h,
      on plat_null.c) built with cc, run on the same program; its memory
      compared with the runner's by memcmp.py (CODE, DATA and video memory;
@@ -302,6 +304,20 @@ def main():
     print(f'sb16.wav: {len(samples)} samples at {rate} Hz')
     if rate != 8000 or samples != [0x1000 * 3 // 4] * 64 + [0x40 * 256 * 3 // 4] * 16:
         raise SystemExit('selftest FAILED: SB16.EXE\'s -wav (the samples the Sound Blaster played)')
+    # looking does not change the run: a -log on the loop that waits for the
+    # Sound Blaster's interrupt (hit every third instruction) and a -shot
+    # during the wait leave the same memory as a run without them
+    a = tasm.Assembler(os.path.join(HERE, 'sb16', 'SB16.ASM'))
+    a.assemble()
+    loop = 'SB16.EXE+0000:%04X' % a.syms['WAIT_INNER'].value
+    hashes = []
+    for extra in ([], ['-log', loop], ['-shot', '0.004', os.path.join(b, 'sb16.png')]):
+        out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1'] + extra + ['SB16/SB16.EXE'])
+        hashes.append([l for l in out.splitlines() if l.startswith('hash ')])
+        if 'con: sb16 ok' not in out or hashes[-1] != hashes[0]:
+            print(out)
+            raise SystemExit('selftest FAILED: SB16.EXE with %s ran otherwise' % ' '.join(extra))
+    print('SB16.EXE with a -log on its wait loop and with a -shot: the same memory')
 
     step('4. the C port over the runtime, compared (memcmp.py)')
     exe = os.path.join(b, 'port')

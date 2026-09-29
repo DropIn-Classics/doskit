@@ -456,6 +456,7 @@ int main(int argc, char **argv){
     }
     {   /* the trace starts at the first hit when there are breakpoints */
         static FILE *held = NULL;
+        uint64_t cut_end = 0;   /* the end of a batch a breakpoint cut short */
         if(xtrace_fp && nbrks){ held = xtrace_fp; xtrace_fp = NULL; }
         brk_n = nbrks;
         c0 = clock();
@@ -465,8 +466,9 @@ int main(int argc, char **argv){
             double now = emu_now();
             int lim;
             if(now >= until) break;
-            /* due events, on the emulated clock */
-            while(key_pos < nkeys && keys[key_pos].t <= now){
+            /* due events, on the emulated clock (a key at a batch boundary
+             * only, not where a breakpoint cut the batch) */
+            while(!cut_end && key_pos < nkeys && keys[key_pos].t <= now){
                 kbd_key(keys[key_pos].sc, keys[key_pos].down); key_pos++;
             }
             while(shot_pos < nshots && shots[shot_pos].t <= now){
@@ -483,13 +485,13 @@ int main(int argc, char **argv){
                 print_dumps();
                 dump_next += dump_every;
             }
-            /* the next of them bounds the batch */
+            /* the next key bounds the batch; shots and dumps do not, they
+             * are taken at the first batch boundary after their time, so
+             * that looking does not move the boundaries (the interrupts are
+             * taken there) and a run with them is the run without */
             {
                 double next = until;
                 if(key_pos < nkeys && keys[key_pos].t < next) next = keys[key_pos].t;
-                if(shot_pos < nshots && shots[shot_pos].t < next) next = shots[shot_pos].t;
-                if(shot_every > 0.0 && shot_next < next) next = shot_next;
-                if(dump_every > 0.0 && dump_next < next) next = dump_next;
                 until_c = cpu.cycles + (uint64_t)((next - now) * emu_ips) + 1;
             }
             if(cpu.halted){
@@ -508,13 +510,22 @@ int main(int argc, char **argv){
                  * up to 256 REPs later (a key wait that loops over REPE SCASB
                  * got its timer interrupt 1.4 ms late) */
                 uint64_t end;
-                dl = dev_next_deadline();
-                if(until_c < dl) dl = until_c;
-                lim = 256;
-                if(dl <= cpu.cycles) lim = 1;
-                else if(dl - cpu.cycles < 256) lim = (int)(dl - cpu.cycles);
-                for(end = cpu.cycles + (uint64_t)lim; cpu.cycles < end && !cpu.shutdown; ) cpu_step();
-                dev_tick();
+                if(cut_end) end = cut_end;
+                else {
+                    dl = dev_next_deadline();
+                    if(until_c < dl) dl = until_c;
+                    lim = 256;
+                    if(dl <= cpu.cycles) lim = 1;
+                    else if(dl - cpu.cycles < 256) lim = (int)(dl - cpu.cycles);
+                    end = cpu.cycles + (uint64_t)lim;
+                }
+                cut_end = 0;
+                while(cpu.cycles < end && !cpu.shutdown) cpu_step();
+                /* a breakpoint's stop inside the batch: the batch goes on
+                 * after it, with no device tick and no interrupt between,
+                 * as in a run without the breakpoint */
+                if(brk_hit >= 0 && cpu.cycles < end) cut_end = end;
+                else dev_tick();
             }
             if(brk_hit >= 0){
                 /* every -break, -log and -poke at this address; a poke is
