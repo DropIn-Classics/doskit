@@ -2,6 +2,17 @@
  * and "protected mode" below) */
 #include "dosrun.h"
 #include <setjmp.h>
+/* setjmp saves the signal mask on BSD and macOS, a system call each time:
+ * once an instruction under PE that made the runner five times slower */
+#ifdef _WIN32
+#define FAULT_JMP_BUF jmp_buf
+#define FAULT_SETJMP(b) setjmp(b)
+#define FAULT_LONGJMP(b) longjmp(b, 1)
+#else
+#define FAULT_JMP_BUF sigjmp_buf
+#define FAULT_SETJMP(b) sigsetjmp(b, 0)
+#define FAULT_LONGJMP(b) siglongjmp(b, 1)
+#endif
 
 CPU cpu;
 uint8_t *ram;
@@ -320,7 +331,7 @@ static uint32_t d_limit(Desc d){
 
 enum { IK_HW, IK_SOFT, IK_EXC };
 
-static jmp_buf fault_jb;
+static FAULT_JMP_BUF fault_jb;
 static int fault_armed;
 static int fault_vec, fault_has_err;
 static uint32_t fault_err;
@@ -357,7 +368,7 @@ static void fault(int vec, uint32_t err){
         fprintf(stderr, "dosrun: exception %02Xh with nothing to deliver it\n", vec);
         exit(2);
     }
-    longjmp(fault_jb, 1);
+    FAULT_LONGJMP(fault_jb);
 }
 #define GP(e) fault(13, (e))
 
@@ -524,7 +535,7 @@ static void deliver_fault(void){
     restore_state();
     trc("[cpu] exception %02Xh error %04X at %04X:%08X\n", vec, (unsigned)err,
         cpu.sreg[S_CS], (unsigned)cpu.eip);
-    if(setjmp(fault_jb)){
+    if(FAULT_SETJMP(fault_jb)){
         restore_state();
         if(++tries > 1){
             fault_armed = 0;
@@ -545,7 +556,7 @@ void cpu_interrupt(int n, int soft){
     if(PE){
         if(fault_armed){ pm_interrupt(n, soft ? IK_SOFT : IK_HW, 0, 0); return; }
         save_state();
-        if(setjmp(fault_jb)){ deliver_fault(); return; }
+        if(FAULT_SETJMP(fault_jb)){ deliver_fault(); return; }
         fault_armed = 1;
         pm_interrupt(n, soft ? IK_SOFT : IK_HW, 0, 0);
         fault_armed = 0;
@@ -917,7 +928,7 @@ static void run_callback(uint8_t id){
     no_iret = 0;
     if(!armed){
         save_state();
-        if(setjmp(fault_jb)){ deliver_fault(); return; }
+        if(FAULT_SETJMP(fault_jb)){ deliver_fault(); return; }
         fault_armed = 1;
     }
     if(cb_table[id]) cb_table[id]();
@@ -1660,7 +1671,7 @@ again:
 void cpu_step(void){
     if(!PE){ step(); return; }
     save_state();
-    if(setjmp(fault_jb)){ deliver_fault(); cpu.cycles++; return; }
+    if(FAULT_SETJMP(fault_jb)){ deliver_fault(); cpu.cycles++; return; }
     fault_armed = 1;
     step();
     fault_armed = 0;
