@@ -201,6 +201,14 @@ def link(modules, stack_from=None):
                 elif kind == 'REL':
                     val = tabs + addend - (a + 2)
                     struct.pack_into('<H', img, a, val & 0xFFFF)
+                elif kind == 'OFF32':
+                    val = tabs - tframe * 16 + addend
+                    struct.pack_into('<I', img, a, val & 0xFFFFFFFF)
+                    initmask[a + 2:a + 4] = b'\1\1'
+                elif kind == 'REL32':
+                    val = tabs + addend - (a + 4)
+                    struct.pack_into('<I', img, a, val & 0xFFFFFFFF)
+                    initmask[a + 2:a + 4] = b'\1\1'
                 else:
                     raise ValueError(kind)
                 initmask[a:a + 2] = b'\1\1'

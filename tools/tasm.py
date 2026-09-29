@@ -26,8 +26,9 @@ class AsmError(Exception):
 
 REG8 = ['AL', 'CL', 'DL', 'BL', 'AH', 'CH', 'DH', 'BH']
 REG16 = ['AX', 'CX', 'DX', 'BX', 'SP', 'BP', 'SI', 'DI']
-SREG = ['ES', 'CS', 'SS', 'DS']
-REGS = set(REG8 + REG16 + SREG)
+REG32 = ['EAX', 'ECX', 'EDX', 'EBX', 'ESP', 'EBP', 'ESI', 'EDI']
+SREG = ['ES', 'CS', 'SS', 'DS', 'FS', 'GS']
+REGS = set(REG8 + REG16 + REG32 + SREG)
 
 IDCHARS = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_@$?')
 
@@ -158,6 +159,7 @@ class Val:
     rel      None, ('S', segname) offset in a segment, ('X', extname) offset of an extern
     segrel   SEG reference: ('S', segname) or ('X', extname) (value is a paragraph)
     base, index   registers of a memory operand
+    scale    the index register's factor (32-bit addressing), 1 if none
     mem      True if it is a memory reference
     size     1/2/4/6/8/10 or None
     ovr      explicit segment override register
@@ -169,7 +171,7 @@ class Val:
     """
     __slots__ = ('num', 'rel', 'segrel', 'base', 'index', 'mem', 'size', 'ovr',
                  'reg', 'vseg', 'unknown', 'dist', 'label', 'short', 'hasbr',
-                 'isoffset', 'strlen', 'fwd', 'fwdbare')
+                 'isoffset', 'strlen', 'fwd', 'fwdbare', 'scale')
 
     def __init__(self, num=0):
         self.num = num
@@ -191,6 +193,7 @@ class Val:
         self.strlen = 0
         self.fwd = False
         self.fwdbare = False      # a forward name used without OFFSET/SEG
+        self.scale = 1
 
     def copy(self):
         v = Val()
@@ -511,6 +514,14 @@ class ExprParser:
         return r
 
     def binop(self, op, v, w):
+        if op == '*' and (v.reg in REG32 and w.is_const() or w.reg in REG32 and v.is_const()):
+            # a scaled index: ECX*4
+            r, n = (v, w) if v.reg else (w, v)
+            if n.num not in (1, 2, 4, 8):
+                raise AsmError(f'scale {n.num}')
+            x = Val()
+            x.index, x.scale, x.mem = r.reg, n.num, True
+            return x
         if not (v.is_const() and w.is_const()):
             # allow e.g. (LAST-FIRST)/2 already reduced; otherwise complain
             if op in ('/', '*') and v.rel is not None and w.is_const() and op == '/':
@@ -550,9 +561,10 @@ class ExprParser:
             if r.reg and (w.reg or w.base or w.index or w.mem or w.hasbr or field):
                 reg, r.reg = r.reg, None
                 self.addreg(r, reg)
-            for reg in (w.base, w.index):
-                if reg:
-                    self.addreg(r, reg)
+            if w.base:
+                self.addreg(r, w.base)
+            if w.index:
+                self.addreg(r, w.index, w.scale)
             if w.reg:
                 self.addreg(r, w.reg)
                 r.reg = None
@@ -603,7 +615,24 @@ class ExprParser:
         r.fwdbare = v.fwdbare or (w.fwdbare and op == '+')
         return r
 
-    def addreg(self, r, reg):
+    def addreg(self, r, reg, scale=1):
+        if reg in REG32:
+            if any(x in REG16 for x in (r.base, r.index)):
+                raise AsmError('16- and 32-bit registers in one address')
+            if scale == 1 and not r.base:
+                r.base = reg
+            elif not r.index:
+                if reg == 'ESP':
+                    if scale != 1 or r.base == 'ESP':
+                        raise AsmError('ESP cannot be an index')
+                    r.base, reg = reg, r.base     # [EAX+ESP]: ESP is the base
+                r.index, r.scale = reg, scale
+            else:
+                raise AsmError('three registers in an address')
+            r.mem = True
+            return
+        if any(x in REG32 for x in (r.base, r.index)):
+            raise AsmError('16- and 32-bit registers in one address')
         if reg in ('BX', 'BP'):
             if r.base:
                 raise AsmError('two base registers')
@@ -634,6 +663,7 @@ class Segment:
         self.fixups = []          # (offset, kind, target, addend)
         self.relmask = []         # (offset, n): relative jump displacements
         self.order = 0
+        self.use32 = False        # USE32: 32-bit operands and addresses
 
     def emit(self, b, initialised=True):
         end = self.pc + len(b)
@@ -729,6 +759,7 @@ class Assembler:
         self.prev_syms = None
         self.prev_pc = {}
         self.emit = False
+        self.near_checks = []
         self.run_pass(0)
         if not self.multipass:
             # plain TASM: one pass; pass 1 here repeats it knowing what each
@@ -739,6 +770,7 @@ class Assembler:
             self.prev_pc = self.seq_pc
             self.shape = {}
             self.fwd_checks = []
+            self.near_checks = []
             self.run_pass(k)
             bad = self.broken_fwd()
             if not bad:
@@ -753,8 +785,17 @@ class Assembler:
         return self
 
     def broken_fwd(self):
-        """Forward jumps sized short whose target moved out of reach."""
+        """Forward jumps sized short whose target moved out of reach, and
+        (USE32 segments) near ones whose target came in reach."""
         bad = []
+        for seq, name, segname in self.near_checks:
+            s = self.syms.get(name)
+            at = self.seq_pc.get(seq)
+            if s is None or at is None or s.kind != 'label' or s.seg != segname:
+                continue
+            d = s.value - (at[1] + 2)
+            if -128 <= d <= 127:
+                bad.append((name, d))
         for seq, name, segname in self.fwd_checks:
             s = self.syms.get(name)
             at = self.seq_pc.get(seq)
@@ -1471,6 +1512,9 @@ class Assembler:
         if self.struc is not None:
             raise AsmError('segment inside struc')
         align, combine, cls = 16, 'PRIVATE', None
+        # the default is USE16 even after .386 (TASM would take USE32 then):
+        # a 32-bit segment says so
+        use32 = False
         for t in toks:
             if t.k == 'str':
                 cls = t.v.upper()
@@ -1480,9 +1524,12 @@ class Assembler:
                     align = {'BYTE': 1, 'WORD': 2, 'DWORD': 4, 'PARA': 16, 'PAGE': 256}[u]
                 elif u in ('PUBLIC', 'STACK', 'COMMON', 'MEMORY', 'PRIVATE', 'AT'):
                     combine = u
+                elif u in ('USE16', 'USE32'):
+                    use32 = u == 'USE32'
         seg = self.segments.get(name)
         if seg is None:
             seg = Segment(name, align, combine, cls)
+            seg.use32 = use32
             seg.order = len(self.segorder)
             self.segments[name] = seg
             self.segorder.append(name)
@@ -1713,6 +1760,18 @@ class Assembler:
                 seg.emit((v.num & 0xFFFF).to_bytes(2, 'little'))
             else:
                 seg.emit((v.num & 0xFFFF).to_bytes(2, 'little'))
+        elif size == 4 and seg.use32:
+            if v.segrel is not None:
+                raise AsmError('SEG in DD')
+            if v.rel is not None:
+                self.fixup(seg, 'OFF32', v.rel, v.num)
+            seg.emit((v.num & 0xFFFFFFFF).to_bytes(4, 'little'))
+        elif size == 6 and v.rel is not None:
+            # a 48-bit far pointer: offset, then selector
+            self.fixup(seg, 'OFF32', v.rel, v.num)
+            seg.emit((v.num & 0xFFFFFFFF).to_bytes(4, 'little'))
+            self.fixup(seg, 'SEG', v.rel, 0)
+            seg.emit(b'\0\0')
         elif size == 4:
             if v.rel is not None:
                 # far pointer
@@ -1730,7 +1789,8 @@ class Assembler:
     def fixup(self, seg, kind, target, addend):
         """Record a fixup at seg.pc.  kind OFF (16-bit offset of target),
         SEG (paragraph of target, needs a relocation), REL (16-bit self-relative
-        displacement to target, value = target - (pc+2))."""
+        displacement to target, value = target - (pc+2)); OFF32 and REL32
+        the same with 32 bits (USE32 segments)."""
         seg.fixups.append((seg.pc, kind, target, addend))
 
     # ---- expression evaluation
@@ -1755,7 +1815,11 @@ class Assembler:
         self.seq += 1
         self.seq_pc[seq] = (seg.name, seg.pc)
         try:
-            encode(self, seg, seq, mn, toks)
+            if seg.use32:
+                from x86enc32 import encode as encode32
+                encode32(self, seg, seq, mn, toks)
+            else:
+                encode(self, seg, seq, mn, toks)
         except AsmError as e:
             # a macro defined further down: TASM's first pass skips the line
             if self.passno == 0 and str(e).startswith('unknown instruction'):

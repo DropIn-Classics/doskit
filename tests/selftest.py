@@ -66,11 +66,51 @@ def make_exe():
     return len(exe)
 
 
+def check_enc32():
+    """tests/enc32/ENC32.ASM: what capstone reads from each 32-bit
+    instruction tasm.py makes, and its length, as the line's comment says."""
+    import re, struct, capstone
+    path = os.path.join(HERE, 'enc32', 'ENC32.ASM')
+    a = tasm.Assembler(path)
+    a.assemble()
+    seg = a.segments['CODE']
+    img = bytearray(seg.data)
+    for off, kind, target, addend in seg.fixups:     # one segment, at 0
+        if kind == 'OFF32':
+            struct.pack_into('<I', img, off, addend & 0xFFFFFFFF)
+        elif kind != 'SEG':
+            raise SystemExit(f'selftest FAILED: fixup {kind} in ENC32')
+    names = {n: s.value for n, s in a.syms.items() if s.kind in ('label', 'var')}
+    want = [l.split('; =', 1)[1] for l in open(path) if '; =' in l and l.split(';')[0].strip()]
+    if len(want) != len(a.seq_pc):
+        raise SystemExit(f'selftest FAILED: {len(a.seq_pc)} instructions, {len(want)} expectations')
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    bad = 0
+    for seq, text in enumerate(want):
+        pc = a.seq_pc[seq][1]
+        for part in text.split(';'):
+            m = re.fullmatch(r'\s*(.*?)\s*\[(\d+)\]\s*', part)
+            exp = re.sub(r'[A-Z_][A-Z0-9_]+', lambda n: hex(names[n.group(0)]) if n.group(0) in names else n.group(0), m.group(1))
+            i = next(md.disasm(bytes(img[pc:pc + 16]), pc), None)
+            got = f'{i.mnemonic} {i.op_str}'.strip() if i else '?'
+            if got != exp or i.size != int(m.group(2)):
+                print(f'  {pc:04X} {bytes(img[pc:pc + (i.size if i else 4)]).hex(" ")}: '
+                      f'{got} [{i.size if i else 0}], expected {exp} [{m.group(2)}]')
+                bad += 1
+            pc += i.size if i else 1
+    if bad:
+        raise SystemExit(f'selftest FAILED: {bad} of the 32-bit encodings')
+    return len(want)
+
+
 def main():
     if os.path.isdir(PROJ):
         shutil.rmtree(PROJ)
     os.makedirs(os.path.join(PROJ, 'src'))
     os.makedirs(os.path.join(PROJ, 'port'))
+
+    step('0. 32-bit instructions (tests/enc32)')
+    print(f'{check_enc32()} lines as capstone reads them')
 
     step('1. HELLO.EXE assembled and linked')
     print(f'{make_exe()} bytes')
