@@ -67,7 +67,9 @@ comment: `code` (an entry point), `words` (a table of near pointers),
 `ptr` (an immediate that is a code offset: `MOV DX,offset handler`
 before INT 21h AH=25h), `coderange` (a run of handlers). gaps.py shows
 where each gap's address appears as a word, which usually is the
-pointer. Leave data as data.
+pointer. Leave data as data. Code that runs into data after a call
+that never returns (an exit through a service the analysis does not
+know) gets a `stop` hint on that instruction.
 
 **Addresses written as numbers.** An immediate or displacement that is
 really an address does not show in the byte comparison, only once code

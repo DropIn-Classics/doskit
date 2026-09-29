@@ -58,6 +58,10 @@ Hints syntax (one per line, ';' starts a comment, numbers are hex):
     comment    SEG:OFF TEXT            a comment line before the address
     raw        SEG:OFF                 write the instruction as DB (the
                                        assembler would pick other bytes)
+    stop       SEG:OFF                 the instruction at SEG:OFF does not
+                                       return (an exit through a service the
+                                       analysis does not know): nothing after
+                                       it is code by falling through
     keeptail                           the bytes after the program image
                                        (debug information) are copied from
                                        the original, not made
@@ -190,6 +194,7 @@ class Hints:
         self.es = []              # (seg, start, end, esseg)
         self.comments = {}        # (seg, off) -> [text]
         self.raw = set()
+        self.stop = set()
         self.relocorder = []
         self.keeptail = False
         self.asm = {}             # assembler switches (see the docstring)
@@ -248,6 +253,8 @@ class Hints:
                         self.asm[key] = val if key == 'test_form' else val not in ('0', 'no', 'off')
                 elif k == 'raw':
                     self.raw.add(self.addr(f[1]))
+                elif k == 'stop':
+                    self.stop.add(self.addr(f[1]))
                 else:
                     raise ValueError(f'unknown hint {k}')
             except (ValueError, IndexError) as e:
@@ -545,7 +552,7 @@ class Analysis:
                     ds = None
                 else:
                     es = None
-            if m in STOP:
+            if m in STOP or key in self.h.stop:
                 return
             if m == 'int' and ops[0].imm == 0x20:
                 return

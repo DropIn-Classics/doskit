@@ -157,6 +157,16 @@ def main():
         print(out)
         raise SystemExit('selftest FAILED: FLAT without its raw hint')
     print('FLAT without its raw hint: IDENTICAL, CODE:0086 written as DB')
+    nostop = os.path.join(PROJ, 'build', 'FLATNOSTOP.hints')
+    with open(os.path.join(HERE, 'flat', 'src', 'FLAT.hints')) as f:
+        text = ''.join(l for l in f if not l.startswith('stop'))
+    with open(nostop, 'w') as f:
+        f.write(text)
+    out = run([py, os.path.join(TOOLS, 'build.py'), nostop])
+    if 'raw CODE:00B6' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: FLAT without its stop hint')
+    print('FLAT without its stop hint: the data after CODE:00B4 taken for code')
 
     step('3. run in the runner (run.py)')
     b = os.path.join(PROJ, 'build')

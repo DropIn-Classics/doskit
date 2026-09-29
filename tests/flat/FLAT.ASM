@@ -55,7 +55,12 @@ H0: INC COUNT
 H1: ADD COUNT, 10H
     RET
 H2: SUB DWORD PTR COUNT, 1000H
+    JC QUIT
     RET
+QUIT:
+    MOV AX, 0
+    INT 93H                         ; does not return (stop hint)
+    DB 0C0H, 70H, 0, 0A0H           ; data, which decodes as SAL /6
 
 CODE ENDS
 

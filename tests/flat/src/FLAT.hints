@@ -19,3 +19,4 @@ name       CODE:008E SHOW
 name       MORE:0004 OTHER
 comment    CODE:0006 near pointers, called in turn
 raw        CODE:0086               ; FNINIT, no x87 in tasm.py
+stop       CODE:00B4               ; INT 93h AX=0, the test's exit; data follows
