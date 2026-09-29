@@ -15,7 +15,6 @@
 #endif
 
 CPU cpu;
-uint8_t *ram;
 uint32_t a20_mask = 0xFFFFFFFFu;
 
 static uint8_t ptab[256];
