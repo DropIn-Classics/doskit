@@ -56,11 +56,24 @@ H1: ADD COUNT, 10H
     RET
 H2: SUB DWORD PTR COUNT, 1000H
     JC QUIT
-    RET
+    JMP SWITCH
 QUIT:
     MOV AX, 0
     INT 93H                         ; does not return (stop hint)
     DB 0C0H, 70H, 0, 0A0H           ; data, which decodes as SAL /6
+
+SWITCH:                             ; a compiled switch (rwords hint)
+    MOVZX EDI, BYTE PTR COUNT
+    AND EDI, 3
+    MOVSX EDI, WORD PTR SWTAB[EDI*2]
+    LEA EDI, [EDI+SWTAB]
+    JMP EDI
+S0: RET                             ; before the table: a negative offset
+SWTAB DW S0-SWTAB, S1-SWTAB, S2-SWTAB, S0-SWTAB
+S1: INC COUNT
+    RET
+S2: DEC COUNT
+    RET
 
 CODE ENDS
 

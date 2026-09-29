@@ -147,6 +147,12 @@ def main():
     print(out)
     if not out.splitlines()[-1].startswith('all ok'):
         raise SystemExit('selftest FAILED: check.py')
+    with open(os.path.join(PROJ, 'build', 'FLAT.ASM')) as f:
+        text = f.read()
+    for want in ('DW L00D5-C00D6', 'DW L00DE-C00D6', 'DW L00E5-C00D6', '[EDI+C00D6]'):
+        if want not in text:
+            raise SystemExit(f'selftest FAILED: FLAT.ASM has no {want} (rwords hint)')
+    print('FLAT: the switch table written as offsets between labels')
     noraw = os.path.join(PROJ, 'build', 'FLATNORAW.hints')
     with open(os.path.join(HERE, 'flat', 'src', 'FLAT.hints')) as f:
         text = ''.join(l for l in f if not l.startswith('raw'))
@@ -163,10 +169,10 @@ def main():
     with open(nostop, 'w') as f:
         f.write(text)
     out = run([py, os.path.join(TOOLS, 'build.py'), nostop])
-    if 'raw CODE:00B6' not in out:
+    if 'raw CODE:00B7' not in out:
         print(out)
         raise SystemExit('selftest FAILED: FLAT without its stop hint')
-    print('FLAT without its stop hint: the data after CODE:00B4 taken for code')
+    print('FLAT without its stop hint: the data after CODE:00B5 taken for code')
 
     step('3. run in the runner (run.py)')
     b = os.path.join(PROJ, 'build')

@@ -7,6 +7,9 @@ segment    MORE 1 DATA
 words      CODE:0006 3 CODE
 dptr       CODE:004B CODE
 ptr        CODE:0057 CODE
+rwords     CODE:00D6 4             ; the switch's offsets from the table
+dptr       CODE:00C5 CODE          ; MOVSX EDI,SWTAB[EDI*2]
+dptr       CODE:00CD CODE          ; LEA EDI,[EDI+SWTAB]
 
 name       CODE:0000 SAVED_DS
 name       CODE:0002 COUNT
@@ -19,4 +22,4 @@ name       CODE:008E SHOW
 name       MORE:0004 OTHER
 comment    CODE:0006 near pointers, called in turn
 raw        CODE:0086               ; FNINIT, no x87 in tasm.py
-stop       CODE:00B4               ; INT 93h AX=0, the test's exit; data follows
+stop       CODE:00B5               ; INT 93h AX=0, the test's exit; data follows

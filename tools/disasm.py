@@ -41,6 +41,10 @@ Hints syntax (one per line, ';' starts a comment, numbers are hex):
     words      SEG:OFF COUNT TARGETSEG a table of near pointers into TARGETSEG
                                        (TARGETSEG CODE also seeds code); 32-bit
                                        ones in a pMAX image
+    rwords     SEG:OFF COUNT           a table of signed 16-bit offsets from
+                                       the table's own start (a compiled
+                                       switch: LEA reg,[reg+table]; JMP reg),
+                                       code in SEG; written DW target-table
     name       SEG:OFF NAME            a label's name
     ptr        SEG:OFF TARGETSEG       the immediate of the instruction at
                                        SEG:OFF is an offset in TARGETSEG (without
@@ -185,6 +189,7 @@ class Hints:
         self.code = []            # (seg, off, name)
         self.coderanges = []      # (seg, start, end)
         self.words = []           # (seg, off, count, target)
+        self.rwords = []          # (seg, off, count): offsets from the table
         self.names = {}           # (seg, off) -> name
         self.ptr = {}             # (seg, off) -> target seg
         self.dptr = set()         # ptr hints to data
@@ -219,6 +224,9 @@ class Hints:
                 elif k == 'words':
                     s, o = self.addr(f[1])
                     self.words.append((s, o, int(f[2], 16), f[3]))
+                elif k == 'rwords':
+                    s, o = self.addr(f[1])
+                    self.rwords.append((s, o, int(f[2], 16)))
                 elif k == 'name':
                     self.names[self.addr(f[1])] = f[2]
                 elif k == 'ptr':
@@ -332,6 +340,11 @@ class Analysis:
     def byte(self, a):
         return self.p.img[a] if a < len(self.p.img) else 0
 
+    def rword_targets(self, seg, off, cnt):
+        base = self.byname[seg].base + off
+        return [off + int.from_bytes(self.p.img[base + 2 * i:base + 2 * i + 2], 'little', signed=True)
+                for i in range(cnt)]
+
     def label(self, seg, off, kind=None):
         key = (seg, off)
         if key not in self.labels:
@@ -375,6 +388,11 @@ class Analysis:
                 if t == 'CODE':
                     work.append(('CODE', v, dd, None))
                 self.label(t, v, 'code' if t == 'CODE' else None)
+        for s, o, cnt in self.h.rwords:
+            self.label(s, o)
+            for t in self.rword_targets(s, o, cnt):
+                work.append((s, t, dd, None))
+                self.label(s, t, 'code')
         while work:
             seg, off, ds, es = work.pop()
             self.trace(seg, off, ds, es, work)
@@ -954,6 +972,7 @@ class Emitter:
         labels = sorted(o for (s, o) in an.labels if s == S.name)
         # a table of a words hint is written as DWs, with or without a label
         tables = set(o for s, o, cnt, t in an.h.words if s == S.name)
+        tables |= set(o for s, o, cnt in an.h.rwords if s == S.name)
         import bisect
         off = 0
         w = an.w
@@ -1009,6 +1028,16 @@ class Emitter:
                 off = end
                 continue
             data = bytes(img[a:S.base + end])
+            rw = next((cnt for s, o, cnt in an.h.rwords if s == S.name and o == off), None)
+            if rw:
+                tab = an.labels[(S.name, off)]
+                for i, t in enumerate(an.rword_targets(S.name, off, rw)):
+                    if i:
+                        self.label_lines(S, off + 2 * i)
+                    self.inner_labels(S, off + 2 * i, 2)
+                    self.out(f'\tDW {an.labels[(S.name, t)]}-{tab}', (S.name, off + 2 * i, 2))
+                off += 2 * rw
+                continue
             ws = self.words_at(S, off)
             if ws:
                 t, n = ws
