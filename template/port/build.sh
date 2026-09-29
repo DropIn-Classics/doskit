@@ -9,7 +9,7 @@ CC=${CC:-cc}
 RT=../doskit/runtime
 CFLAGS="-O2 -Wall -Wextra -I$RT -Isrc"
 GAME="src/main.c"
-RUNTIME="$RT/sys.c $RT/cdimage.c $RT/textmode.c $RT/pad.c $RT/sha256.c $RT/rmem.c $RT/vga.c $RT/frame.c $RT/modplay.c $RT/audiofx.c $RT/fli.c"
+RUNTIME="$RT/sys.c $RT/cdimage.c $RT/textmode.c $RT/pad.c $RT/sha256.c $RT/rmem.c $RT/vga.c $RT/frame.c $RT/modplay.c $RT/audiofx.c $RT/fli.c $RT/shot.c"
 
 mkdir -p build
 $CC $CFLAGS -o build/{{SLUG}}-headless $GAME $RUNTIME $RT/plat_null.c -lm

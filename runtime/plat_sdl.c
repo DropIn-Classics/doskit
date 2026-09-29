@@ -1,13 +1,15 @@
 /* plat_sdl.c - platform.h on SDL2, for macOS and Linux (the Steam Deck
  * too): a window drawn by SDL's renderer, the keyboard's scan codes from
  * SDL's (USB) scan codes, game controllers through SDL's game controller
- * API (pad.h), SDL's performance counter, an SDL audio device. */
+ * API (pad.h), SDL's performance counter, an SDL audio device.  Print
+ * Screen writes a screenshot (shot.h). */
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "pad.h"
 #include "platform.h"
+#include "shot.h"
 #include "sys.h"
 
 /* the window's title, also that of plat_message's box */
@@ -373,6 +375,11 @@ int plat_pump(void)
                     toggle_fullscreen();
                 break;
             }
+            if (sc == SDL_SCANCODE_PRINTSCREEN) {
+                if (!up && !e.key.repeat)
+                    shot_save(NULL, NULL, 0);
+                break;
+            }
             if (!up && sc == SDL_SCANCODE_F4 && (e.key.keysym.mod & KMOD_ALT)) {
                 closed = 1;
                 break;
@@ -405,6 +412,7 @@ void plat_present(const uint8_t *src, int width, int height, const uint32_t pale
         tex_w = width;
         tex_h = height;
     }
+    shot_keep(src, width, height, palette);
     for (i = 0; i < width * height; i++)
         argb[i] = 0xFF000000u | palette[src[i]];
     SDL_UpdateTexture(texture, NULL, argb, width * (int)sizeof *argb);

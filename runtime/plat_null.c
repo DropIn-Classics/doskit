@@ -11,14 +11,18 @@
  *                   to 320,240 of a 640x480 picture (in 1/640 and 1/480
  *                   of the picture whatever its size) and clicks the left
  *                   button (2 the right, 0 none)
+ *   DK_SHOTS=...    screenshots by picture number: "120:a.png 300:b.png"
+ *                   writes pictures 120 and 300 as PNG files (shot.h;
+ *                   no spaces in the names)
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "platform.h"
+#include "shot.h"
 
 static long frames_left = -1, picture;
-static const char *dump_path, *keys, *mouse;
+static const char *dump_path, *keys, *mouse, *shots;
 static int mouse_seen, mouse_x, mouse_y, mouse_clicks;
 static uint64_t now_us;
 static uint8_t pending[64];
@@ -37,6 +41,7 @@ int plat_init(const char *title)
     dump_path = getenv("DK_DUMP");
     keys = getenv("DK_KEYS");
     mouse = getenv("DK_MOUSE");
+    shots = getenv("DK_SHOTS");
     return 1;
 }
 
@@ -118,6 +123,31 @@ static void mouse_for_picture(void)
     }
 }
 
+/* the screenshots DK_SHOTS asks for at picture `picture` */
+static void shots_for_picture(void)
+{
+    const char *p = shots;
+    while (p && *p) {
+        char *end, path[512];
+        long at = strtol(p, &end, 10);
+        size_t n;
+        if (end == p || *end != ':')
+            break;
+        p = end + 1;
+        for (n = 0; p[n] && p[n] != ' '; n++)
+            ;
+        if (at == picture && n < sizeof path) {
+            memcpy(path, p, n);
+            path[n] = 0;
+            if (!shot_save(path, NULL, 0))
+                fprintf(stderr, "cannot write %s\n", path);
+        }
+        p += n;
+        while (*p == ' ')
+            p++;
+    }
+}
+
 int plat_mouse(int *x, int *y, int *clicks)
 {
     *clicks = mouse_clicks;
@@ -157,6 +187,8 @@ void plat_present(const uint8_t *pixels, int width, int height, const uint32_t p
         last_w = width;
         last_h = height;
     }
+    shot_keep(pixels, width, height, palette);
+    shots_for_picture();
     picture++;
     if (frames_left > 0)
         frames_left--;

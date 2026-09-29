@@ -26,7 +26,7 @@ set RT=..\doskit\runtime
 if not exist build\obj\headless mkdir build\obj\headless
 set CFLAGS=/nologo /W4 /O2 /MT /D_CRT_SECURE_NO_WARNINGS /I%RT% /Isrc
 set GAME=src\main.c
-set RUNTIME=%RT%\sys.c %RT%\cdimage.c %RT%\textmode.c %RT%\pad.c %RT%\sha256.c %RT%\rmem.c %RT%\vga.c %RT%\frame.c %RT%\modplay.c %RT%\audiofx.c %RT%\fli.c
+set RUNTIME=%RT%\sys.c %RT%\cdimage.c %RT%\textmode.c %RT%\pad.c %RT%\sha256.c %RT%\rmem.c %RT%\vga.c %RT%\frame.c %RT%\modplay.c %RT%\audiofx.c %RT%\fli.c %RT%\shot.c
 
 cl %CFLAGS% /Fobuild\obj\ /Fe:build\{{SLUG}}.exe %GAME% %RUNTIME% %RT%\plat_win32.c user32.lib gdi32.lib winmm.lib advapi32.lib shell32.lib /link /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
 if errorlevel 1 exit /b 1
