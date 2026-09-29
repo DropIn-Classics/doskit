@@ -79,6 +79,12 @@ E0: INC COUNT
     RET
 E1: DEC COUNT
     RET
+OPTAB       DW O0-OPBASE, 2         ; records of an offset and a number (rwords
+OPBASE      DW O1-OPBASE, 4         ; stride=4), the offsets from the second
+O0: INC COUNT
+    RET
+O1: DEC COUNT
+    RET
 
 CODE ENDS
 

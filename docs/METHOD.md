@@ -65,7 +65,8 @@ CODE is not reached: every gap is either code reached through a pointer
 or data. For code, find the pointer and say where it comes from in a
 comment: `code` (an entry point), `words` (a table of near pointers;
 with `stride=N` one pointer in each record of N bytes), `rwords` (a compiled switch: 16-bit
-offsets from the table's own start, `LEA reg,[reg+table]; JMP reg`),
+offsets from the table's own start, `LEA reg,[reg+table]; JMP reg`;
+`stride=N` and `from=OFF` for offsets in records, counted from elsewhere),
 `ptr` (an immediate that is a code offset: `MOV DX,offset handler`
 before INT 21h AH=25h), `coderange` (a run of handlers). gaps.py shows
 where each gap's address appears as a word, which usually is the

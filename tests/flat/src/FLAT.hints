@@ -11,6 +11,7 @@ rwords     CODE:00D6 4             ; the switch's offsets from the table
 dptr       CODE:00C5 CODE          ; MOVSX EDI,SWTAB[EDI*2]
 dptr       CODE:00CD CODE          ; LEA EDI,[EDI+SWTAB]
 words      CODE:00F0 2 CODE stride=8   ; the handlers of the records at CODE:00EC
+rwords     CODE:010A 2 stride=4 from=010E  ; offsets in records, from the second
 
 name       CODE:0000 SAVED_DS
 name       CODE:0002 COUNT

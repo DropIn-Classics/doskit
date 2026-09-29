@@ -48,6 +48,10 @@ Hints syntax (one per line, ';' starts a comment, numbers are hex):
                                        the table's own start (a compiled
                                        switch: LEA reg,[reg+table]; JMP reg),
                                        code in SEG; written DW target-table
+    rwords     SEG:OFF COUNT [stride=N] [from=OFF]
+                                       the same with one offset every N bytes
+                                       (a field of records, the bytes between
+                                       as data), counted from SEG:OFF
     name       SEG:OFF NAME            a label's name
     ptr        SEG:OFF TARGETSEG       the immediate of the instruction at
                                        SEG:OFF is an offset in TARGETSEG (without
@@ -192,7 +196,7 @@ class Hints:
         self.code = []            # (seg, off, name)
         self.coderanges = []      # (seg, start, end)
         self.words = []           # (seg, off, count, target)
-        self.rwords = []          # (seg, off, count): offsets from the table
+        self.rwords = []          # (seg, off, count, from): offsets from SEG:from
         self.names = {}           # (seg, off) -> name
         self.ptr = {}             # (seg, off) -> target seg
         self.dptr = set()         # ptr hints to data
@@ -235,7 +239,14 @@ class Hints:
                         self.words.append((s, o, int(f[2], 16), f[3]))
                 elif k == 'rwords':
                     s, o = self.addr(f[1])
-                    self.rwords.append((s, o, int(f[2], 16)))
+                    stride = next((int(x[7:], 16) for x in f[3:] if x.startswith('stride=')), None)
+                    frm = next((int(x[5:], 16) for x in f[3:] if x.startswith('from=')), o)
+                    if stride:
+                        # one offset every STRIDE bytes (records): tables of one
+                        for i in range(int(f[2], 16)):
+                            self.rwords.append((s, o + stride * i, 1, frm))
+                    else:
+                        self.rwords.append((s, o, int(f[2], 16), frm))
                 elif k == 'name':
                     self.names[self.addr(f[1])] = f[2]
                 elif k == 'ptr':
@@ -349,9 +360,9 @@ class Analysis:
     def byte(self, a):
         return self.p.img[a] if a < len(self.p.img) else 0
 
-    def rword_targets(self, seg, off, cnt):
+    def rword_targets(self, seg, off, cnt, frm):
         base = self.byname[seg].base + off
-        return [off + int.from_bytes(self.p.img[base + 2 * i:base + 2 * i + 2], 'little', signed=True)
+        return [frm + int.from_bytes(self.p.img[base + 2 * i:base + 2 * i + 2], 'little', signed=True)
                 for i in range(cnt)]
 
     def label(self, seg, off, kind=None):
@@ -397,9 +408,9 @@ class Analysis:
                 if t == 'CODE':
                     work.append(('CODE', v, dd, None))
                 self.label(t, v, 'code' if t == 'CODE' else None)
-        for s, o, cnt in self.h.rwords:
-            self.label(s, o)
-            for t in self.rword_targets(s, o, cnt):
+        for s, o, cnt, frm in self.h.rwords:
+            self.label(s, frm)
+            for t in self.rword_targets(s, o, cnt, frm):
                 work.append((s, t, dd, None))
                 self.label(s, t, 'code')
         while work:
@@ -981,7 +992,7 @@ class Emitter:
         labels = sorted(o for (s, o) in an.labels if s == S.name)
         # a table of a words hint is written as DWs, with or without a label
         tables = set(o for s, o, cnt, t in an.h.words if s == S.name)
-        tables |= set(o for s, o, cnt in an.h.rwords if s == S.name)
+        tables |= set(o for s, o, cnt, frm in an.h.rwords if s == S.name)
         import bisect
         off = 0
         w = an.w
@@ -1037,10 +1048,11 @@ class Emitter:
                 off = end
                 continue
             data = bytes(img[a:S.base + end])
-            rw = next((cnt for s, o, cnt in an.h.rwords if s == S.name and o == off), None)
+            rw = next(((cnt, frm) for s, o, cnt, frm in an.h.rwords if s == S.name and o == off), None)
             if rw:
-                tab = an.labels[(S.name, off)]
-                for i, t in enumerate(an.rword_targets(S.name, off, rw)):
+                rw, frm = rw
+                tab = an.labels[(S.name, frm)]
+                for i, t in enumerate(an.rword_targets(S.name, off, rw, frm)):
                     if i:
                         self.label_lines(S, off + 2 * i)
                     self.inner_labels(S, off + 2 * i, 2)

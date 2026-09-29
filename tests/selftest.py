@@ -157,6 +157,10 @@ def main():
         if want not in text:
             raise SystemExit(f'selftest FAILED: FLAT.ASM has no {want} (words stride=8)')
     print('FLAT: the records\' handlers reached and written as labels')
+    for want in ('DW L0112-C010E', 'DW L0119-C010E'):
+        if want not in text:
+            raise SystemExit(f'selftest FAILED: FLAT.ASM has no {want} (rwords stride=4 from=)')
+    print('FLAT: offsets in records written as differences of labels')
     noraw = os.path.join(PROJ, 'build', 'FLATNORAW.hints')
     with open(os.path.join(HERE, 'flat', 'src', 'FLAT.hints')) as f:
         text = ''.join(l for l in f if not l.startswith('raw'))
