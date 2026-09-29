@@ -46,7 +46,10 @@
  *                    byte 4*o+p = plane p, offset o) at the end
  *   -wav FILE        what the Sound Blaster played
  *   -dos             print every INT 21h call
- *   -cd              print every MSCDEX call and CD request
+ *   -cue FILE        the CD's tracks from a cue sheet (GOG's game.inst):
+ *                    audio tracks the program can ask for and play; the
+ *                    files stay the unpacked tree (default: one data track)
+ *   -cd              print the CD's tracks and every MSCDEX call and request
  *   -intwatch NN     print every INT NN call (hex)
  *   -prof            the busiest CS:IP at the end
  *   -v               the devices' and DOS's trace on stderr
@@ -292,7 +295,7 @@ static void put_files(void){
 /* ---------------------------------------------------------------- main */
 int main(int argc, char **argv){
     const char *game = NULL, *state = "build/run/state";
-    const char *ram_file = NULL, *vram_file = NULL, *wav_file = NULL;
+    const char *ram_file = NULL, *vram_file = NULL, *wav_file = NULL, *cue = NULL;
     double until = 30.0;
     char prog[260] = "", tail[128] = "";
     const char *stop = "until";
@@ -373,6 +376,7 @@ int main(int argc, char **argv){
         else if(!strcmp(a,"-wav")){ NEED(1); wav_file = argv[++i]; }
         else if(!strcmp(a,"-dos")) dos_log = 1;
         else if(!strcmp(a,"-cd")) cd_log = 1;
+        else if(!strcmp(a,"-cue")){ NEED(1); cue = argv[++i]; }
         else if(!strcmp(a,"-loadfix")) loadfix = 1;
         else if(!strcmp(a,"-intwatch")){ NEED(1); int_watch = (int)strtol(argv[++i], NULL, 16); }
         else if(!strcmp(a,"-prof")) prof_on = 1;
@@ -396,6 +400,11 @@ int main(int argc, char **argv){
     bios_init();
     dos_init(game, state);
     mscdex_init();
+    if(cue){
+        char err[600];
+        if(mscdex_cue(cue, err, sizeof(err))) die("-cue: %s", err);
+    }
+    if(cd_log) mscdex_report();
     if(loadfix) dos_loadfix();
     dos_on_load = on_load;
     put_files();

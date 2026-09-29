@@ -24,7 +24,9 @@ In build/selftest (a project as a game's would be, see kit.py):
      own file opened for writing, with no layer folder yet) and says
      "pmode ok"; CDROM.EXE, which checks the runner's MSCDEX (the drive,
      device requests, an audio play and stop; INT 21h AH=57h) and says
-     "cdrom ok";
+     "cdrom ok", on the default disc and on the tracks of a cue sheet
+     (-cue: a data track and two audio tracks, WAVE and Ogg, made here),
+     whose table the runner prints as expected;
   4. the C runtime: tests/hello/port.c (HELLO in C over rmem.h and vga.h,
      on plat_null.c) built with cc, run on the same program; its memory
      compared with the runner's by memcmp.py (CODE, DATA and video memory;
@@ -76,6 +78,44 @@ def make_exe(name='HELLO'):
     with open(os.path.join(PROJ, 'game', name, name + '.EXE'), 'wb') as f:
         f.write(exe)
     return len(exe)
+
+
+# the cue sheet's disc as the runner prints it: the data track 300
+# sectors; the WAVE 150 frames (2 s), and the PREGAP of 2 s before track 3
+# in its span, as a disc's table of contents has it; the Ogg 1 s (44100
+# samples at 44.1 kHz)
+CUE_TABLE = ['cd: 3 tracks, lead-out 00:11:00',
+             'cd: track  1 data  00:02:00, 300 frames',
+             'cd: track  2 audio 00:06:00, 300 frames',
+             'cd: track  3 audio 00:10:00, 75 frames']
+
+
+def make_cue():
+    """a cue sheet as GOG writes them (Windows names, other case than
+    the files) over a data track, a WAVE and an Ogg made here"""
+    import struct
+    d = os.path.join(PROJ, 'build', 'cue')
+    os.makedirs(os.path.join(d, 'music'), exist_ok=True)
+    with open(os.path.join(d, 'data.bin'), 'wb') as f:
+        f.write(bytes(2352 * 300))
+    with open(os.path.join(d, 'music', 'track02.wav'), 'wb') as f:
+        n = 2352 * 150
+        f.write(b'RIFF' + struct.pack('<I', 36 + n) + b'WAVEfmt ' +
+                struct.pack('<IHHIIHH', 16, 1, 2, 44100, 44100 * 4, 4, 16) +
+                b'data' + struct.pack('<I', n) + bytes(n))
+
+    def page(granule, body):
+        return b'OggS' + bytes(2) + struct.pack('<q', granule) + bytes(12) + b'\x01' + bytes([len(body)]) + body
+    with open(os.path.join(d, 'music', 'track03.ogg'), 'wb') as f:
+        f.write(page(0, b'\x01vorbis' + struct.pack('<IBI', 0, 2, 44100) + bytes(13)) +
+                page(44100, bytes(40)))
+    cue = os.path.join(d, 'game.inst')
+    with open(cue, 'w') as f:
+        f.write('FILE "DATA.BIN" BINARY\n\tTRACK 01 MODE2/2352\n\t INDEX 01 00:00:00\n'
+                'FILE "MUSIC\\Track02.wav" WAVE\n\tTRACK 02 AUDIO\n\t INDEX 01 00:00:00\n'
+                'FILE "MUSIC\\TRACK03.OGG" MP3\n\tTRACK 03 AUDIO\n\tPREGAP 00:02:00\n'
+                '\t INDEX 01 00:00:00\n')
+    return cue
 
 
 def make_flat():
@@ -213,6 +253,13 @@ def main():
     if 'con: cdrom ok' not in out:
         print(out)
         raise SystemExit('selftest FAILED: CDROM.EXE (the runner\'s MSCDEX)')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-cd', '-cue', make_cue(),
+               'CDROM/CDROM.EXE'])
+    table = [l for l in out.splitlines() if l.startswith('cd: track') or 'lead-out' in l]
+    print('\n'.join(table + [l for l in out.splitlines() if l.startswith('con:')]))
+    if 'con: cdrom ok' not in out or table != CUE_TABLE:
+        print(out)
+        raise SystemExit('selftest FAILED: CDROM.EXE with a cue sheet (the runner\'s -cue)')
 
     step('4. the C port over the runtime, compared (memcmp.py)')
     exe = os.path.join(b, 'port')

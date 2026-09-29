@@ -146,8 +146,9 @@ got there with `-dump`/`-shot`.
 
 Not in the runner: paging and task switches (so no extender that needs
 them), VCPI/DPMI hosts, x87 instructions, EMS/XMS, a mouse driver (INT 33h), CD audio
-(MSCDEX answers for D:, a disc of one data track; plays are kept track
-of, nothing sounds, `-cd` prints them), OPL FM synthesis (the ports
+(MSCDEX answers for D:, a disc of one data track or, with `-cue`, the
+tracks of a cue sheet such as GOG's `game.inst`; plays are kept track of,
+nothing sounds, `-cd` prints them), OPL FM synthesis (the ports
 answer, nothing sounds), savestates, a window.
 
 **Files.** Each data format gets a tool in the project (`tools/NAMEfiles.py`)

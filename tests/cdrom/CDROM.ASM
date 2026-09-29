@@ -2,8 +2,8 @@
 ;   1. INT 2Fh AX=1500h: one CD drive, the first D:,
 ;   2. AX=150Bh: D: is a CD drive (BX ADADh),
 ;   3. a device request (AX=1510h), IOCTL input 0Ah: done, the disc's
-;      tracks 1 to 1,
-;   4. IOCTL input 0Bh for track 2: an error,
+;      tracks from 1,
+;   4. IOCTL input 0Bh for the track after the last: an error,
 ;   5. play audio (HSG, 100 s): the audio status request says busy; stop:
 ;      paused (status bit 0), not busy,
 ;   6. INT 21h AH=57h AL=0 on its own file: a date, no error,
@@ -42,11 +42,13 @@ check3:	; 3. audio disk info
 	MOV BL,'3'
 	CMP AX,0100H
 	JNE fail_a
-	CMP WORD PTR cblock+1,0101H
+	CMP BYTE PTR cblock+1,1
 	JNE fail_a
-	; 4. track 2 is not there
+	MOV AL,cblock+2
+	INC AL
+	; 4. the track after the last is not there
 	MOV BYTE PTR cblock,0BH
-	MOV BYTE PTR cblock+1,2
+	MOV cblock+1,AL
 	MOV AL,3
 	CALL request
 	MOV BL,'4'

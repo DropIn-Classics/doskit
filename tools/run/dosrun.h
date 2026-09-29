@@ -168,9 +168,12 @@ void dos_flush_con(void);             /* the last line printed without CR/LF */
 extern void (*dos_on_load)(const char *dospath, uint16_t load_seg);
 
 /* ---------------------------------------------------------- MSCDEX ----- */
-/* INT 2Fh AH=15h with D: as the CD drive, a disc of one data track
- * (mscdex.c); installed after dos_init */
+/* INT 2Fh AH=15h with D: as the CD drive (mscdex.c); installed after
+ * dos_init, a disc of one data track until mscdex_cue reads a cue sheet's
+ * tracks (0, or -1 with the reason in err) */
 void mscdex_init(void);
+int  mscdex_cue(const char *cue, char *err, size_t n);
+void mscdex_report(void);             /* the track table, printed */
 extern int cd_log;                    /* -cd: print the CD requests */
 
 /* ----------------------------------------------------------- sound ------ */
