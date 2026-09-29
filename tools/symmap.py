@@ -16,7 +16,7 @@ KEY=HINTS pair each; the names are matched by name).  For each program:
     second, ...) for every `name` and named `code` of any of the hints,
     0xFFFF where a program has no such name.
 
-For a pMAX image (runtime/pmem.h) KEY_<SEG> is the segment's descriptor
+For a pMAX or raw 32-bit image (runtime/pmem.h) KEY_<SEG> is the segment's descriptor
 number and the addresses are 32-bit offsets in it; a program without a
 name has 0xFFFFFFFF there (outside an int: a port with several programs
 keeps these in uint32_t, not an enum).
@@ -61,7 +61,7 @@ def generate(args, prefix, progs, quiet=False):
             if s.name not in seg_order:
                 seg_order.append(s.name)
     # name -> address per program; a name keeps one segment in all
-    none = 0xFFFFFFFF if any(h.kind == 'pmax' for h in hs) else 0xFFFF
+    none = 0xFFFFFFFF if any(h.kind in ('pmax', 'bin') for h in hs) else 0xFFFF
     names, seg_of = {}, {}
     for i, h in enumerate(hs):
         found = [(seg, off, name) for (seg, off), name in h.names.items()]

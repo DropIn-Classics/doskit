@@ -139,6 +139,10 @@ def build_once(hints, raw):
                 bad.append((s, off, 'bytes', f'{text.strip()}  got {got.hex()} want {want.hex()}'))
     if an.p.kind == 'pmax':
         exe = write_pmax(out, an.segs)
+    elif an.p.kind == 'bin':
+        if out.relocs:
+            raise SystemExit('a raw image has no relocations: a segment reference in the source')
+        exe = bytes(out.img)
     else:
         exe = write_mz(out, an.p, [an.byname[s].frame for s in an.h.relocorder])
     if an.h.keeptail:
@@ -166,7 +170,7 @@ def main():
         raw |= new
     if exe is None:
         sys.exit(f'lines tasm.py refuses are left after {args.rounds} rounds')
-    ext = os.path.splitext(an.h.exe)[1] if an.p.kind == 'pmax' else '.EXE'
+    ext = os.path.splitext(an.h.exe)[1] if an.p.kind in ('pmax', 'bin') else '.EXE'
     path = build_dir(name + ext)
     open(path, 'wb').write(exe)
     ref = an.p.file

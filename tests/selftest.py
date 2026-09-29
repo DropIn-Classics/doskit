@@ -9,13 +9,15 @@ In build/selftest (a project as a game's would be, see kit.py):
   1. HELLO.ASM assembled and linked with tasm.py and tlink.py into
      game/HELLO/HELLO.EXE (the "shipped program"); tests/flat/FLAT.ASM,
      32-bit, the same way into a pMAX image, build/files/FLAT.386 (as a
-     project's tool would unpack it); tests/pmode/PMODE.ASM into
+     project's tool would unpack it), tests/raw/RAWDRV.ASM into a raw
+     32-bit image, build/files/RAWDRV.DRV; tests/pmode/PMODE.ASM into
      game/PMODE/PMODE.EXE, tests/cdrom/CDROM.ASM into game/CDROM/CDROM.EXE,
      tests/vgamode/VGAMODE.ASM into game/VGAMODE/VGAMODE.EXE,
      tests/sb16/SB16.ASM into game/SB16/SB16.EXE, tests/cdplay/CDPLAY.ASM
      into game/CDPLAY/CDPLAY.EXE;
   2. check.py: disasm.py makes their sources from tests/hello/src/HELLO.hints
-     and tests/flat/src/FLAT.hints, build.py rebuilds them byte for byte;
+     and tests/flat/src/FLAT.hints, tests/raw/RAWDRV.ASM's raw image from
+     tests/raw/src/RAWDRV.hints, build.py rebuilds them byte for byte;
      PROVENANCE.md (the template's) is there; the names headers symmap.py
      wrote (HELLO's, FLAT's) are up to date; FLAT without its raw hint rebuilds too (the
      line tasm.py refuses written as DB by build.py);
@@ -258,6 +260,16 @@ def make_flat():
     return len(img)
 
 
+def make_raw():
+    """tests/raw/RAWDRV.ASM as a raw 32-bit image: the linked image alone"""
+    a = tasm.Assembler(os.path.join(HERE, 'raw', 'RAWDRV.ASM'))
+    a.assemble()
+    out = tlink.link([tlink.module_from_asm(a, 'RAWDRV')])
+    with open(os.path.join(PROJ, 'build', 'files', 'RAWDRV.DRV'), 'wb') as f:
+        f.write(bytes(out.img))
+    return len(out.img)
+
+
 def check_pmem(py, b):
     """tests/flat/port.c (the start of FLAT.386 in C over pmem.h) against
     the memory the image should have there, made here from the file: the
@@ -348,11 +360,12 @@ def main():
     print(f'{check_enc32()} lines as capstone reads them')
 
     step('1. HELLO.EXE assembled and linked')
-    print(f'{make_exe()} bytes; FLAT.386 {make_flat()} bytes; PMODE.EXE {make_exe("PMODE")} bytes; '
+    print(f'{make_exe()} bytes; FLAT.386 {make_flat()} bytes; RAWDRV.DRV {make_raw()} bytes; PMODE.EXE {make_exe("PMODE")} bytes; '
           f'CDROM.EXE {make_exe("CDROM")} bytes; VGAMODE.EXE {make_exe("VGAMODE")} bytes; '
           f'SB16.EXE {make_exe("SB16")} bytes; CDPLAY.EXE {make_exe("CDPLAY")} bytes')
     shutil.copy(os.path.join(HERE, 'hello', 'src', 'HELLO.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'flat', 'src', 'FLAT.hints'), os.path.join(PROJ, 'src'))
+    shutil.copy(os.path.join(HERE, 'raw', 'src', 'RAWDRV.hints'), os.path.join(PROJ, 'src'))
     # every project carries PROVENANCE.md (check.py insists)
     with open(os.path.join(KIT, 'template', 'PROVENANCE.md'), 'rb') as f:
         text = f.read().replace(b'{{NAME}}', b'HELLO (the kit\'s test program)')

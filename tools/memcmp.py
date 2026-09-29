@@ -18,7 +18,7 @@ import argparse, bisect, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from disasm import Hints, PmaxProgram, program_path
+from disasm import Hints, load_program
 
 
 def runs(a, b, base, length):
@@ -54,10 +54,10 @@ def main():
     load = int(args.load, 16)
     segs = h.segs
     descs = None
-    if h.kind == 'pmax':
+    if h.kind in ('pmax', 'bin'):
         if args.base is None:
-            raise SystemExit('memcmp.py: a pMAX image wants --base')
-        descs = PmaxProgram(program_path(h.exe)).descs
+            raise SystemExit('memcmp.py: a 32-bit image wants --base')
+        descs = load_program(h).descs
     total = 0
     for k, s in enumerate(segs):
         if s.name in args.skip:

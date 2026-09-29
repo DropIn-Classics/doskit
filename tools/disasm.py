@@ -20,7 +20,7 @@ The analysis:
   * data: the bytes nothing decoded as code, as DB lines (text as
     strings), cut at every label.
 
-Two kinds of program:
+Three kinds of program:
   * an MZ program (`exe`), 16-bit real mode;
   * a pMAX flat image (`pmax`), the 32-bit protected-mode program of the
     pMAX DOS extender: its descriptors are the segments, its selector
@@ -28,10 +28,15 @@ Two kinds of program:
     The source has USE32 segments; offsets, near pointers and `words`
     tables are 32 bits wide.  With one segment (a flat program) DS holds
     CODE too.
+  * a raw 32-bit image (`bin`): the file is the image, offsets from 0,
+    entered at 0, no header and no relocations (a driver a program loads
+    into a segment of its own and calls); one segment, number 0, the
+    whole file.  Written back as the image alone.
 
 Hints syntax (one per line, ';' starts a comment, numbers are hex):
     exe        GAME/GAME.EXE           an MZ program
     pmax       GAME/GAME.386           a pMAX image
+    bin        GAME/GAME.DRV           a raw 32-bit image
     segment    NAME FRAME CLASS [stack] [size=N]   in image order; in a
                                        pMAX image FRAME is the descriptor's
                                        number (base and size are its own)
@@ -185,6 +190,21 @@ class PmaxProgram:
         raise SystemExit(f'entry point {self.ip:X} in no segment')
 
 
+class RawProgram(PmaxProgram):
+    """A raw 32-bit image: the file itself, one descriptor (base 0, the
+    file's size), entered at 0, no relocations."""
+    kind = 'bin'
+
+    def __init__(self, path):
+        d = open(path, 'rb').read()
+        self.file = self.img = d
+        self.word0 = self.alloc = self.version = 0
+        self.ip = 0
+        self.descs = [(0, len(d))]
+        self.relocs, self.relsites = [], {}
+        self.tail = b''
+
+
 # ---------------------------------------------------------------- hints
 
 class Hints:
@@ -217,8 +237,8 @@ class Hints:
             f = line.split()
             k = f[0]
             try:
-                if k in ('exe', 'pmax'):
-                    self.exe, self.kind = f[1], 'mz' if k == 'exe' else 'pmax'
+                if k in ('exe', 'pmax', 'bin'):
+                    self.exe, self.kind = f[1], 'mz' if k == 'exe' else k
                 elif k == 'segment':
                     opts = f[4:]
                     size = next((int(o[5:], 16) for o in opts if o.startswith('size=')), None)
@@ -1124,12 +1144,16 @@ class Emitter:
         return body.count(',') + 1
 
 
+def load_program(h):
+    """the program the hints describe, read from the player's files"""
+    return {'pmax': PmaxProgram, 'bin': RawProgram}.get(h.kind, Program)(program_path(h.exe))
+
+
 def generate(hints_path, raw_extra=()):
     h = Hints(hints_path)
     for r in raw_extra:
         h.raw.add(r)
-    path = program_path(h.exe)
-    prog = PmaxProgram(path) if h.kind == 'pmax' else Program(path)
+    prog = load_program(h)
     an = Analysis(prog, h)
     an.run()
     em = Emitter(an)

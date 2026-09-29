@@ -1,0 +1,14 @@
+; The kit's test of a raw 32-bit image (tests/selftest.py): tests/raw/RAWDRV.ASM,
+; written as the image alone into the build folder by the selftest.
+bin        build/files/RAWDRV.DRV
+segment    CODE 0 CODE
+
+words      CODE:001B 3 CODE
+dptr       CODE:002C CODE          ; CALL [EAX*4+COMMANDS]
+dptr       CODE:0052 CODE          ; MOV ESI,OFFSET BANNER
+
+name       CODE:0002 BANNER
+name       CODE:0017 STATE
+name       CODE:001B COMMANDS
+code       CODE:0027 DISPATCH
+comment    CODE:001B the commands, called by EAX
