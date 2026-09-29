@@ -35,7 +35,9 @@
  *   -log ADDR        print the registers each time ADDR is reached, go on
  *   -poke ADDR[#N] TARGET HEX   when ADDR is reached (the Nth time), write
  *                    the bytes HEX ("04 00" or "0400") at TARGET, go on
- *   -watch ADDR      print each write to the byte at ADDR
+ *   -watch ADDR      print each write to the byte at ADDR (one -watch: the last)
+ *   -rwatch ADDR LEN which instructions read the LEN bytes at ADDR (hex):
+ *                    a count per reader at the end (data reads, not fetches)
  *   -trace FILE N    one line per instruction for N instructions, from the
  *                    first -break/-log hit on (or from the start without one)
  *   -dump ADDR LEN   print LEN bytes at ADDR at the end (repeatable)
@@ -153,6 +155,9 @@ static int nbrks = 0;
 
 static Addr watch_addr;
 static int have_watch = 0;
+static Addr rwatch_addr;
+static uint32_t rwatch_len;
+static int have_rwatch = 0;
 
 typedef struct { Addr a; uint32_t len; } Dump;
 static Dump dumps[32];
@@ -256,6 +261,10 @@ static void write_file(const char *path, const uint8_t *p, size_t n){
 }
 
 /* ------------------------------------------------------------ programs */
+static void set_rwatch(void){
+    if(rwatch_addr.lin == 0xFFFFFFFFu) return;    /* its program is not loaded yet */
+    rwatch_lo = rwatch_addr.lin; rwatch_hi = rwatch_lo + rwatch_len;
+}
 static void on_load(const char *dospath, uint16_t load){
     int i;
     const char *b = base_name(dospath);
@@ -268,6 +277,7 @@ static void on_load(const char *dospath, uint16_t load){
         if(brks[i].stop == 2) resolve(&brks[i].pa, b, load);
     }
     if(have_watch){ resolve(&watch_addr, b, load); memwatch_addr = watch_addr.lin; }
+    if(have_rwatch){ resolve(&rwatch_addr, b, load); set_rwatch(); }
     for(i=0;i<ndumps;i++) resolve(&dumps[i].a, b, load);
 }
 
@@ -363,6 +373,10 @@ int main(int argc, char **argv){
             nbrks++; }
         else if(!strcmp(a,"-watch")){ NEED(1); watch_addr = parse_addr(argv[++i]); have_watch = 1;
             memwatch_addr = watch_addr.lin; }
+        else if(!strcmp(a,"-rwatch")){ NEED(2); rwatch_addr = parse_addr(argv[i+1]);
+            rwatch_len = (uint32_t)strtoul(argv[i+2], NULL, 16); i += 2;
+            if(!rwatch_len) die("-rwatch: LEN 0");
+            have_rwatch = 1; set_rwatch(); }
         else if(!strcmp(a,"-trace")){ NEED(2); trace_file = argv[i+1];
             trace_count = strtoull(argv[i+2], NULL, 10); i += 2; }
         else if(!strcmp(a,"-dump")){ NEED(2);
@@ -553,6 +567,7 @@ int main(int argc, char **argv){
                addr_str(&brks[i].a), brks[i].a.lin, brks[i].hits);
     print_dumps();
     memwatch_report();
+    rwatch_report();
     prof_report();
     if(vga_state){ vga_dump(); vga_state_dump(); }
     printf("hash ram %016llx vram %016llx\n",

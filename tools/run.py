@@ -11,7 +11,7 @@ runner's (see the top of tools/run/main.c); run.py only
   * finds the game's files as the other tools do (kit.py) and passes -game,
     and the project's build/run/state as -state,
   * builds the runner when it is missing or older than its sources,
-  * translates the ADDR of -break, -log, -watch, -dump and -poke (both
+  * translates the ADDR of -break, -log, -watch, -rwatch, -dump and -poke (both
       of its addresses) when it is
       SEG:OFF   with SEG a segment of the hints (CODE:4CEE, DATA:8A8A),
       a label   of the generated source (L4CEE, D8A8A, C4F05) or a `name`
@@ -31,10 +31,10 @@ from kit import KIT, build_dir, game_dir, hints_files
 
 EXE = os.path.join(KIT, 'build', 'dosrun.exe' if os.name == 'nt' else 'dosrun')
 SRC = os.path.join(HERE, 'run')
-ADDR_OPTS = {'-break': 1, '-log': 1, '-watch': 1, '-dump': 1, '-poke': 2}
+ADDR_OPTS = {'-break': 1, '-log': 1, '-watch': 1, '-rwatch': 1, '-dump': 1, '-poke': 2}
 # options and how many arguments they take (to find PROGRAM)
 OPTS = {'-game': 1, '-state': 1, '-put': 2, '-until': 1, '-ips': 1, '-key': 2, '-keys': 1,
-        '-shot': 2, '-shotevery': 2, '-break': 1, '-log': 1, '-watch': 1, '-trace': 2,
+        '-shot': 2, '-shotevery': 2, '-break': 1, '-log': 1, '-watch': 1, '-rwatch': 2, '-trace': 2,
         '-dump': 2, '-poke': 3, '-dumpevery': 1, '-ram': 1, '-vram': 1, '-wav': 1, '-dos': 0, '-cd': 0, '-cue': 1, '-loadfix': 0, '-intwatch': 1, '-prof': 0, '-vgastate': 0,
         '-v': 0}
 

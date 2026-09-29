@@ -62,18 +62,29 @@ static void cpu_undef(const char *what);   /* defined with the trace ring below 
  * mask/branch inside mem_r16/mem_r32) matters.  Behaviour is unchanged. */
 #define CPU_VGA_LO 0xA0000u
 #define CPU_VGA_HI 0xC0000u
+/* instruction fetches: not seen by -rwatch */
+static inline uint8_t cpu_fetch8(uint32_t a){
+    a &= a20_mask; a &= (RAM_SIZE-1);
+    if(a >= CPU_VGA_LO && a < CPU_VGA_HI) return vga_mem_r(a);
+    return ram[a];
+}
+/* -rwatch: rwatch_hi is 0 while it is off, so a load pays one compare */
+#define RWATCH(a, n) do { if((a) < rwatch_hi && (a) + (n) > rwatch_lo) rwatch_hit(a, n); } while(0)
 static inline uint8_t cpu_ld8(uint32_t a){
     a &= a20_mask; a &= (RAM_SIZE-1);
+    RWATCH(a, 1u);
     if(a >= CPU_VGA_LO && a < CPU_VGA_HI) return vga_mem_r(a);
     return ram[a];
 }
 static inline uint16_t cpu_ld16(uint32_t a){
     a &= a20_mask; a &= (RAM_SIZE-1);
+    RWATCH(a, 2u);
     if(a + 1u >= CPU_VGA_LO && a < CPU_VGA_HI) return (uint16_t)(cpu_ld8(a) | ((uint16_t)cpu_ld8(a+1) << 8));
     return (uint16_t)(ram[a] | ((uint16_t)ram[a+1] << 8));
 }
 static inline uint32_t cpu_ld32(uint32_t a){
     a &= a20_mask; a &= (RAM_SIZE-1);
+    RWATCH(a, 4u);
     if(a + 3u >= CPU_VGA_LO && a < CPU_VGA_HI)
         return (uint32_t)cpu_ld8(a) | ((uint32_t)cpu_ld8(a+1) << 8) |
                ((uint32_t)cpu_ld8(a+2) << 16) | ((uint32_t)cpu_ld8(a+3) << 24);
@@ -105,9 +116,17 @@ static inline void cpu_st32(uint32_t a, uint32_t v){
     ram[a+2] = (uint8_t)(v >> 16); ram[a+3] = (uint8_t)(v >> 24);
 }
 
-static uint8_t fetch8(void){ uint8_t v = cpu_ld8(cs_base + cpu.eip); cpu.eip = (cpu.eip+1)&ipmask; return v; }
-static uint16_t fetch16(void){ uint16_t v = cpu_ld16(cs_base + cpu.eip); cpu.eip=(cpu.eip+2)&ipmask; return v; }
-static uint32_t fetch32(void){ uint32_t v = cpu_ld32(cs_base + cpu.eip); cpu.eip=(cpu.eip+4)&ipmask; return v; }
+static uint8_t fetch8(void){ uint8_t v = cpu_fetch8(cs_base + cpu.eip); cpu.eip = (cpu.eip+1)&ipmask; return v; }
+static uint16_t fetch16(void){
+    uint16_t v;
+    if(!rwatch_hi){ v = cpu_ld16(cs_base + cpu.eip); cpu.eip = (cpu.eip+2)&ipmask; return v; }
+    v = fetch8(); return (uint16_t)(v | (fetch8() << 8));
+}
+static uint32_t fetch32(void){
+    uint32_t v;
+    if(!rwatch_hi){ v = cpu_ld32(cs_base + cpu.eip); cpu.eip = (cpu.eip+4)&ipmask; return v; }
+    v = fetch16(); return v | ((uint32_t)fetch16() << 16);
+}
 
 static void load_seg(int s, uint16_t sel);       /* protected mode, below */
 static void cs_changed(void){
@@ -1157,7 +1176,7 @@ unsigned long memwatch_n = 0;
 /* A watch that only shows a sequence's first N answers "did this ever happen"
  * and not "when did it stop", which is the question whenever a guest was
  * working and then wasn't.  So keep the last few as well. */
-static struct { double t; uint32_t a; uint8_t v, old; uint16_t cs, ip; }
+static struct { double t; uint32_t a, ip; uint8_t v, old; uint16_t cs; }
     mw_tail[MEMWATCH_TAIL];
 static unsigned mw_tail_pos = 0;
 
@@ -1166,7 +1185,7 @@ void memwatch_hit(uint32_t a, uint8_t v){
     memwatch_n++;
     mw_tail[s].t = emu_now(); mw_tail[s].a = a;
     mw_tail[s].v = v;         mw_tail[s].old = ram[a];
-    mw_tail[s].cs = cpu.sreg[S_CS]; mw_tail[s].ip = (uint16_t)insn_ip;
+    mw_tail[s].cs = cpu.sreg[S_CS]; mw_tail[s].ip = insn_ip;
     mw_tail_pos++;
     if(memwatch_left <= 0) return;
     memwatch_left--;
@@ -1186,11 +1205,48 @@ void memwatch_report(void){
             unsigned s = (first + i) & (MEMWATCH_TAIL - 1);
             printf("[memw]   %05X <- %02X (was %02X)  t=%.6f  by %04X:%04X\n",
                    (unsigned)mw_tail[s].a, mw_tail[s].v, mw_tail[s].old,
-                   mw_tail[s].t, mw_tail[s].cs, mw_tail[s].ip);
+                   mw_tail[s].t, mw_tail[s].cs, (unsigned)mw_tail[s].ip);
         }
     }
     printf("[memw] %05X written %lu times total\n",
            (unsigned)memwatch_addr, memwatch_n);
+}
+
+/* -rwatch ADDR LEN: which instructions read these bytes.  A table polled
+ * every frame is read millions of times, so the report is a count per
+ * reader (CS:EIP and the first byte it read), not a line per read.  Data
+ * reads through the CPU only: not instruction fetches, not the fast REP
+ * MOVS path below A0000h, not the BIOS's or DOS's own reads. */
+uint32_t rwatch_lo = 0, rwatch_hi = 0;
+#define RWATCH_MAX 64
+static struct { uint16_t cs; uint32_t ip, a; unsigned long n; double t0, t1; } rw[RWATCH_MAX];
+static int rw_n = 0;
+static unsigned long rw_lost = 0;
+
+void rwatch_hit(uint32_t a, unsigned n){
+    int i;
+    if(a < rwatch_lo) a = rwatch_lo;    /* a word read that starts before the range */
+    (void)n;
+    for(i = 0; i < rw_n; i++)
+        if(rw[i].ip == insn_ip && rw[i].cs == cpu.sreg[S_CS] && rw[i].a == a){
+            rw[i].n++; rw[i].t1 = emu_now(); return;
+        }
+    if(rw_n == RWATCH_MAX){ rw_lost++; return; }
+    rw[rw_n].cs = cpu.sreg[S_CS]; rw[rw_n].ip = insn_ip; rw[rw_n].a = a;
+    rw[rw_n].n = 1; rw[rw_n].t0 = rw[rw_n].t1 = emu_now();
+    rw_n++;
+}
+
+void rwatch_report(void){
+    int i;
+    if(!rwatch_hi) return;
+    for(i = 0; i < rw_n; i++)
+        printf("[memr] %05X+%02X read by %04X:%04X  %lu times  t=%.6f..%.6f\n",
+               (unsigned)rwatch_lo, (unsigned)(rw[i].a - rwatch_lo), rw[i].cs,
+               (unsigned)rw[i].ip, rw[i].n, rw[i].t0, rw[i].t1);
+    if(rw_lost) printf("[memr] %lu reads by further readers not kept\n", rw_lost);
+    printf("[memr] %05X..%05X read by %d readers\n",
+           (unsigned)rwatch_lo, (unsigned)(rwatch_hi - 1), rw_n);
 }
 
 /* -prof: where the emulated CPU actually goes.

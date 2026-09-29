@@ -246,6 +246,19 @@ def main():
     print('\n'.join(l for l in out.splitlines() if l.startswith(('con:', 'break', 'dump'))))
     if 'con: hello from doskit' not in out:
         raise SystemExit('selftest FAILED: no console line from HELLO.EXE')
+    # -rwatch: the table of two pointers is read by one CALL, a word each;
+    # counter by INC and ADD (not by the fetches, not by DOS's AH=9)
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-rwatch', 'counter', '6',
+               'HELLO/HELLO.EXE'])
+    memr = [l for l in out.splitlines() if l.startswith('[memr]')]
+    print('\n'.join(memr))
+    readers = [l.split()[1][-2:] + ' ' + l.split()[4] for l in memr if ' read by ' in l and 'times' in l]
+    calls = {r.split()[1] for r in readers if r.startswith(('02', '04'))}
+    if (sorted(r.split()[0] for r in readers) != ['00', '00', '02', '04'] or len(calls) != 1
+            or not all(' 1 times' in l for l in memr if 'times' in l)
+            or not memr[-1].endswith('read by 4 readers')):
+        print(out)
+        raise SystemExit('selftest FAILED: -rwatch on HELLO.EXE\'s counter and table')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', 'PMODE/PMODE.EXE'])
     print('\n'.join(l for l in out.splitlines() if l.startswith(('con:', '[cpu]'))))
     if 'con: pmode ok' not in out:

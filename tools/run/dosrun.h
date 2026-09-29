@@ -99,6 +99,9 @@ extern uint32_t a20_mask;
 extern uint32_t memwatch_addr;         /* -watch: log writes to this byte */
 void memwatch_hit(uint32_t a, uint8_t v);
 void memwatch_report(void);
+extern uint32_t rwatch_lo, rwatch_hi;   /* -rwatch: count reads of [lo, hi) */
+void rwatch_hit(uint32_t a, unsigned n);
+void rwatch_report(void);
 extern int prof_on;                    /* -prof: sample CS:IP */
 void prof_report(void);
 extern int int_watch;                  /* -intwatch NN: log INT NN calls */
