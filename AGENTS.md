@@ -50,3 +50,6 @@ rewritten.
   (plat_win32.c). Header guards `DK_NAME_H`.
 - Everything the tools write goes to `build/` (ignored).
 - Write in English in the repository.
+- No heredocs (`<<EOF`, `@'...'@`) in shell commands; they fail often in
+  this environment. Write the content with the file-editing tool instead
+  and run it from there.
