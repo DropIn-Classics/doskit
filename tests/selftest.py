@@ -12,7 +12,8 @@ In build/selftest (a project as a game's would be, see kit.py):
      project's tool would unpack it); tests/pmode/PMODE.ASM into
      game/PMODE/PMODE.EXE, tests/cdrom/CDROM.ASM into game/CDROM/CDROM.EXE,
      tests/vgamode/VGAMODE.ASM into game/VGAMODE/VGAMODE.EXE,
-     tests/sb16/SB16.ASM into game/SB16/SB16.EXE;
+     tests/sb16/SB16.ASM into game/SB16/SB16.EXE, tests/cdplay/CDPLAY.ASM
+     into game/CDPLAY/CDPLAY.EXE;
   2. check.py: disasm.py makes their sources from tests/hello/src/HELLO.hints
      and tests/flat/src/FLAT.hints, build.py rebuilds them byte for byte;
      PROVENANCE.md (the template's) is there; the names header symmap.py
@@ -27,10 +28,16 @@ In build/selftest (a project as a game's would be, see kit.py):
      "pmode ok"; CDROM.EXE, which checks the runner's MSCDEX (the drive,
      device requests, an audio play and stop; INT 21h AH=57h) and says
      "cdrom ok", on the default disc and on the tracks of a cue sheet
-     (-cue: a data track and two audio tracks, WAVE and Ogg, made here),
-     whose table the runner prints as expected; VGAMODE.EXE, which checks
-     the runner's BIOS mode set (modes 0Dh and 0Eh planar at A0000h, back
-     to text) and says "vgamode ok"; SB16.EXE, which checks the runner's
+     (-cue: a data track and two audio tracks, a WAVE made here and
+     tests/cdplay/TONE.OGG), whose table the runner prints as expected;
+     CDPLAY.EXE, which sets the CD's channels (swapped, one at half
+     volume), reads them back and plays from the WAVE's last second
+     through the pregap to the Ogg's end, and says "cdplay ok", its
+     -cdwav holding the WAVE's samples exactly, the pregap's silence and
+     the Ogg's two tones at their pitch and loudness, all on their
+     channels; VGAMODE.EXE, which checks the runner's BIOS mode set
+     (modes 0Dh and 0Eh planar at A0000h, back to text) and says
+     "vgamode ok"; SB16.EXE, which checks the runner's
      Sound Blaster 16 (the DSP's reset, the mixer's IRQ and DMA, a 16-bit
      transfer on DMA 5 and an 8-bit one on DMA 1, each ending in IRQ 7)
      and says "sb16 ok", its -wav holding the 80 samples it played; the
@@ -99,9 +106,15 @@ CUE_TABLE = ['cd: 3 tracks, lead-out 00:11:00',
              'cd: track  3 audio 00:10:00, 75 frames']
 
 
+def wave_sample(i):
+    """the WAVE track's stereo sample i, a pattern that does not repeat
+    within the track"""
+    return (i * 37 % 20001 - 10000, i * 91 % 16001 - 8000)
+
+
 def make_cue():
     """a cue sheet as GOG writes them (Windows names, other case than
-    the files) over a data track, a WAVE and an Ogg made here"""
+    the files) over a data track, a WAVE made here and TONE.OGG"""
     import struct
     d = os.path.join(PROJ, 'build', 'cue')
     os.makedirs(os.path.join(d, 'music'), exist_ok=True)
@@ -111,13 +124,9 @@ def make_cue():
         n = 2352 * 150
         f.write(b'RIFF' + struct.pack('<I', 36 + n) + b'WAVEfmt ' +
                 struct.pack('<IHHIIHH', 16, 1, 2, 44100, 44100 * 4, 4, 16) +
-                b'data' + struct.pack('<I', n) + bytes(n))
-
-    def page(granule, body):
-        return b'OggS' + bytes(2) + struct.pack('<q', granule) + bytes(12) + b'\x01' + bytes([len(body)]) + body
-    with open(os.path.join(d, 'music', 'track03.ogg'), 'wb') as f:
-        f.write(page(0, b'\x01vorbis' + struct.pack('<IBI', 0, 2, 44100) + bytes(13)) +
-                page(44100, bytes(40)))
+                b'data' + struct.pack('<I', n) +
+                b''.join(struct.pack('<hh', *wave_sample(i)) for i in range(n // 4)))
+    shutil.copy(os.path.join(HERE, 'cdplay', 'TONE.OGG'), os.path.join(d, 'music', 'track03.ogg'))
     cue = os.path.join(d, 'game.inst')
     with open(cue, 'w') as f:
         f.write('FILE "DATA.BIN" BINARY\n\tTRACK 01 MODE2/2352\n\t INDEX 01 00:00:00\n'
@@ -125,6 +134,71 @@ def make_cue():
                 'FILE "MUSIC\\TRACK03.OGG" MP3\n\tTRACK 03 AUDIO\n\tPREGAP 00:02:00\n'
                 '\t INDEX 01 00:00:00\n')
     return cue
+
+
+def check_cdplay(py, b):
+    """CDPLAY.EXE on the cue sheet's disc with -cdwav: the channels set
+    and read back, then what the drive played, sample by sample where the
+    source is exact (the WAVE, the silence), by pitch and loudness where
+    it is decoded (the Ogg)"""
+    import struct
+    wav = os.path.join(b, 'cdplay.wav')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '8', '-cd', '-cue', make_cue(),
+               '-cdwav', wav, 'CDPLAY/CDPLAY.EXE'])
+    lines = out.splitlines()
+    print('\n'.join(l for l in lines if l.startswith(('cd: channels', 'cd: play', 'con:'))))
+    play = [l for l in lines if l.startswith('cd: play frames 525..825 (track 2 + 75) t=')]
+    if ('con: cdplay ok' not in out or len(play) != 1 or
+            not any(l.startswith('cd: channels 0<-1 FF, 1<-0 80, 2<-2 00, 3<-3 00 ') for l in lines)):
+        print(out)
+        raise SystemExit('selftest FAILED: CDPLAY.EXE (the runner\'s CD audio)')
+    with open(wav, 'rb') as f:
+        data = f.read()
+    fmt = struct.unpack('<HHIIHH', data[20:36])
+    s = struct.unpack('<%dh' % ((len(data) - 44) // 2), data[44:])
+    left, right = s[0::2], s[1::2]
+
+    def trunc(x, vol):                  # the runner's x * vol / 255, as C does it
+        q = abs(x) * vol // 255
+        return q if x >= 0 else -q
+    # the WAVE's last second: output 0 is input 1 at FFh, output 1 input 0
+    # at 80h; its start is the play's moment (the -cd line), give or take
+    # the one sample the printed time rounds
+    k0 = int(float(play[0].split('t=')[1]) * 44100)
+    src = [wave_sample(44100 + i) for i in range(44100)]
+    want_l = [r for l, r in src]
+    want_r = [trunc(l, 0x80) for l, r in src]
+    k = next((k for k in (k0 - 1, k0, k0 + 1)
+              if list(left[k:k + 44100]) == want_l and list(right[k:k + 44100]) == want_r), None)
+    bad = []
+    if fmt != (1, 2, 44100, 44100 * 4, 4, 16):
+        bad.append(f'format {fmt}')
+    if k is None:
+        bad.append(f'the WAVE\'s samples not at {k0}')
+    else:
+        if any(left[:k]) or any(right[:k]):
+            bad.append('sound before the play')
+        if any(left[k + 44100:k + 3 * 44100]) or any(right[k + 44100:k + 3 * 44100]):
+            bad.append('sound in the pregap')
+        if any(left[k + 4 * 44100:]) or any(right[k + 4 * 44100:]):
+            bad.append('sound after the play')
+        # the Ogg: left 441 Hz at 1/2, right 1102.5 Hz at 1/4; swapped, the
+        # left output the 1102.5 Hz tone at 1/4, the right the 441 Hz at
+        # 1/2 x 80h/FFh; sign changes 2 a period, loudness amplitude / sqrt 2
+        for name, ch, hz, amp in (('left', left, 1102.5, 0.25), ('right', right, 441, 0.5 * 0x80 / 255)):
+            seg = ch[k + 3 * 44100:k + 4 * 44100]
+            flips = sum(1 for a, c in zip(seg, seg[1:]) if (a < 0) != (c < 0))
+            rms = (sum(x * x for x in seg) / len(seg)) ** 0.5
+            want = amp * 32767 / 2 ** 0.5
+            print(f'cdplay.wav: the Ogg\'s {name}: {flips} sign changes, loudness {rms:.0f} '
+                  f'(expected {2 * hz:.0f}, {want:.0f})')
+            if abs(flips - 2 * hz) > 10 or abs(rms - want) > 0.05 * want:
+                bad.append(f'the Ogg\'s {name} channel')
+    print(f'cdplay.wav: {len(left)} samples; the play at sample {k}')
+    if len(left) < (k or 0) + 4 * 44100 + 15000 or (k or 0) < 15000:
+        bad.append('no pause before and after the play')
+    if bad:
+        raise SystemExit('selftest FAILED: CDPLAY.EXE\'s -cdwav: ' + ', '.join(bad))
 
 
 def make_flat():
@@ -189,7 +263,7 @@ def main():
     step('1. HELLO.EXE assembled and linked')
     print(f'{make_exe()} bytes; FLAT.386 {make_flat()} bytes; PMODE.EXE {make_exe("PMODE")} bytes; '
           f'CDROM.EXE {make_exe("CDROM")} bytes; VGAMODE.EXE {make_exe("VGAMODE")} bytes; '
-          f'SB16.EXE {make_exe("SB16")} bytes')
+          f'SB16.EXE {make_exe("SB16")} bytes; CDPLAY.EXE {make_exe("CDPLAY")} bytes')
     shutil.copy(os.path.join(HERE, 'hello', 'src', 'HELLO.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'flat', 'src', 'FLAT.hints'), os.path.join(PROJ, 'src'))
     # every project carries PROVENANCE.md (check.py insists)
@@ -283,6 +357,7 @@ def main():
     if 'con: cdrom ok' not in out or table != CUE_TABLE:
         print(out)
         raise SystemExit('selftest FAILED: CDROM.EXE with a cue sheet (the runner\'s -cue)')
+    check_cdplay(py, b)
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', 'VGAMODE/VGAMODE.EXE'])
     print('\n'.join(l for l in out.splitlines() if l.startswith('con:')))
     if 'con: vgamode ok' not in out:

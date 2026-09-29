@@ -46,8 +46,10 @@ rewritten.
   where the reason is not obvious, no frameworks. Tools find the project
   through kit.py.
 - C99 for the runtime and the runner, built with cc (clang, gcc) and
-  MSVC; no dependencies but SDL2 (plat_sdl.c) and the Windows SDK
-  (plat_win32.c). Header guards `DK_NAME_H`.
+  MSVC; no dependencies but SDL2 (plat_sdl.c), the Windows SDK
+  (plat_win32.c) and what is in third_party/ (taken unchanged, public
+  domain or a permissive licence, its source and licence in a README
+  there). Header guards `DK_NAME_H`.
 - Everything the tools write goes to `build/` (ignored).
 - Write in English in the repository.
 - No heredocs (`<<EOF`, `@'...'@`) in shell commands; they fail often in

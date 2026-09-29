@@ -8,4 +8,4 @@ mkdir -p build
 # exactly (as /fp:precise with MSVC)
 ${CC:-cc} -O2 -Wall -ffp-contract=off -o build/dosrun \
     tools/run/main.c tools/run/cpu.c tools/run/vga.c tools/run/dev.c tools/run/bios.c \
-    tools/run/dos.c tools/run/sound.c tools/run/vgafont.c tools/run/png.c tools/run/mscdex.c -lm
+    tools/run/dos.c tools/run/sound.c tools/run/vgafont.c tools/run/png.c tools/run/mscdex.c third_party/stb_vorbis/stb_vorbis.c -lm

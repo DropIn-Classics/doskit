@@ -8,8 +8,11 @@
  * the files it names (mscdex_cue).  The tree is not an image, so there are
  * no sectors to read raw: READ LONG says "sector not found".  Audio play
  * requests are taken and kept track of on the emulated clock, so a
- * program that asks for the audio status sees the play run and end;
- * nothing is heard (-cd prints them, with the track).
+ * program that asks for the audio status sees the play run and end
+ * (-cd prints them, with the track).  With -cdwav what the drive plays
+ * goes to a WAV file on that clock (mscdex_wav_open): the tracks' own
+ * samples (Ogg Vorbis through stb_vorbis, third_party/), with the
+ * channels and volumes a program set (IOCTL output 03h).
  *
  * The request header (ES:BX): [0] length, [1] subunit, [2] command,
  * [3] status word (bit 15 error with the code in the low byte, bit 9
@@ -27,6 +30,8 @@
 #else
 #include <dirent.h>
 #endif
+#define STB_VORBIS_HEADER_ONLY
+#include "../../third_party/stb_vorbis/stb_vorbis.c"
 
 #define AX REG16(R_EAX)
 #define BX REG16(R_EBX)
@@ -53,11 +58,28 @@ int cd_log = 0;
 static int ntracks;
 static uint32_t trk_start[TRACKS_MAX], leadout;
 static uint8_t trk_data[TRACKS_MAX];
+/* where a track's sound is: its file (kind: raw sectors, WAVE, Ogg) and
+ * the disc frame the file's first sample is at; no file on the default
+ * disc */
+enum { SRC_RAW, SRC_WAVE, SRC_OGG };
+static char trk_path[TRACKS_MAX][1024];
+static uint8_t trk_kind[TRACKS_MAX];
+static uint32_t trk_file_base[TRACKS_MAX];
 
 /* audio play state: frames [play_from, play_to) begun at play_t */
 static int playing = 0, paused = 0;
 static uint32_t play_from, play_to, play_pos;
 static double play_t;
+
+/* the audio channel control of IOCTL output 03h: output channel i plays
+ * input channel chan_in[i] at volume chan_vol[i] (0-255); only outputs 0
+ * and 1 (left, right) are heard, inputs 2 and 3 are silent */
+static uint8_t chan_in[4], chan_vol[4];
+
+static void cd_audio_play(uint32_t start, uint32_t n);
+static void cd_audio_stop(void);
+static void cd_audio_resume(void);
+void mscdex_wav_tick(void);
 
 static uint32_t redbook(uint32_t f){
     return ((f / 4500) << 16) | (((f / 75) % 60) << 8) | (f % 75);
@@ -93,9 +115,9 @@ static uint16_t ioctl_in(uint32_t cb){
         uint32_t at = play_now();
         st32u(&ram[cb+2], ram[cb+1] ? redbook(at) : at);
         return 0; }
-    case 0x04: {                                /* audio channels: 0..3 at full volume */
+    case 0x04: {                                /* audio channels: as output 03h set them */
         int i;
-        for(i = 0; i < 4; i++){ ram[cb+1+2*i] = (uint8_t)i; ram[cb+2+2*i] = 0xFF; }
+        for(i = 0; i < 4; i++){ ram[cb+1+2*i] = chan_in[i]; ram[cb+2+2*i] = chan_vol[i]; }
         return 0; }
     case 0x06:                                  /* device status: door closed, */
         st32u(&ram[cb+1], 0x0216);              /* unlocked, cooked and raw, audio, */
@@ -142,7 +164,14 @@ static uint16_t request(uint32_t rh){
         if(cd_log) printf("cd: ioctl input %02X t=%.6f\n", ram[cb], emu_now());
         return ioctl_in(cb);
     case 0x0C:                                  /* eject, lock, reset, channels, close: taken */
-        if(cd_log) printf("cd: ioctl output %02X t=%.6f\n", ram[cb], emu_now());
+        if(ram[cb] == 0x03){                    /* audio channel control */
+            int i;
+            mscdex_wav_tick();                  /* what was played before, as it was */
+            for(i = 0; i < 4; i++){ chan_in[i] = ram[cb+1+2*i]; chan_vol[i] = ram[cb+2+2*i]; }
+            if(cd_log) printf("cd: channels %u<-%u %02X, %u<-%u %02X, %u<-%u %02X, %u<-%u %02X t=%.6f\n",
+                              0, chan_in[0], chan_vol[0], 1, chan_in[1], chan_vol[1],
+                              2, chan_in[2], chan_vol[2], 3, chan_in[3], chan_vol[3], emu_now());
+        } else if(cd_log) printf("cd: ioctl output %02X t=%.6f\n", ram[cb], emu_now());
         return 0;
     case 0x0D: case 0x0E: case 0x82: case 0x83:  /* open, close, prefetch, seek */
         return 0;
@@ -154,6 +183,7 @@ static uint16_t request(uint32_t rh){
         play_now();
         playing = n != 0; paused = 0;
         play_from = play_pos = start; play_to = start + n; play_t = emu_now();
+        cd_audio_play(start, n);
         if(cd_log){
             int t = track_of(start);
             printf("cd: play frames %u..%u (track %d + %u) t=%.6f\n", (unsigned)start,
@@ -163,12 +193,13 @@ static uint16_t request(uint32_t rh){
     }
     case 0x85:                                  /* stop: pause a play, else forget it */
         play_now();
+        cd_audio_stop();
         if(playing && !paused) paused = 1;
         else { playing = 0; paused = 0; play_from = play_to = play_pos = 0; }
         if(cd_log) printf("cd: stop t=%.6f\n", emu_now());
         return 0;
     case 0x88:                                  /* resume */
-        if(playing && paused){ paused = 0; play_t = emu_now(); }
+        if(playing && paused){ paused = 0; play_t = emu_now(); cd_audio_resume(); }
         if(cd_log) printf("cd: resume t=%.6f\n", emu_now());
         return 0;
     default:
@@ -203,6 +234,169 @@ static void mux_int2f(void){
         AX = 1; bios_set_cf(1);
         break;
     }
+}
+
+/* ------------------------------------------------------------ audio out */
+/* -cdwav: 44.1 kHz 16-bit stereo from t=0, sample k the moment k/44100 s
+ * of the emulated clock, silence where nothing plays.  A disc sample d
+ * (588 to a frame) is sample d - 588 x trk_file_base of its track's file;
+ * a file of another rate is read at the nearest sample below (not
+ * resampled), past its end is silence.  WAVE files are taken as the
+ * length is (44-byte header, 44.1 kHz 16-bit stereo), raw sectors too. */
+#define CD_HZ 44100
+static FILE *cdwav_fp;
+static uint64_t cdwav_n;                      /* samples written: the next k */
+
+/* the play: disc sample aud_pos at k = aud_k0, on up to aud_to */
+static int aud_on;
+static uint64_t aud_k0, aud_pos, aud_to;
+
+/* the open source: track src_trk's file, samples [buf_at, buf_at+buf_n)
+ * in buf; the file is read on from buf_at+buf_n */
+#define SRC_BUF 1024
+static int src_trk = -1, src_ch;
+static uint32_t src_rate;
+static FILE *src_fp;
+static stb_vorbis *src_ov;
+static int16_t buf[SRC_BUF*2];
+static uint64_t buf_at;
+static int buf_n;
+
+static void src_close(void){
+    if(src_fp) fclose(src_fp);
+    if(src_ov) stb_vorbis_close(src_ov);
+    src_fp = NULL; src_ov = NULL; src_trk = -1;
+}
+
+static int src_open(int t){
+    src_close();
+    src_trk = t; buf_at = 0; buf_n = 0; src_ch = 2; src_rate = CD_HZ;
+    if(trk_kind[t] == SRC_OGG){
+        int e;
+        src_ov = stb_vorbis_open_filename(trk_path[t], &e, NULL);
+        if(!src_ov){ fprintf(stderr, "cdwav: cannot decode %s (stb_vorbis error %d)\n", trk_path[t], e); return 0; }
+        src_rate = stb_vorbis_get_info(src_ov).sample_rate;
+    } else {
+        src_fp = fopen(trk_path[t], "rb");
+        if(!src_fp){ fprintf(stderr, "cdwav: cannot open %s\n", trk_path[t]); return 0; }
+        fseek(src_fp, trk_kind[t] == SRC_WAVE ? 44 : 0, SEEK_SET);
+    }
+    return 1;
+}
+
+/* the file's samples from buf_at on into buf; 0 at its end */
+static int src_fill(void){
+    if(src_ov)
+        buf_n = stb_vorbis_get_samples_short_interleaved(src_ov, 2, buf, SRC_BUF*2);
+    else if(src_fp){
+        uint8_t raw[SRC_BUF*4];
+        int i;
+        buf_n = (int)(fread(raw, 4, SRC_BUF, src_fp));
+        for(i = 0; i < buf_n*2; i++) buf[i] = (int16_t)(raw[2*i] | raw[2*i+1] << 8);
+    } else buf_n = 0;
+    return buf_n > 0;
+}
+
+/* file sample j of the open source into s[2]; silence past its end */
+static void src_sample(uint64_t j, int16_t *s){
+    s[0] = s[1] = 0;
+    if(j < buf_at || j >= buf_at + (uint64_t)buf_n + CD_HZ){
+        /* backwards or far ahead: seek */
+        if(src_ov){ if(!stb_vorbis_seek(src_ov, (unsigned)j)) { buf_n = 0; return; } }
+        else if(src_fp){
+            if(fseek(src_fp, (long)(j*4 + (trk_kind[src_trk] == SRC_WAVE ? 44 : 0)), SEEK_SET)){ buf_n = 0; return; }
+        } else return;
+        buf_at = j; buf_n = 0;
+    }
+    while(j >= buf_at + (uint64_t)buf_n){
+        buf_at += (uint64_t)buf_n;
+        if(!src_fill()) return;
+    }
+    s[0] = buf[2*(j - buf_at)]; s[1] = buf[2*(j - buf_at) + 1];
+}
+
+/* disc sample d into s[2]: its track's file, silence on a data track */
+static void disc_sample(uint64_t d, int16_t *s){
+    uint32_t f = (uint32_t)(d / 588);
+    int t = src_trk;
+    uint64_t j;
+    if(t < 0 || f < trk_start[t] || (t + 1 < ntracks && f >= trk_start[t+1])) t = track_of(f);
+    s[0] = s[1] = 0;
+    if(trk_data[t] || !trk_path[t][0] || f < trk_file_base[t]) return;
+    if(t != src_trk && !src_open(t)) return;
+    if(!src_ov && !src_fp) return;
+    j = d - (uint64_t)trk_file_base[t] * 588;
+    if(src_rate != CD_HZ) j = j * src_rate / CD_HZ;
+    src_sample(j, s);
+}
+
+static void cdwav_header(void){
+    uint8_t h[44];
+    uint32_t bytes = (uint32_t)(cdwav_n * 4);
+    memcpy(h, "RIFF", 4); st32u(&h[4], 36 + bytes); memcpy(&h[8], "WAVEfmt ", 8);
+    st32u(&h[16], 16); st16u(&h[20], 1); st16u(&h[22], 2);   /* PCM, stereo */
+    st32u(&h[24], CD_HZ); st32u(&h[28], CD_HZ * 4); st16u(&h[32], 4); st16u(&h[34], 16);
+    memcpy(&h[36], "data", 4); st32u(&h[40], bytes);
+    fseek(cdwav_fp, 0, SEEK_SET);
+    fwrite(h, 1, 44, cdwav_fp);
+    fseek(cdwav_fp, 0, SEEK_END);
+}
+
+/* one output channel from the input pair, as IOCTL output 03h set it */
+static int16_t channel(const int16_t *in, int o){
+    if(chan_in[o] > 1) return 0;
+    return (int16_t)(in[chan_in[o]] * chan_vol[o] / 255);
+}
+
+/* the samples up to the emulated moment now; before every change to the
+ * play or the channels, and from the devices' tick */
+void mscdex_wav_tick(void){
+    uint64_t upto;
+    int16_t out[2*256];
+    int n = 0;
+    if(!cdwav_fp) return;
+    upto = (uint64_t)(emu_now() * CD_HZ);
+    while(cdwav_n < upto){
+        int16_t s[2] = { 0, 0 };
+        if(aud_on){
+            uint64_t d = aud_pos + (cdwav_n - aud_k0);
+            if(d < aud_to) disc_sample(d, s);
+            else aud_on = 0;
+        }
+        out[2*n] = channel(s, 0); out[2*n+1] = channel(s, 1);
+        cdwav_n++;
+        if(++n == 256){ fwrite(out, 4, 256, cdwav_fp); n = 0; }
+    }
+    if(n) fwrite(out, 4, (size_t)n, cdwav_fp);
+}
+
+static void cd_audio_play(uint32_t start, uint32_t n){
+    mscdex_wav_tick();
+    aud_on = n != 0;
+    aud_pos = (uint64_t)start * 588; aud_to = (uint64_t)(start + n) * 588;
+    aud_k0 = cdwav_n;
+}
+static void cd_audio_stop(void){
+    mscdex_wav_tick();
+    if(aud_on){ aud_pos += cdwav_n - aud_k0; aud_on = 0; }
+}
+static void cd_audio_resume(void){
+    mscdex_wav_tick();
+    if(aud_pos < aud_to){ aud_on = 1; aud_k0 = cdwav_n; }
+}
+
+void mscdex_wav_open(const char *path){
+    cdwav_fp = fopen(path, "wb");
+    if(!cdwav_fp){ fprintf(stderr, "cannot write %s\n", path); return; }
+    cdwav_n = 0;
+    cdwav_header();
+}
+void mscdex_wav_close(void){
+    if(!cdwav_fp) return;
+    mscdex_wav_tick();
+    cdwav_header();
+    fclose(cdwav_fp); cdwav_fp = NULL;
+    src_close();
 }
 
 /* ------------------------------------------------------------ cue sheet */
@@ -247,7 +441,7 @@ static int find_nocase(const char *dir, const char *name, char *out, size_t n){
  * Vorbis stream by its last page's granule position (samples) and the
  * rate in its identification header; a WAVE (44.1 kHz, 16-bit stereo, as
  * a CD's audio is) by its data size.  0 when the length cannot be told. */
-static uint32_t file_frames(const char *path, int sector){
+static uint32_t file_frames(const char *path, int sector, uint8_t *kind){
     FILE *f = fopen(path, "rb");
     long size;
     uint8_t head[64];
@@ -255,7 +449,9 @@ static uint32_t file_frames(const char *path, int sector){
     if(!f) return 0;
     fseek(f, 0, SEEK_END); size = ftell(f); fseek(f, 0, SEEK_SET);
     got = fread(head, 1, sizeof(head), f);
+    *kind = SRC_RAW;
     if(got >= 4 && !memcmp(head, "OggS", 4)){
+        *kind = SRC_OGG;
         static uint8_t tail[65536 + 4];
         uint32_t rate = 0;
         uint64_t granule = 0;
@@ -274,8 +470,10 @@ static uint32_t file_frames(const char *path, int sector){
         return (uint32_t)((granule * 75 + rate - 1) / rate);
     }
     fclose(f);
-    if(got >= 12 && !memcmp(head, "RIFF", 4) && !memcmp(&head[8], "WAVE", 4))
+    if(got >= 12 && !memcmp(head, "RIFF", 4) && !memcmp(&head[8], "WAVE", 4)){
+        *kind = SRC_WAVE;
         return (uint32_t)((size - 44 + 2351) / 2352);
+    }
     return (uint32_t)((size + sector - 1) / sector);
 }
 
@@ -286,6 +484,7 @@ int mscdex_cue(const char *cue, char *err, size_t n){
     FILE *f = fopen(cue, "r");
     char line[1024], dir[1024], cur[1024] = "";
     uint32_t file_base = 150, file_len = 0, gap = 0;
+    uint8_t kind = SRC_RAW;
     int sector = 2352;
     char *slash;
     if(!f){ snprintf(err, n, "cannot open %s", cue); return -1; }
@@ -324,18 +523,22 @@ int mscdex_cue(const char *cue, char *err, size_t n){
             trk_data[ntracks] = (uint8_t)(_strnicmp(mode, "AUDIO", 5) != 0);
             sector = !_strnicmp(mode, "MODE1/2048", 10) ? 2048 : 2352;
             if(file_len == 0xFFFFFFFFu){
-                file_len = file_frames(cur, sector);
+                file_len = file_frames(cur, sector, &kind);
                 if(!file_len){ snprintf(err, n, "%s: cannot tell the length of %s", cue, cur); fclose(f); return -1; }
             }
             trk_start[ntracks] = 0xFFFFFFFFu;
+            snprintf(trk_path[ntracks], sizeof(trk_path[0]), "%s", cur);
+            trk_kind[ntracks] = kind;
             ntracks++;
         } else if(!strcmp(word, "PREGAP") && ntracks){
             int m = 0, s = 0, fr = 0;
             if(sscanf(p, "%d:%d:%d", &m, &s, &fr) == 3){ gap = (uint32_t)(m*4500 + s*75 + fr); file_base += gap; }
         } else if(!strcmp(word, "INDEX") && ntracks){
             int idx = 0, m = 0, s = 0, fr = 0;
-            if(sscanf(p, "%d %d:%d:%d", &idx, &m, &s, &fr) == 4 && idx == 1)
+            if(sscanf(p, "%d %d:%d:%d", &idx, &m, &s, &fr) == 4 && idx == 1){
                 trk_start[ntracks-1] = file_base + (uint32_t)(m*4500 + s*75 + fr);
+                trk_file_base[ntracks-1] = file_base;   /* the file's start, after a PREGAP */
+            }
         }
     }
     fclose(f);
@@ -375,5 +578,8 @@ void mscdex_init(void){
      * a size that does not depend on the files, so runs stay alike */
     ntracks = 1; trk_start[0] = 150; trk_data[0] = 1; leadout = 150 + 300000;
     playing = paused = 0; play_from = play_to = play_pos = 0; play_t = 0;
+    trk_path[0][0] = 0;
+    aud_on = 0;
+    { int i; for(i = 0; i < 4; i++){ chan_in[i] = (uint8_t)i; chan_vol[i] = 0xFF; } }
     cb_table[0x2F] = mux_int2f;
 }

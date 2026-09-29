@@ -179,6 +179,9 @@ void mscdex_init(void);
 int  mscdex_cue(const char *cue, char *err, size_t n);
 void mscdex_report(void);             /* the track table, printed */
 extern int cd_log;                    /* -cd: print the CD requests */
+void mscdex_wav_open(const char *path); /* -cdwav: what the drive plays */
+void mscdex_wav_close(void);
+void mscdex_wav_tick(void);            /* the samples up to now */
 
 /* ----------------------------------------------------------- sound ------ */
 void sound_init(void);

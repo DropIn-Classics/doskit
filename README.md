@@ -49,13 +49,16 @@ docs/NEW-PROJECT.md how to start a new game.
     identical, carried hints and name headers up to date);
     `symmap.py`: the hints' names as a C header for the port.
   - `run/`: `dosrun`, the headless PC (386 real, protected and V86 mode, VGA, PIT/PIC,
-    keyboard, BIOS, DMA and Sound Blaster 16, a small DOS over the game's
-    files with a writable layer); `run.py` its front end, which takes
+    keyboard, BIOS, DMA and Sound Blaster 16, MSCDEX with CD audio to a
+    WAV file, a small DOS over the game's files with a writable layer); `run.py` its front end, which takes
     addresses by their names in the hints. `memcmp.py` compares a port's
     memory with the original's.
   - `isox.py`: unpacks a CD image (ISO, or raw 2352-byte sectors as GOG's
     game.gog); `flifiles.py`: reads and checks Autodesk FLI animations.
   - `new_project.py`: a new port's repository from `template/`.
+- `third_party/`: code taken unchanged from elsewhere, each with a
+  README saying from where and under which licence: `stb_vorbis` (Ogg
+  Vorbis decoding, public domain or MIT).
 - `runtime/` (C99; a project compiles the files it needs):
   - `platform.h` with `plat_sdl.c` (SDL2: macOS, Linux, Steam Deck),
     `plat_win32.c` (Windows SDK only) and `plat_null.c` (headless, for

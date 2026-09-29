@@ -299,6 +299,7 @@ void io_w16(uint16_t p, uint16_t v){ io_w8(p,(uint8_t)v); io_w8((uint16_t)(p+1),
 void dev_tick(void){
     emu_advance();
     sb_tick();
+    mscdex_wav_tick();
     /* PIT channel 0 -> IRQ0.  Mode 0 is one interrupt per count written;
      * treating it as periodic gives a calibrating driver interrupts it has
      * not asked for (and it runs off the end of its event list). */

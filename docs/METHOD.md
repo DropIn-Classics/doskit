@@ -133,7 +133,7 @@ Useful options (all at the top of `tools/run/main.c`): `-key T KEY`,
 (registers at each pass), `-watch ADDR` (who writes a byte, when),
 `-dump ADDR LEN`, `-dumpevery DT` (a time series), `-trace FILE N`,
 `-dos` (every INT 21h call with its file), `-intwatch NN`, `-prof`,
-`-ram`/`-vram` (memory for memcmp.py), `-wav`, `-put GUEST HOST` (a
+`-ram`/`-vram` (memory for memcmp.py), `-wav`, `-cdwav`, `-put GUEST HOST` (a
 configuration file the set-up program would have written), `-loadfix`
 (load above 64 KB: EXEPACK's unpacker fails in a program loaded below
 it, e.g. a driver EXECed by a small program). run.py translates
@@ -146,11 +146,14 @@ event): key scripts with random presses, many seeds in parallel, a
 got there with `-dump`/`-shot`.
 
 Not in the runner: paging and task switches (so no extender that needs
-them), VCPI/DPMI hosts, x87 instructions, EMS/XMS, a mouse driver (INT 33h), CD audio
-(MSCDEX answers for D:, a disc of one data track or, with `-cue`, the
-tracks of a cue sheet such as GOG's `game.inst`; plays are kept track of,
-nothing sounds, `-cd` prints them), OPL FM synthesis (the ports
-answer, nothing sounds), savestates, a window.
+them), VCPI/DPMI hosts, x87 instructions, EMS/XMS, a mouse driver (INT 33h),
+OPL FM synthesis (the ports answer, nothing sounds), savestates, a
+window. CD audio is there as a file: MSCDEX answers for D:, a disc of one
+data track or, with `-cue`, the tracks of a cue sheet such as GOG's
+`game.inst`; `-cd` prints the plays and the channel settings,
+`-cdwav` writes what the drive played (44.1 kHz stereo from t=0, the
+tracks' Ogg Vorbis through third_party/stb_vorbis), not mixed with
+`-wav` (which starts at the Sound Blaster's first transfer).
 
 **Files.** Each data format gets a tool in the project (`tools/NAMEfiles.py`)
 that parses the files and writes them back to identical bytes, and shows

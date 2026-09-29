@@ -54,6 +54,7 @@
  *                    audio tracks the program can ask for and play; the
  *                    files stay the unpacked tree (default: one data track)
  *   -cd              print the CD's tracks and every MSCDEX call and request
+ *   -cdwav FILE      what the CD drive played (44.1 kHz stereo, from t=0)
  *   -intwatch NN     print every INT NN call (hex)
  *   -prof            the busiest CS:IP at the end
  *   -vgastate        the VGA's registers, DAC and what the CRTC shows, at the end
@@ -308,7 +309,7 @@ static void put_files(void){
 /* ---------------------------------------------------------------- main */
 int main(int argc, char **argv){
     const char *game = NULL, *state = "build/run/state";
-    const char *ram_file = NULL, *vram_file = NULL, *wav_file = NULL, *cue = NULL;
+    const char *ram_file = NULL, *vram_file = NULL, *wav_file = NULL, *cue = NULL, *cdwav_file = NULL;
     double until = 30.0;
     char prog[260] = "", tail[128] = "";
     const char *stop = "until";
@@ -394,6 +395,7 @@ int main(int argc, char **argv){
         else if(!strcmp(a,"-dos")) dos_log = 1;
         else if(!strcmp(a,"-cd")) cd_log = 1;
         else if(!strcmp(a,"-cue")){ NEED(1); cue = argv[++i]; }
+        else if(!strcmp(a,"-cdwav")){ NEED(1); cdwav_file = argv[++i]; }
         else if(!strcmp(a,"-loadfix")) loadfix = 1;
         else if(!strcmp(a,"-intwatch")){ NEED(1); int_watch = (int)strtol(argv[++i], NULL, 16); }
         else if(!strcmp(a,"-prof")) prof_on = 1;
@@ -428,6 +430,7 @@ int main(int argc, char **argv){
     dos_on_load = on_load;
     put_files();
     if(wav_file) sound_wav_open(wav_file);
+    if(cdwav_file) mscdex_wav_open(cdwav_file);
 
     /* Park the CPU on a HLT in ROM with an IRET frame above it, the place a
      * program that leaves nothing to return to ends up. */
@@ -590,5 +593,6 @@ int main(int argc, char **argv){
     if(vram_file) write_file(vram_file, vga_vram, sizeof(vga_vram));
     if(xtrace_fp) fclose(xtrace_fp);
     sound_wav_close();
+    mscdex_wav_close();
     return 0;
 }
