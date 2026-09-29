@@ -19,8 +19,10 @@ In build/selftest (a project as a game's would be, see kit.py):
      PROVENANCE.md (the template's) is there; the names header symmap.py
      wrote is up to date; FLAT without its raw hint rebuilds too (the
      line tasm.py refuses written as DB by build.py);
-  3. run.py: the program in the runner, stopped at its end (CODE:0026),
-     its console line read, memory and video memory written out; PMODE.EXE
+  3. run.py: its table of the runner's options has every option the
+     runner parses (one it lacks is taken for PROGRAM, and the addresses
+     after it go untranslated); the program in the runner, stopped at
+     its end (CODE:0026), its console line read, memory and video memory written out; PMODE.EXE
      in the runner, which checks the runner's protected mode itself (into
      it through INT 15h AH=89h, a #GP, IRQ0 through the IDT, ring 3, a
      call gate, V86 mode with the I/O bitmap, back to real mode; then its
@@ -56,7 +58,7 @@ In build/selftest (a project as a game's would be, see kit.py):
 Prints `selftest ok` at the end, exit status 0 then.  Needs cc (clang
 or gcc); on Windows it is not written for MSVC yet.
 """
-import os, shutil, subprocess, sys
+import os, re, shutil, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KIT = os.path.normpath(os.path.join(HERE, '..'))
@@ -320,6 +322,12 @@ def main():
     print('FLAT without its stop hint: the data after CODE:00B5 taken for code')
 
     step('3. run in the runner (run.py)')
+    import run as run_py
+    with open(os.path.join(TOOLS, 'run', 'main.c')) as f:
+        parsed = set(re.findall(r'strcmp\(a,"(-[a-z]+)"\)', f.read()))
+    if parsed != set(run_py.OPTS):
+        raise SystemExit('selftest FAILED: run.py\'s OPTS and the runner\'s options differ: '
+                         + ' '.join(sorted(parsed ^ set(run_py.OPTS))))
     b = os.path.join(PROJ, 'build')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-break', 'CODE:0026',
                '-dump', 'counter', '2', '-ram', os.path.join(b, 'orig.ram'),
