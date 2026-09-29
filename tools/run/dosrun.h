@@ -1,5 +1,5 @@
 /* dosrun - a headless PC for running the shipped programs of a DOS game.
- * The emulation core: cpu.c (386 real mode), vga.c, dev.c (PIC,
+ * The emulation core: cpu.c (386: real, protected and V86 mode), vga.c, dev.c (PIC,
  * PIT, keyboard controller), bios.c, sound.c (DMA, Sound Blaster),
  * vgafont.c, png.c; dos.c is the DOS layer (memory, EXEC, files).  main.c
  * is the session: options, the loop, what is written out.
@@ -32,8 +32,19 @@ typedef struct {
     uint32_t sbase[6];
     uint32_t eip;
     /* flags kept unpacked for speed; assembled on demand */
-    uint32_t cf, pf, af, zf, sf, tf, iflag, df, of, nt, iopl, ac;
+    uint32_t cf, pf, af, zf, sf, tf, iflag, df, of, nt, iopl, ac, rf, vm;
     int halted;
+    /* protected mode (cpu.c): the segment registers' descriptor caches
+     * (limit and D/B bit; the base is sbase), the system registers */
+    uint32_t slimit[6];
+    uint8_t  sbig[6];                  /* 32-bit code segment / stack */
+    int cpl;
+    uint32_t cr0, cr2, cr3;
+    uint32_t gdt_base, gdt_limit, idt_base, idt_limit;
+    uint16_t ldtr, tr;
+    uint32_t ldt_base, ldt_limit, tr_base, tr_limit;
+    int tr_type;                       /* descriptor type of the task register's TSS */
+    int inhibit;                       /* MOV SS, POP SS: no interrupt before the next instruction */
     uint64_t cycles;
     int shutdown;
 } CPU;
@@ -54,10 +65,11 @@ static inline void st32u(void *p, uint32_t v){ memcpy(p, &v, 4); }
 
 void cpu_reset(void);
 void cpu_step(void);
-void cpu_interrupt(int n, int soft);   /* push flags/cs/ip, vector through IVT */
+void cpu_interrupt(int n, int soft);   /* through the IVT, or the IDT under PE */
 uint32_t cpu_getflags(void);
 void cpu_setflags(uint32_t f);
-void set_sreg(int s, uint16_t v);
+void set_sreg(int s, uint16_t v);      /* a selector under PE (outside V86 mode) */
+void cpu_far_jump(uint16_t sel, uint32_t off);
 void cpu_no_iret(void);
 extern void (*cb_table[256])(void);
 extern uint32_t insn_ip;               /* IP of the instruction being executed */
@@ -135,6 +147,7 @@ int  bios_kbuf_get(uint16_t *out);    /* type-ahead queue for DOS input */
 int  bios_kbuf_peek(uint16_t *out);
 void bios_set_cf(int v);
 void bios_tty(uint8_t c);
+void a20_set(int on);                 /* the A20 gate (dev.c) */
 
 /* ---------------------------------------------------------------- DOS ---- */
 /* The guest's C: drive is the unpacked CD (game_dir) with a writable layer

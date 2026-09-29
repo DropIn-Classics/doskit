@@ -48,7 +48,7 @@ docs/NEW-PROJECT.md how to start a new game.
   - `check.py`: what must hold before a project's commit (every program
     identical, carried hints and name headers up to date);
     `symmap.py`: the hints' names as a C header for the port.
-  - `run/`: `dosrun`, the headless PC (386 real mode, VGA, PIT/PIC,
+  - `run/`: `dosrun`, the headless PC (386 real, protected and V86 mode, VGA, PIT/PIC,
     keyboard, BIOS, DMA and Sound Blaster, a small DOS over the game's
     files with a writable layer); `run.py` its front end, which takes
     addresses by their names in the hints. `memcmp.py` compares a port's

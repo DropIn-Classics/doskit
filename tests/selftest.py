@@ -9,14 +9,19 @@ In build/selftest (a project as a game's would be, see kit.py):
   1. HELLO.ASM assembled and linked with tasm.py and tlink.py into
      game/HELLO/HELLO.EXE (the "shipped program"); tests/flat/FLAT.ASM,
      32-bit, the same way into a pMAX image, build/files/FLAT.386 (as a
-     project's tool would unpack it);
+     project's tool would unpack it); tests/pmode/PMODE.ASM into
+     game/PMODE/PMODE.EXE;
   2. check.py: disasm.py makes their sources from tests/hello/src/HELLO.hints
      and tests/flat/src/FLAT.hints, build.py rebuilds them byte for byte;
      PROVENANCE.md (the template's) is there; the names header symmap.py
      wrote is up to date; FLAT without its raw hint rebuilds too (the
      line tasm.py refuses written as DB by build.py);
   3. run.py: the program in the runner, stopped at its end (CODE:0026),
-     its console line read, memory and video memory written out;
+     its console line read, memory and video memory written out; PMODE.EXE
+     in the runner, which checks the runner's protected mode itself (into
+     it through INT 15h AH=89h, a #GP, IRQ0 through the IDT, ring 3, a
+     call gate, V86 mode with the I/O bitmap, back to real mode) and says
+     "pmode ok";
   4. the C runtime: tests/hello/port.c (HELLO in C over rmem.h and vga.h,
      on plat_null.c) built with cc, run on the same program; its memory
      compared with the runner's by memcmp.py (CODE, DATA and video memory;
@@ -59,13 +64,13 @@ def run(cmd, **kw):
     return out
 
 
-def make_exe():
-    a = tasm.Assembler(os.path.join(HERE, 'hello', 'HELLO.ASM'))
+def make_exe(name='HELLO'):
+    a = tasm.Assembler(os.path.join(HERE, name.lower(), name + '.ASM'))
     a.assemble()
-    out = tlink.link([tlink.module_from_asm(a, 'HELLO')])
+    out = tlink.link([tlink.module_from_asm(a, name)])
     exe = build.write_mz(out, None, [0])
-    os.makedirs(os.path.join(PROJ, 'game', 'HELLO'))
-    with open(os.path.join(PROJ, 'game', 'HELLO', 'HELLO.EXE'), 'wb') as f:
+    os.makedirs(os.path.join(PROJ, 'game', name))
+    with open(os.path.join(PROJ, 'game', name, name + '.EXE'), 'wb') as f:
         f.write(exe)
     return len(exe)
 
@@ -130,7 +135,7 @@ def main():
     print(f'{check_enc32()} lines as capstone reads them')
 
     step('1. HELLO.EXE assembled and linked')
-    print(f'{make_exe()} bytes; FLAT.386 {make_flat()} bytes')
+    print(f'{make_exe()} bytes; FLAT.386 {make_flat()} bytes; PMODE.EXE {make_exe("PMODE")} bytes')
     shutil.copy(os.path.join(HERE, 'hello', 'src', 'HELLO.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'flat', 'src', 'FLAT.hints'), os.path.join(PROJ, 'src'))
     # every project carries PROVENANCE.md (check.py insists)
@@ -194,6 +199,11 @@ def main():
     print('\n'.join(l for l in out.splitlines() if l.startswith(('con:', 'break', 'dump'))))
     if 'con: hello from doskit' not in out:
         raise SystemExit('selftest FAILED: no console line from HELLO.EXE')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', 'PMODE/PMODE.EXE'])
+    print('\n'.join(l for l in out.splitlines() if l.startswith(('con:', '[cpu]'))))
+    if 'con: pmode ok' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: PMODE.EXE (the runner\'s protected mode)')
 
     step('4. the C port over the runtime, compared (memcmp.py)')
     exe = os.path.join(b, 'port')

@@ -174,6 +174,7 @@ static uint8_t kbd_buf[64];
 static int kbd_head, kbd_tail;
 static uint8_t kbd_last = 0;
 static int kbd_a20 = 1;
+void a20_set(int on){ kbd_a20 = on ? 1 : 0; a20_mask = kbd_a20 ? 0xFFFFFFFFu : 0xFFEFFFFFu; }
 static uint8_t kbc_cmd = 0;
 static unsigned long kbd_dropped = 0;
 
@@ -276,7 +277,7 @@ void io_w8(uint16_t p, uint8_t v){
         return;
     case 0x70: cmos_idx = v; return;
     case 0x71: return;
-    case 0x92: kbd_a20 = (v&2)?1:0; a20_mask = kbd_a20 ? 0xFFFFFFFFu : 0xFFEFFFFFu; return;
+    case 0x92: a20_set(v & 2); return;
     case 0x201: return;
     case 0x388: adlib_idx = v; return;
     case 0x389: opl_write(adlib_idx, v); return;
@@ -285,7 +286,7 @@ void io_w8(uint16_t p, uint8_t v){
     if(p>=0x3B0 && p<=0x3DF){ vga_io_w(p,v); return; }
     if(p>=0x220 && p<=0x22F){ sb_write(p,v); return; }
     if(p==0x60){
-        if(kbc_cmd==0xD1){ kbd_a20 = (v&2)?1:0; a20_mask = kbd_a20?0xFFFFFFFFu:0xFFEFFFFFu; kbc_cmd=0; }
+        if(kbc_cmd==0xD1){ a20_set(v & 2); kbc_cmd=0; }
         return;
     }
     trc("[io] write %02X to unknown port %03X from %04X:%04X\n", v, p, cpu.sreg[S_CS], (unsigned)insn_ip);

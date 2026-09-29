@@ -255,12 +255,47 @@ static void bios_int1a(void){
 static void bios_int11(void){ AX = BDA16(0x10); }
 static void bios_int12(void){ AX = BDA16(0x13); }
 static void bios_int13(void){ AH = 0x01; cpu.cf = 1; }
+/* INT 15h AH=87h: copy CX words between the linear addresses of the
+ * descriptors at ES:SI+10h (source) and +18h (destination) */
+static void bios_move_block(void){
+    uint32_t gdt = cpu.sbase[S_ES] + SI, n = (uint32_t)CX * 2, i;
+    uint32_t src = mem_r32(gdt + 0x12) & 0xFFFFFF, dst = mem_r32(gdt + 0x1A) & 0xFFFFFF;
+    src |= (uint32_t)mem_r8(gdt + 0x17) << 24; dst |= (uint32_t)mem_r8(gdt + 0x1F) << 24;
+    for(i = 0; i < n; i++) mem_w8(dst + i, mem_r8(src + i));
+    AH = 0; cpu.cf = 0;
+}
+
+/* INT 15h AH=89h: into protected mode, as the AT's BIOS defines it.  ES:SI
+ * is a GDT of 8 descriptors: 08h the GDT itself, 10h the IDT, 18h DS, 20h
+ * ES, 28h SS, 30h CS (38h the BIOS's own code, not used here); BH and BL
+ * the vector bases for IRQ 0-7 and 8-15.  It returns to the caller's IP
+ * with CS 30h and the INT's frame taken off the stack, interrupts off.
+ * The PICs' masks are kept (what the AT's BIOS does with them is not
+ * checked). */
+static void bios_to_pm(void){
+    uint32_t gdt = cpu.sbase[S_ES] + SI, sp = cpu.sbase[S_SS] + REG16(R_ESP);
+    uint16_t ip = mem_r16(sp);
+    uint8_t m1 = io_r8(0x21), m2 = io_r8(0xA1);
+    REG16(R_ESP) += 6;
+    io_w8(0x20, 0x11); io_w8(0x21, BH); io_w8(0x21, 0x04); io_w8(0x21, 0x01); io_w8(0x21, m1);
+    io_w8(0xA0, 0x11); io_w8(0xA1, BL); io_w8(0xA1, 0x02); io_w8(0xA1, 0x01); io_w8(0xA1, m2);
+    a20_set(1);
+    cpu.gdt_limit = mem_r16(gdt + 0x08); cpu.gdt_base = mem_r32(gdt + 0x0A) & 0xFFFFFF;
+    cpu.idt_limit = mem_r16(gdt + 0x10); cpu.idt_base = mem_r32(gdt + 0x12) & 0xFFFFFF;
+    cpu.cr0 |= 1; cpu.cpl = 0;
+    cpu.iflag = 0; cpu.cf = 0; AH = 0;
+    set_sreg(S_DS, 0x18); set_sreg(S_ES, 0x20); set_sreg(S_SS, 0x28);
+    cpu_far_jump(0x30, ip);
+    cpu_no_iret();
+}
+
 static void bios_int15(void){
     switch(AH){
-    case 0x88: AX = 0; cpu.cf = 0; break;                 /* extended memory size */
+    case 0x88: AX = (uint16_t)((RAM_SIZE - 0x100000u) / 1024); cpu.cf = 0; break;  /* KB above 1 MB */
+    case 0x89: bios_to_pm(); return;
     case 0xC0: cpu.cf = 1; AH = 0x86; break;
     case 0x86: cpu.cf = 0; break;
-    case 0x87: cpu.cf = 1; AH = 0x86; break;
+    case 0x87: bios_move_block(); break;
     default: cpu.cf = 1; AH = 0x86; break;
     }
     { uint32_t sp = cpu.sbase[S_SS] + REG16(R_ESP);

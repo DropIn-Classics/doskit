@@ -1,5 +1,7 @@
-/* 386 real-mode CPU interpreter (see dosrun.h) */
+/* 386 CPU interpreter: real mode, protected mode, V86 mode (see dosrun.h
+ * and "protected mode" below) */
 #include "dosrun.h"
+#include <setjmp.h>
 
 CPU cpu;
 uint8_t *ram;
@@ -15,17 +17,24 @@ static void init_ptab(void){
 uint32_t cpu_getflags(void){
     return 0x0002u | (cpu.cf) | (cpu.pf<<2) | (cpu.af<<4) | (cpu.zf<<6) |
            (cpu.sf<<7) | (cpu.tf<<8) | (cpu.iflag<<9) | (cpu.df<<10) |
-           (cpu.of<<11) | (cpu.iopl<<12) | (cpu.nt<<14) | (cpu.ac<<18);
+           (cpu.of<<11) | (cpu.iopl<<12) | (cpu.nt<<14) | (cpu.rf<<16) |
+           (cpu.vm<<17) | (cpu.ac<<18);
 }
+/* all but VM, which only an interrupt and IRET change */
 void cpu_setflags(uint32_t f){
     cpu.cf=f&1; cpu.pf=(f>>2)&1; cpu.af=(f>>4)&1; cpu.zf=(f>>6)&1;
     cpu.sf=(f>>7)&1; cpu.tf=(f>>8)&1; cpu.iflag=(f>>9)&1; cpu.df=(f>>10)&1;
-    cpu.of=(f>>11)&1; cpu.iopl=(f>>12)&3; cpu.nt=(f>>14)&1; cpu.ac=(f>>18)&1;
+    cpu.of=(f>>11)&1; cpu.iopl=(f>>12)&3; cpu.nt=(f>>14)&1; cpu.rf=(f>>16)&1;
+    cpu.ac=(f>>18)&1;
 }
 
 /* ------------------------------------------------------------- decode ctx */
 static int opsz, adsz, segovr, rep;
 static uint32_t cs_base;
+static int def32;                  /* the code segment's D bit: 32-bit operands and addresses */
+static uint32_t ipmask;            /* EIP wraps at 64 KB in a 16-bit code segment */
+#define PE (cpu.cr0 & 1)
+#define STK32 (cpu.sbig[S_SS])
 static int mod_, reg_, rm_;
 static uint32_t ea, ea_off;
 static int ea_isreg;
@@ -85,17 +94,32 @@ static inline void cpu_st32(uint32_t a, uint32_t v){
     ram[a+2] = (uint8_t)(v >> 16); ram[a+3] = (uint8_t)(v >> 24);
 }
 
-static uint8_t fetch8(void){ uint8_t v = cpu_ld8(cs_base + cpu.eip); cpu.eip = (cpu.eip+1)&0xFFFF; return v; }
-static uint16_t fetch16(void){ uint16_t v = cpu_ld16(cs_base + cpu.eip); cpu.eip=(cpu.eip+2)&0xFFFF; return v; }
-static uint32_t fetch32(void){ uint32_t v = cpu_ld32(cs_base + cpu.eip); cpu.eip=(cpu.eip+4)&0xFFFF; return v; }
+static uint8_t fetch8(void){ uint8_t v = cpu_ld8(cs_base + cpu.eip); cpu.eip = (cpu.eip+1)&ipmask; return v; }
+static uint16_t fetch16(void){ uint16_t v = cpu_ld16(cs_base + cpu.eip); cpu.eip=(cpu.eip+2)&ipmask; return v; }
+static uint32_t fetch32(void){ uint32_t v = cpu_ld32(cs_base + cpu.eip); cpu.eip=(cpu.eip+4)&ipmask; return v; }
 
-void set_sreg(int s, uint16_t v){ cpu.sreg[s]=v; cpu.sbase[s]=(uint32_t)v<<4; if(s==S_CS) cs_base=cpu.sbase[S_CS]; }
+static void load_seg(int s, uint16_t sel);       /* protected mode, below */
+static void cs_changed(void){
+    cs_base = cpu.sbase[S_CS]; def32 = cpu.sbig[S_CS]; ipmask = def32 ? 0xFFFFFFFFu : 0xFFFFu;
+}
+/* Real mode and V86 mode: the base is the selector times 16.  Real mode
+ * keeps the limit and D bit the register had (as the 386 does); V86 mode
+ * sets them to 64 KB, 16-bit. */
+void set_sreg(int s, uint16_t v){
+    if(PE && !cpu.vm){ load_seg(s, v); return; }
+    cpu.sreg[s]=v; cpu.sbase[s]=(uint32_t)v<<4;
+    if(cpu.vm){ cpu.slimit[s] = 0xFFFF; cpu.sbig[s] = 0; }
+    if(s==S_CS) cs_changed();
+}
 static uint32_t sb(int s){ return cpu.sbase[segovr>=0 ? segovr : s]; }
 
-static void push16(uint16_t v){ REG16(R_ESP) -= 2; cpu_st16(cpu.sbase[S_SS] + REG16(R_ESP), v); }
-static uint16_t pop16(void){ uint16_t v = cpu_ld16(cpu.sbase[S_SS] + REG16(R_ESP)); REG16(R_ESP)+=2; return v; }
-static void push32(uint32_t v){ REG16(R_ESP) -= 4; cpu_st32(cpu.sbase[S_SS] + REG16(R_ESP), v); }
-static uint32_t pop32(void){ uint32_t v = cpu_ld32(cpu.sbase[S_SS] + REG16(R_ESP)); REG16(R_ESP)+=4; return v; }
+/* the stack pointer is ESP in a 32-bit stack segment (B bit), SP otherwise */
+static inline uint32_t sp_get(void){ return STK32 ? REG32(R_ESP) : REG16(R_ESP); }
+static inline void sp_add(uint32_t d){ if(STK32) REG32(R_ESP) += d; else REG16(R_ESP) = (uint16_t)(REG16(R_ESP) + d); }
+static void push16(uint16_t v){ sp_add((uint32_t)-2); cpu_st16(cpu.sbase[S_SS] + sp_get(), v); }
+static uint16_t pop16(void){ uint16_t v = cpu_ld16(cpu.sbase[S_SS] + sp_get()); sp_add(2); return v; }
+static void push32(uint32_t v){ sp_add((uint32_t)-4); cpu_st32(cpu.sbase[S_SS] + sp_get(), v); }
+static uint32_t pop32(void){ uint32_t v = cpu_ld32(cpu.sbase[S_SS] + sp_get()); sp_add(4); return v; }
 static void pushv(uint32_t v){ if(opsz==32) push32(v); else push16((uint16_t)v); }
 static uint32_t popv(void){ return opsz==32?pop32():pop16(); }
 
@@ -258,8 +282,276 @@ static int cond(int c){
     return 0;
 }
 
+/* ------------------------------------------------------ protected mode */
+/* The 386's protected mode as a DOS extender uses it: segment registers
+ * loaded from descriptors in the GDT and LDT (base, limit, 16/32-bit),
+ * privilege levels with the stacks of the TSS, far jumps, calls and
+ * returns through code descriptors and call gates, interrupts and
+ * exceptions through the IDT's interrupt and trap gates, V86 mode (entered
+ * by IRETD, left by an interrupt), the I/O permission bitmap and the
+ * IOPL-sensitive instructions.
+ *
+ * Not here: paging, task switches (task gates, a far jump or call to a
+ * TSS, IRET with NT), the checks of limits and types on memory accesses
+ * (a descriptor's limit is kept, not enforced), the alignment check, debug
+ * registers.  Any fault during the delivery of an exception is a double
+ * fault; a fault during that stops the run (a triple fault).
+ *
+ * An exception is raised with fault(): it jumps out of the instruction
+ * through fault_jb, puts back what the instruction changed of EIP, CS, SS,
+ * ESP and CPL and is delivered through the IDT.  The jump is armed only
+ * under PE (and around the BIOS's callbacks), so real mode costs nothing
+ * more. */
+
+typedef struct { uint32_t lo, hi; } Desc;
+#define D_BASE(d)  (((d).lo >> 16) | (((d).hi & 0xFF) << 16) | ((d).hi & 0xFF000000u))
+#define D_P(d)     (((d).hi >> 15) & 1)
+#define D_DPL(d)   ((int)(((d).hi >> 13) & 3))
+#define D_S(d)     (((d).hi >> 12) & 1)          /* code or data (1), system (0) */
+#define D_TYPE(d)  ((int)(((d).hi >> 8) & 15))
+#define D_BIG(d)   ((uint8_t)(((d).hi >> 22) & 1))
+#define D_CODE(d)  (D_S(d) && (D_TYPE(d) & 8))
+#define D_CONF(d)  (D_CODE(d) && (D_TYPE(d) & 4))
+#define D_WDATA(d) (D_S(d) && (D_TYPE(d) & 10) == 2) /* writable data */
+static uint32_t d_limit(Desc d){
+    uint32_t l = (d.lo & 0xFFFF) | (d.hi & 0xF0000);
+    return (d.hi & 0x800000) ? (l << 12) | 0xFFF : l;
+}
+
+enum { IK_HW, IK_SOFT, IK_EXC };
+
+static jmp_buf fault_jb;
+static int fault_armed;
+static int fault_vec, fault_has_err;
+static uint32_t fault_err;
+static struct {                     /* at the instruction's start */
+    uint32_t eip, esp, base[2], limit[2];
+    uint16_t sel[2]; uint8_t big[2]; int cpl;
+} saved;
+
+static void save_state(void){
+    int i, s;
+    saved.eip = cpu.eip; saved.esp = REG32(R_ESP); saved.cpl = cpu.cpl;
+    for(i = 0; i < 2; i++){
+        s = i ? S_SS : S_CS;
+        saved.sel[i] = cpu.sreg[s]; saved.base[i] = cpu.sbase[s];
+        saved.limit[i] = cpu.slimit[s]; saved.big[i] = cpu.sbig[s];
+    }
+}
+static void restore_state(void){
+    int i, s;
+    cpu.eip = saved.eip; REG32(R_ESP) = saved.esp; cpu.cpl = saved.cpl;
+    for(i = 0; i < 2; i++){
+        s = i ? S_SS : S_CS;
+        cpu.sreg[s] = saved.sel[i]; cpu.sbase[s] = saved.base[i];
+        cpu.slimit[s] = saved.limit[i]; cpu.sbig[s] = saved.big[i];
+    }
+    cs_changed();
+}
+
+static void fault(int vec, uint32_t err){
+    fault_vec = vec; fault_err = err & 0xFFFF;
+    fault_has_err = vec == 8 || (vec >= 10 && vec <= 14) || vec == 17;
+    if(!fault_armed){
+        /* cannot happen: every path that can fault arms fault_jb */
+        fprintf(stderr, "dosrun: exception %02Xh with nothing to deliver it\n", vec);
+        exit(2);
+    }
+    longjmp(fault_jb, 1);
+}
+#define GP(e) fault(13, (e))
+
+/* something of protected mode the runner does not do: said once a site, and
+ * the run stops (going on would only hide where it went wrong) */
+static void pm_unsupported(const char *what){
+    printf("[cpu] not emulated: %s at %04X:%08X\n", what, cpu.sreg[S_CS], (unsigned)insn_ip);
+    cpu.shutdown = 1;
+}
+
+static uint32_t desc_addr;          /* where read_desc found it */
+static int read_desc(uint16_t sel, Desc *d){
+    uint32_t base = cpu.gdt_base, limit = cpu.gdt_limit;
+    if(sel & 4){
+        if(!(cpu.ldtr & ~3)) return 0;
+        base = cpu.ldt_base; limit = cpu.ldt_limit;
+    }
+    if((uint32_t)(sel | 7) > limit) return 0;
+    desc_addr = base + (sel & ~7u);
+    d->lo = cpu_ld32(desc_addr); d->hi = cpu_ld32(desc_addr + 4);
+    return 1;
+}
+static void set_accessed(Desc *d){
+    if(D_S(*d) && !(d->hi & 0x100)){ d->hi |= 0x100; cpu_st32(desc_addr + 4, d->hi); }
+}
+static void seg_from_desc(int s, uint16_t sel, Desc d){
+    cpu.sreg[s] = sel; cpu.sbase[s] = D_BASE(d);
+    cpu.slimit[s] = d_limit(d); cpu.sbig[s] = D_BIG(d);
+}
+static void set_cs(uint16_t sel, Desc d, int cpl){
+    seg_from_desc(S_CS, (uint16_t)((sel & ~3) | cpl), d);
+    cpu.cpl = cpl;
+    cs_changed();
+}
+static void set_null(int s, uint16_t sel){
+    cpu.sreg[s] = sel; cpu.sbase[s] = 0; cpu.slimit[s] = 0; cpu.sbig[s] = 0;
+}
+
+/* SS for privilege level cpl: the checks of a stack switch (#TS or #SS) */
+static void check_stack(uint16_t sel, int cpl, Desc *d, int vec){
+    if(!(sel & ~3)) fault(vec, 0);
+    if(!read_desc(sel, d) || (sel & 3) != cpl || D_DPL(*d) != cpl || !D_WDATA(*d))
+        fault(vec, sel);
+    if(!D_P(*d)) fault(12, sel);
+}
+
+/* MOV, POP, LDS...: a data segment register or SS */
+static void load_seg(int s, uint16_t sel){
+    Desc d;
+    if(s == S_CS){ pm_unsupported("CS loaded as a data segment"); return; }
+    if(s == S_SS){
+        check_stack(sel, cpu.cpl, &d, 13);
+        set_accessed(&d);
+        seg_from_desc(S_SS, sel, d);
+        return;
+    }
+    if(!(sel & ~3)){ set_null(s, sel); return; }
+    if(!read_desc(sel, &d)) GP(sel);
+    if(!D_S(d) || (D_CODE(d) && !(D_TYPE(d) & 2))) GP(sel);   /* system, execute-only */
+    if(!D_CONF(d) && (D_DPL(d) < cpu.cpl || D_DPL(d) < (sel & 3))) GP(sel);
+    if(!D_P(d)) fault(11, sel);
+    set_accessed(&d);
+    seg_from_desc(s, sel, d);
+}
+
+/* a return to an outer level: the data segments the new level may not use
+ * become null */
+static void null_inner_segs(void){
+    static const int ss[4] = { S_ES, S_DS, S_FS, S_GS };
+    int i;
+    for(i = 0; i < 4; i++){
+        Desc d; uint16_t sel = cpu.sreg[ss[i]];
+        if(!(sel & ~3)) continue;
+        if(!read_desc(sel, &d) || (!D_CONF(d) && D_DPL(d) < cpu.cpl)) set_null(ss[i], 0);
+    }
+}
+
+/* the stack of level dpl from the TSS */
+static void tss_stack(int dpl, uint16_t *ss, uint32_t *esp){
+    if(cpu.tr_type & 8){
+        if((uint32_t)dpl * 8 + 11 > cpu.tr_limit) fault(10, cpu.tr);
+        *esp = cpu_ld32(cpu.tr_base + 4 + dpl*8); *ss = cpu_ld16(cpu.tr_base + 8 + dpl*8);
+    } else {
+        if((uint32_t)dpl * 4 + 5 > cpu.tr_limit) fault(10, cpu.tr);
+        *esp = cpu_ld16(cpu.tr_base + 2 + dpl*4); *ss = cpu_ld16(cpu.tr_base + 4 + dpl*4);
+    }
+}
+
+/* a push onto a stack that is not SS:ESP yet */
+static void xpush(uint32_t base, int big, uint32_t *sp, int sz, uint32_t v){
+    *sp -= (uint32_t)(sz / 8);
+    if(!big) *sp &= 0xFFFF;
+    if(sz == 32) cpu_st32(base + *sp, v); else cpu_st16(base + *sp, (uint16_t)v);
+}
+static void set_esp(uint32_t sp){ if(STK32) REG32(R_ESP) = sp; else REG16(R_ESP) = (uint16_t)sp; }
+
+/* The flags a POPF or IRET may change: IOPL only at CPL 0, IF only at
+ * CPL <= IOPL; VM never (IRET to V86 mode sets it itself). */
+static void write_flags(uint32_t f, int sz){
+    uint32_t mask = sz == 32 ? 0x57FD5u : 0x7FD5u;
+    if(PE && (cpu.vm || cpu.cpl > 0)) mask &= ~0x3000u;
+    if(PE && !cpu.vm && cpu.cpl > (int)cpu.iopl) mask &= ~0x200u;
+    cpu_setflags((cpu_getflags() & ~mask) | (f & mask));
+}
+
+static void pm_interrupt(int n, int kind, int has_err, uint32_t err){
+    Desc g, d, sd;
+    uint16_t sel, nss = 0;
+    uint32_t off, flags = cpu_getflags(), base, sp;
+    int type, gsz, dpl, big, ext = kind != IK_SOFT, from_vm = (int)cpu.vm;
+    if(kind == IK_SOFT && cpu.vm && cpu.iopl < 3) GP(0);
+    if((uint32_t)n * 8 + 7 > cpu.idt_limit) GP(n*8 + 2 + ext);
+    g.lo = cpu_ld32(cpu.idt_base + (uint32_t)n*8); g.hi = cpu_ld32(cpu.idt_base + (uint32_t)n*8 + 4);
+    type = D_TYPE(g);
+    if(!D_S(g) && type == 5){ pm_unsupported("a task gate in the IDT"); return; }
+    if(D_S(g) || (type & 7) < 6) GP(n*8 + 2 + ext);
+    if(kind == IK_SOFT && D_DPL(g) < cpu.cpl) GP(n*8 + 2);
+    if(!D_P(g)) fault(11, n*8 + 2 + ext);
+    gsz = (type & 8) ? 32 : 16;
+    sel = (uint16_t)(g.lo >> 16);
+    off = (g.lo & 0xFFFF) | (gsz == 32 ? (g.hi & 0xFFFF0000u) : 0);
+    if(!(sel & ~3)) GP(ext);
+    if(!read_desc(sel, &d) || !D_CODE(d) || D_DPL(d) > cpu.cpl) GP((sel & ~3) + ext);
+    if(!D_P(d)) fault(11, (sel & ~3) + ext);
+    dpl = D_CONF(d) ? cpu.cpl : D_DPL(d);
+    if(from_vm && dpl != 0) GP((sel & ~3) + ext);
+    if(dpl < cpu.cpl || from_vm){
+        uint32_t nesp;
+        tss_stack(dpl, &nss, &nesp);
+        check_stack(nss, dpl, &sd, 10);
+        base = D_BASE(sd); big = D_BIG(sd); sp = big ? nesp : nesp & 0xFFFF;
+        if(from_vm){
+            xpush(base, big, &sp, gsz, cpu.sreg[S_GS]); xpush(base, big, &sp, gsz, cpu.sreg[S_FS]);
+            xpush(base, big, &sp, gsz, cpu.sreg[S_DS]); xpush(base, big, &sp, gsz, cpu.sreg[S_ES]);
+        }
+        xpush(base, big, &sp, gsz, cpu.sreg[S_SS]);
+        xpush(base, big, &sp, gsz, REG32(R_ESP));
+    } else {
+        base = cpu.sbase[S_SS]; big = STK32; sp = sp_get();
+    }
+    xpush(base, big, &sp, gsz, flags);
+    xpush(base, big, &sp, gsz, cpu.sreg[S_CS]);
+    xpush(base, big, &sp, gsz, cpu.eip);
+    if(has_err) xpush(base, big, &sp, gsz, err);
+    /* nothing faults from here on */
+    if(nss){
+        seg_from_desc(S_SS, nss, sd);
+        if(from_vm){ set_null(S_GS, 0); set_null(S_FS, 0); set_null(S_DS, 0); set_null(S_ES, 0); }
+    }
+    set_esp(sp);
+    set_accessed(&d);
+    set_cs(sel, d, dpl);
+    cpu.eip = off;
+    cpu.tf = 0; cpu.nt = 0; cpu.rf = 0; cpu.vm = 0;
+    if(!(type & 1)) cpu.iflag = 0;              /* an interrupt gate, not a trap gate */
+    cpu.halted = 0;
+}
+
+/* Deliver the exception fault() jumped out with; a fault while doing so is
+ * a double fault, one while delivering that stops the run. */
+static void deliver_fault(void){
+    volatile int vec = fault_vec, has = fault_has_err, tries = 0;
+    volatile uint32_t err = fault_err;
+    restore_state();
+    trc("[cpu] exception %02Xh error %04X at %04X:%08X\n", vec, (unsigned)err,
+        cpu.sreg[S_CS], (unsigned)cpu.eip);
+    if(setjmp(fault_jb)){
+        restore_state();
+        if(++tries > 1){
+            fault_armed = 0;
+            printf("[cpu] triple fault (exception %02Xh, then %02Xh) at %04X:%08X; stopped\n",
+                   vec, fault_vec, cpu.sreg[S_CS], (unsigned)cpu.eip);
+            cpu.shutdown = 1;
+            return;
+        }
+        vec = 8; has = 1; err = 0;
+    }
+    fault_armed = 1;
+    pm_interrupt(vec, IK_EXC, has, err);
+    fault_armed = 0;
+}
+
 void cpu_interrupt(int n, int soft){
-    uint32_t v = cpu_ld32((uint32_t)n*4);
+    uint32_t v;
+    if(PE){
+        if(fault_armed){ pm_interrupt(n, soft ? IK_SOFT : IK_HW, 0, 0); return; }
+        save_state();
+        if(setjmp(fault_jb)){ deliver_fault(); return; }
+        fault_armed = 1;
+        pm_interrupt(n, soft ? IK_SOFT : IK_HW, 0, 0);
+        fault_armed = 0;
+        return;
+    }
+    v = cpu_ld32(cpu.idt_base + (uint32_t)n*4);
     push16((uint16_t)cpu_getflags());
     push16(cpu.sreg[S_CS]);
     push16((uint16_t)cpu.eip);
@@ -267,7 +559,220 @@ void cpu_interrupt(int n, int soft){
     set_sreg(S_CS, (uint16_t)(v>>16));
     cpu.eip = v & 0xFFFF;
     cpu.halted = 0;
-    (void)soft;
+}
+
+/* a divide error: a fault under PE (EIP at the DIV), as the runner always
+ * had it in real mode (EIP after it) */
+static void div_err(void){ if(PE) fault(0, 0); else cpu_interrupt(0, 0); }
+
+/* INT n, INT 3, INTO */
+static void soft_int(int n){
+    if(PE) pm_interrupt(n, IK_SOFT, 0, 0); else cpu_interrupt(n, 1);
+}
+
+/* the checks of a far JMP or CALL to a code segment (not through a gate) */
+static void check_code_direct(uint16_t sel, Desc d){
+    if(D_CONF(d) ? D_DPL(d) > cpu.cpl : ((sel & 3) > cpu.cpl || D_DPL(d) != cpu.cpl)) GP(sel & ~3);
+    if(!D_P(d)) fault(11, sel & ~3);
+}
+
+/* a call gate's target: its code descriptor, the level it runs at */
+static int gate_target(uint16_t sel, Desc g, Desc *d, uint16_t *tsel){
+    if(D_DPL(g) < cpu.cpl || D_DPL(g) < (sel & 3)) GP(sel & ~3);
+    if(!D_P(g)) fault(11, sel & ~3);
+    *tsel = (uint16_t)(g.lo >> 16);
+    if(!(*tsel & ~3)) GP(0);
+    if(!read_desc(*tsel, d) || !D_CODE(*d) || D_DPL(*d) > cpu.cpl) GP(*tsel & ~3);
+    if(!D_P(*d)) fault(11, *tsel & ~3);
+    return D_CONF(*d) ? cpu.cpl : D_DPL(*d);
+}
+
+static void far_jmp(uint16_t sel, uint32_t off){
+    Desc d, g; uint16_t tsel;
+    if(!PE || cpu.vm){ set_sreg(S_CS, sel); cpu.eip = off & MASK(opsz); return; }
+    if(!(sel & ~3)) GP(0);
+    if(!read_desc(sel, &d)) GP(sel & ~3);
+    if(D_CODE(d)){
+        check_code_direct(sel, d);
+        set_accessed(&d);
+        set_cs(sel, d, cpu.cpl); cpu.eip = off & MASK(opsz);
+        return;
+    }
+    if(D_S(d)) GP(sel & ~3);
+    switch(D_TYPE(d)){
+    case 4: case 12:
+        g = d;
+        if(gate_target(sel, g, &d, &tsel) != cpu.cpl && !D_CONF(d)) GP(tsel & ~3);
+        set_cs(tsel, d, cpu.cpl);
+        cpu.eip = (g.lo & 0xFFFF) | (D_TYPE(g) == 12 ? (g.hi & 0xFFFF0000u) : 0);
+        return;
+    case 1: case 5: case 9: pm_unsupported("a task switch (far JMP)"); return;
+    default: GP(sel & ~3);
+    }
+}
+
+void cpu_far_jump(uint16_t sel, uint32_t off){ opsz = 32; far_jmp(sel, off); }
+
+static void far_call(uint16_t sel, uint32_t off){
+    Desc d, g, sd; uint16_t tsel, nss; uint32_t nesp, base, sp, goff;
+    int dpl, gsz, i, np;
+    if(!PE || cpu.vm){
+        pushv(cpu.sreg[S_CS]); pushv(cpu.eip);
+        set_sreg(S_CS, sel); cpu.eip = off & MASK(opsz); return;
+    }
+    if(!(sel & ~3)) GP(0);
+    if(!read_desc(sel, &d)) GP(sel & ~3);
+    if(D_CODE(d)){
+        check_code_direct(sel, d);
+        base = cpu.sbase[S_SS]; sp = sp_get();
+        xpush(base, STK32, &sp, opsz, cpu.sreg[S_CS]);
+        xpush(base, STK32, &sp, opsz, cpu.eip);
+        set_esp(sp);
+        set_accessed(&d);
+        set_cs(sel, d, cpu.cpl); cpu.eip = off & MASK(opsz);
+        return;
+    }
+    if(D_S(d)) GP(sel & ~3);
+    if(D_TYPE(d) == 1 || D_TYPE(d) == 5 || D_TYPE(d) == 9){ pm_unsupported("a task switch (far CALL)"); return; }
+    if(D_TYPE(d) != 4 && D_TYPE(d) != 12) GP(sel & ~3);
+    g = d;
+    dpl = gate_target(sel, g, &d, &tsel);
+    gsz = D_TYPE(g) == 12 ? 32 : 16;
+    goff = (g.lo & 0xFFFF) | (gsz == 32 ? (g.hi & 0xFFFF0000u) : 0);
+    if(dpl < cpu.cpl){
+        /* to an inner level: its stack from the TSS, the parameters copied */
+        uint32_t osp = sp_get(), obase = cpu.sbase[S_SS];
+        int big;
+        tss_stack(dpl, &nss, &nesp);
+        check_stack(nss, dpl, &sd, 10);
+        base = D_BASE(sd); big = D_BIG(sd); sp = big ? nesp : nesp & 0xFFFF;
+        xpush(base, big, &sp, gsz, cpu.sreg[S_SS]);
+        xpush(base, big, &sp, gsz, REG32(R_ESP));
+        np = (int)(g.hi & 31);
+        for(i = np - 1; i >= 0; i--){
+            uint32_t a = obase + ((osp + (uint32_t)(i * gsz / 8)) & (STK32 ? 0xFFFFFFFFu : 0xFFFFu));
+            xpush(base, big, &sp, gsz, gsz == 32 ? cpu_ld32(a) : cpu_ld16(a));
+        }
+        xpush(base, big, &sp, gsz, cpu.sreg[S_CS]);
+        xpush(base, big, &sp, gsz, cpu.eip);
+        seg_from_desc(S_SS, nss, sd);
+        set_esp(sp);
+    } else {
+        base = cpu.sbase[S_SS]; sp = sp_get();
+        xpush(base, STK32, &sp, gsz, cpu.sreg[S_CS]);
+        xpush(base, STK32, &sp, gsz, cpu.eip);
+        set_esp(sp);
+    }
+    set_cs(tsel, d, dpl);
+    cpu.eip = goff;
+}
+
+/* the checks of the code segment a RETF or IRET goes back to */
+static void check_code_return(uint16_t sel, Desc *d){
+    int rpl = sel & 3;
+    if(!(sel & ~3)) GP(0);
+    if(rpl < cpu.cpl) GP(sel & ~3);
+    if(!read_desc(sel, d) || !D_CODE(*d)) GP(sel & ~3);
+    if(D_CONF(*d) ? D_DPL(*d) > rpl : D_DPL(*d) != rpl) GP(sel & ~3);
+    if(!D_P(*d)) fault(11, sel & ~3);
+}
+
+/* to an outer level: SS:ESP from the stack at sp */
+static void return_outer(uint32_t sp, int w, uint16_t cs, Desc d, uint32_t eip, int rpl){
+    Desc sd;
+    uint32_t base = cpu.sbase[S_SS], m = STK32 ? 0xFFFFFFFFu : 0xFFFFu;
+    uint32_t nesp = w == 4 ? cpu_ld32(base + (sp & m)) : cpu_ld16(base + (sp & m));
+    uint16_t nss = cpu_ld16(base + ((sp + (uint32_t)w) & m));
+    check_stack(nss, rpl, &sd, 13);
+    set_cs(cs, d, rpl);
+    cpu.eip = eip;
+    seg_from_desc(S_SS, nss, sd);
+    set_esp(nesp);
+    null_inner_segs();
+}
+
+static void far_ret(uint32_t n){
+    uint32_t sp, base, m, eip;
+    uint16_t cs;
+    int w = opsz / 8;
+    Desc d;
+    if(!PE || cpu.vm){
+        uint32_t o = popv(); uint16_t s = (uint16_t)popv();
+        cpu.eip = o & MASK(opsz); set_sreg(S_CS, s); sp_add(n); return;
+    }
+    base = cpu.sbase[S_SS]; m = STK32 ? 0xFFFFFFFFu : 0xFFFFu; sp = sp_get();
+    eip = w == 4 ? cpu_ld32(base + sp) : cpu_ld16(base + sp);
+    cs = cpu_ld16(base + ((sp + (uint32_t)w) & m));
+    check_code_return(cs, &d);
+    if((cs & 3) == cpu.cpl){
+        set_cs(cs, d, cpu.cpl); cpu.eip = eip;
+        sp_add((uint32_t)(2 * w) + n);
+        return;
+    }
+    return_outer(sp + (uint32_t)(2 * w) + n, w, cs, d, eip, cs & 3);
+    sp_add(n);
+}
+
+static void iret_(void){
+    uint32_t sp, base, m, eip, fl;
+    uint16_t cs;
+    int w = opsz / 8;
+    Desc d;
+    if(!PE || cpu.vm){
+        if(cpu.vm && cpu.iopl < 3) GP(0);
+        eip = popv(); cs = (uint16_t)popv(); fl = popv();
+        cpu.eip = eip & MASK(opsz); set_sreg(S_CS, cs); write_flags(fl, opsz);
+        return;
+    }
+    if(cpu.nt){ pm_unsupported("a task return (IRET with NT)"); return; }
+    base = cpu.sbase[S_SS]; m = STK32 ? 0xFFFFFFFFu : 0xFFFFu; sp = sp_get();
+#define STK(i) (w == 4 ? cpu_ld32(base + ((sp + (uint32_t)(i)*4) & m)) : cpu_ld16(base + ((sp + (uint32_t)(i)*2) & m)))
+    eip = STK(0); cs = (uint16_t)STK(1); fl = STK(2);
+    if(w == 4 && (fl & 0x20000) && cpu.cpl == 0){
+        /* back to V86 mode: ESP, SS, ES, DS, FS, GS follow */
+        uint32_t nesp = STK(3);
+        uint16_t v[5]; int i;
+        for(i = 0; i < 5; i++) v[i] = (uint16_t)STK(4 + i);
+        cpu_setflags(fl); cpu.vm = 1; cpu.cpl = 3;
+        set_sreg(S_CS, cs); set_sreg(S_SS, v[0]); set_sreg(S_ES, v[1]);
+        set_sreg(S_DS, v[2]); set_sreg(S_FS, v[3]); set_sreg(S_GS, v[4]);
+        REG32(R_ESP) = nesp;
+        cpu.eip = eip & 0xFFFF;
+        return;
+    }
+    check_code_return(cs, &d);
+    if((cs & 3) == cpu.cpl){
+        set_cs(cs, d, cpu.cpl); cpu.eip = eip & MASK(opsz);
+        sp_add((uint32_t)(3 * w));
+        write_flags(fl, opsz);
+        return;
+    }
+    {   /* the flags as the old level may write them */
+        int old = cpu.cpl;
+        return_outer(sp + (uint32_t)(3 * w), w, cs, d, eip & MASK(opsz), cs & 3);
+        cpu.cpl = old; write_flags(fl, opsz); cpu.cpl = cs & 3;
+    }
+#undef STK
+}
+
+/* IN, OUT, INS, OUTS: the I/O permission bitmap when CPL > IOPL or in V86 mode */
+static void io_check(uint16_t port, int bytes){
+    uint32_t off, bits;
+    if(!PE || (!cpu.vm && cpu.cpl <= (int)cpu.iopl)) return;
+    if(!(cpu.tr_type & 8) || cpu.tr_limit < 0x67) GP(0);
+    off = cpu_ld16(cpu.tr_base + 0x66) + (uint32_t)(port >> 3);
+    if(off + 1 > cpu.tr_limit) GP(0);
+    bits = (uint32_t)cpu_ld16(cpu.tr_base + off) >> (port & 7);
+    if(bits & ((1u << bytes) - 1)) GP(0);
+}
+
+/* CLI, STI (and PUSHF, POPF, INT, IRET in V86 mode): IOPL-sensitive */
+static void iopl_check(void){
+    if(PE && (cpu.vm ? cpu.iopl < 3 : cpu.cpl > (int)cpu.iopl)) GP(0);
+}
+/* LGDT, MOV CRn, HLT, ...: CPL 0 only */
+static void cpl0_check(void){
+    if(PE && (cpu.vm || cpu.cpl)) GP(0);
 }
 
 /* ------------------------------------------------------------- string    */
@@ -404,38 +909,158 @@ static void strop(int op, int sz){
 void (*cb_table[256])(void);
 void cpu_no_iret(void){ no_iret = 1; }
 
+/* 0F FF id: a BIOS or DOS service in C, run from its stub in real or V86
+ * mode; it returns through the IRET frame unless it says otherwise.  One
+ * (INT 15h AH=89h) enters protected mode, so a fault is armed around it. */
+static void run_callback(uint8_t id){
+    int armed = fault_armed;
+    no_iret = 0;
+    if(!armed){
+        save_state();
+        if(setjmp(fault_jb)){ deliver_fault(); return; }
+        fault_armed = 1;
+    }
+    if(cb_table[id]) cb_table[id]();
+    if(!no_iret){ uint16_t ip=pop16(), c=pop16(), f=pop16();
+                  cpu.eip=ip; set_sreg(S_CS,c); write_flags(f, 16); }
+    fault_armed = armed;
+}
+
+/* LDS, LES, LSS, LFS, LGS: the offset (16 or 32 bits), then the selector */
+static void load_far(int s){
+    uint32_t o;
+    if(ea_isreg){ cpu_undef("LDS/LES with a register"); return; }
+    o = opsz == 32 ? cpu_ld32(ea) : cpu_ld16(ea);
+    set_sreg(s, cpu_ld16(ea + (uint32_t)opsz/8));
+    if(s == S_SS) cpu.inhibit = 1;
+    wrG(opsz, o);
+}
+
+/* 0F 00: SLDT, STR, LLDT, LTR, VERR, VERW (protected mode only) */
+static void group6(void){
+    Desc d; uint16_t sel;
+    modrm();
+    if(!PE || cpu.vm){ cpu_undef("0F 00 outside protected mode"); return; }
+    switch(reg_){
+    case 0: wrE(ea_isreg ? opsz : 16, cpu.ldtr); break;
+    case 1: wrE(ea_isreg ? opsz : 16, cpu.tr); break;
+    case 2: cpl0_check(); sel = (uint16_t)rdE(16);
+        if(!(sel & ~3)){ cpu.ldtr = 0; cpu.ldt_base = 0; cpu.ldt_limit = 0; break; }
+        if((sel & 4) || !read_desc(sel, &d) || D_S(d) || D_TYPE(d) != 2) GP(sel & ~3);
+        if(!D_P(d)) fault(11, sel & ~3);
+        cpu.ldtr = sel; cpu.ldt_base = D_BASE(d); cpu.ldt_limit = d_limit(d);
+        break;
+    case 3: cpl0_check(); sel = (uint16_t)rdE(16);
+        if(!(sel & ~3)) GP(0);
+        if((sel & 4) || !read_desc(sel, &d) || D_S(d) || (D_TYPE(d) != 1 && D_TYPE(d) != 9)) GP(sel & ~3);
+        if(!D_P(d)) fault(11, sel & ~3);
+        d.hi |= 0x200; cpu_st32(desc_addr + 4, d.hi);            /* busy */
+        cpu.tr = sel; cpu.tr_base = D_BASE(d); cpu.tr_limit = d_limit(d); cpu.tr_type = D_TYPE(d);
+        break;
+    case 4: case 5: {
+        int ok;
+        sel = (uint16_t)rdE(16);
+        ok = (sel & ~3) && read_desc(sel, &d) && D_S(d);
+        if(ok && !D_CONF(d) && (D_DPL(d) < cpu.cpl || D_DPL(d) < (sel & 3))) ok = 0;
+        if(ok) ok = reg_ == 4 ? (!D_CODE(d) || (D_TYPE(d) & 2)) : D_WDATA(d);
+        cpu.zf = (uint32_t)ok; break; }
+    default: cpu_undef("0F 00 /6, /7"); break;
+    }
+}
+
+/* 0F 01: SGDT, SIDT, LGDT, LIDT, SMSW, LMSW, INVLPG */
+static void group7(void){
+    uint32_t base;
+    modrm();
+    switch(reg_){
+    case 0: case 1:
+        cpu_st16(ea, (uint16_t)(reg_ ? cpu.idt_limit : cpu.gdt_limit));
+        base = reg_ ? cpu.idt_base : cpu.gdt_base;
+        cpu_st32(ea + 2, opsz == 32 ? base : (base & 0xFFFFFF) | 0xFF000000u);  /* the 386 stores FFh */
+        break;
+    case 2: case 3:
+        cpl0_check();
+        base = cpu_ld32(ea + 2);
+        if(opsz == 16) base &= 0xFFFFFF;
+        if(reg_ == 2){ cpu.gdt_limit = cpu_ld16(ea); cpu.gdt_base = base; }
+        else         { cpu.idt_limit = cpu_ld16(ea); cpu.idt_base = base; }
+        break;
+    case 4: wrE(ea_isreg ? opsz : 16, cpu.cr0); break;
+    case 6: cpl0_check();              /* sets PE, never clears it */
+        cpu.cr0 = (cpu.cr0 & ~0xEu) | (cpu.cr0 & 1) | (rdE(16) & 0xF); break;
+    case 7: cpl0_check(); break;
+    default: cpu_undef("0F 01 /5"); break;
+    }
+}
+
+/* 0F 02 LAR, 0F 03 LSL */
+static void lar_lsl(int lsl){
+    Desc d; uint16_t sel; int ok;
+    modrm();
+    if(!PE || cpu.vm){ cpu_undef("LAR/LSL outside protected mode"); return; }
+    sel = (uint16_t)rdE(16);
+    ok = (sel & ~3) && read_desc(sel, &d);
+    if(ok && !D_S(d)){                   /* the system types each may read */
+        int t = D_TYPE(d);
+        ok = t == 1 || t == 2 || t == 3 || t == 9 || t == 11 ||
+             (!lsl && (t == 4 || t == 5 || t == 12));
+    }
+    if(ok && !D_CONF(d) && (D_DPL(d) < cpu.cpl || D_DPL(d) < (sel & 3))) ok = 0;
+    cpu.zf = (uint32_t)ok;
+    if(ok) wrG(opsz, lsl ? d_limit(d) : (d.hi & (opsz == 32 ? 0x00FFFF00u : 0xFF00u)));
+}
+
+static void mov_cr(int to_cr){
+    modrm();
+    cpl0_check();
+    if(!to_cr){
+        REG32(rm_) = reg_ == 0 ? cpu.cr0 : reg_ == 2 ? cpu.cr2 : reg_ == 3 ? cpu.cr3 : 0;
+        return;
+    }
+    switch(reg_){
+    case 0: {
+        uint32_t v = REG32(rm_) | 0x10;             /* ET stays set on a 387-less 386 too */
+        if(v & 0x80000000u){ pm_unsupported("paging (CR0.PG)"); return; }
+        if(!(v & 1) && PE) cpu.cpl = 0;
+        cpu.cr0 = v;
+        break; }
+    case 2: cpu.cr2 = REG32(rm_); break;
+    case 3: cpu.cr3 = REG32(rm_); break;
+    default: cpu_undef("MOV CR4 or higher"); break;
+    }
+}
+
 static void op0f(void){
     uint8_t op = fetch8();
     uint32_t a,b,r; int sz = opsz;
     switch(op){
-    case 0x00: modrm(); break;
-    case 0x01:
-        modrm();
-        if(reg_==4) wrE(16, 0x0010);
-        break;
-    case 0x06: break;
-    case 0x09: break;
-    case 0x20: modrm(); REG32(rm_) = 0x00000010; break;
-    case 0x22: modrm(); break;
-    case 0x23: modrm(); break;
-    case 0x21: modrm(); REG32(rm_) = 0; break;
+    case 0x00: group6(); break;
+    case 0x01: group7(); break;
+    case 0x02: lar_lsl(0); break;
+    case 0x03: lar_lsl(1); break;
+    case 0x06: cpl0_check(); cpu.cr0 &= ~8u; break;          /* CLTS */
+    case 0x08: case 0x09: cpl0_check(); break;               /* INVD, WBINVD */
+    case 0x20: mov_cr(0); break;
+    case 0x22: mov_cr(1); break;
+    case 0x21: modrm(); cpl0_check(); REG32(rm_) = 0; break;  /* debug registers: none */
+    case 0x23: modrm(); cpl0_check(); break;
     case 0x31: REG32(R_EAX)=(uint32_t)cpu.cycles; REG32(R_EDX)=(uint32_t)(cpu.cycles>>32); break;
     case 0xA2: REG32(R_EAX)=0; REG32(R_EBX)=0; REG32(R_ECX)=0; REG32(R_EDX)=0; break;
     case 0x80: case 0x81: case 0x82: case 0x83: case 0x84: case 0x85: case 0x86: case 0x87:
     case 0x88: case 0x89: case 0x8A: case 0x8B: case 0x8C: case 0x8D: case 0x8E: case 0x8F: {
         int32_t d = opsz==32 ? (int32_t)fetch32() : (int32_t)(int16_t)fetch16();
-        if(cond(op&15)) cpu.eip = (cpu.eip + d) & 0xFFFF;
+        if(cond(op&15)) cpu.eip = (cpu.eip + (uint32_t)d) & MASK(opsz);
         break; }
     case 0x90: case 0x91: case 0x92: case 0x93: case 0x94: case 0x95: case 0x96: case 0x97:
     case 0x98: case 0x99: case 0x9A: case 0x9B: case 0x9C: case 0x9D: case 0x9E: case 0x9F:
         modrm(); wrE(8, cond(op&15) ? 1 : 0); break;
     case 0xA0: pushv(cpu.sreg[S_FS]); break;
-    case 0xA1: set_sreg(S_FS, (uint16_t)popv()); break;
+    case 0xA1: { uint16_t v = (uint16_t)cpu_ld16(cpu.sbase[S_SS] + sp_get()); set_sreg(S_FS, v); sp_add((uint32_t)opsz/8); break; }
     case 0xA8: pushv(cpu.sreg[S_GS]); break;
-    case 0xA9: set_sreg(S_GS, (uint16_t)popv()); break;
-    case 0xB2: modrm(); { uint32_t o=cpu_ld16(ea); uint16_t s=cpu_ld16(ea+2); wrG(opsz,o); set_sreg(S_SS,s); } break;
-    case 0xB4: modrm(); { uint32_t o=cpu_ld16(ea); uint16_t s=cpu_ld16(ea+2); wrG(opsz,o); set_sreg(S_FS,s); } break;
-    case 0xB5: modrm(); { uint32_t o=cpu_ld16(ea); uint16_t s=cpu_ld16(ea+2); wrG(opsz,o); set_sreg(S_GS,s); } break;
+    case 0xA9: { uint16_t v = (uint16_t)cpu_ld16(cpu.sbase[S_SS] + sp_get()); set_sreg(S_GS, v); sp_add((uint32_t)opsz/8); break; }
+    case 0xB2: modrm(); load_far(S_SS); break;
+    case 0xB4: modrm(); load_far(S_FS); break;
+    case 0xB5: modrm(); load_far(S_GS); break;
     case 0xB6: modrm(); wrG(sz, (uint8_t)rdE(8)); break;
     case 0xB7: modrm(); wrG(sz, (uint16_t)rdE(16)); break;
     case 0xBE: modrm(); wrG(sz, (uint32_t)(int32_t)(int8_t)rdE(8)); break;
@@ -476,13 +1101,7 @@ static void op0f(void){
     case 0xC8: case 0xC9: case 0xCA: case 0xCB: case 0xCC: case 0xCD: case 0xCE: case 0xCF: {
         int i = op&7; uint32_t v = REG32(i);
         REG32(i) = (v>>24)|((v>>8)&0xFF00)|((v<<8)&0xFF0000)|(v<<24); break; }
-    case 0xFF: {
-        uint8_t id = fetch8();
-        no_iret = 0;
-        if(cb_table[id]) cb_table[id]();
-        if(!no_iret){ uint16_t ip=pop16(), c=pop16(), f=pop16();
-                      cpu.eip=ip; set_sreg(S_CS,c); cpu_setflags(f); }
-        break; }
+    case 0xFF: run_callback(fetch8()); break;
     default: {
         char w[32];
         snprintf(w, sizeof(w), "unhandled 0F %02X", op);
@@ -590,7 +1209,7 @@ static void prof_sample(void){
     uint32_t key = ((uint32_t)cpu.sreg[S_CS] << 16) | (cpu.eip & 0xFFFF);
     unsigned h = (unsigned)((key * 2654435761u) >> 21) & (PROF_N - 1);
     unsigned i;
-    uint32_t lin = (((key >> 16) << 4) + (key & 0xFFFF)) >> PROF_RGN_SHIFT;
+    uint32_t lin = (cs_base + cpu.eip) >> PROF_RGN_SHIFT;
     prof_total++;
     if(lin < PROF_RGN_N) prof_region[lin]++;
     for(i = 0; i < 64; i++){
@@ -681,6 +1300,16 @@ uint32_t xtrace_lo = 0, xtrace_hi = 0xFFFFFFFFu;
 uint64_t xtrace_left = 0;
 
 static void xtrace_line(uint32_t lin){
+    if(PE){
+        fprintf(xtrace_fp, "%llu %04X:%08X EAX=%08X EBX=%08X ECX=%08X EDX=%08X ESI=%08X EDI=%08X EBP=%08X ESP=%08X DS=%04X ES=%04X FS=%04X GS=%04X SS=%04X F=%08X CPL=%d\n",
+                (unsigned long long)cpu.cycles, cpu.sreg[S_CS], (unsigned)cpu.eip,
+                REG32(R_EAX), REG32(R_EBX), REG32(R_ECX), REG32(R_EDX),
+                REG32(R_ESI), REG32(R_EDI), REG32(R_EBP), REG32(R_ESP),
+                cpu.sreg[S_DS], cpu.sreg[S_ES], cpu.sreg[S_FS], cpu.sreg[S_GS], cpu.sreg[S_SS],
+                (unsigned)cpu_getflags(), cpu.cpl);
+        if(--xtrace_left == 0) xtrace_fp = NULL;
+        return;
+    }
     fprintf(xtrace_fp, "%llu %04X:%04X AX=%04X BX=%04X CX=%04X DX=%04X SI=%04X DI=%04X BP=%04X SP=%04X DS=%04X ES=%04X SS=%04X F=%04X\n",
             (unsigned long long)cpu.cycles, cpu.sreg[S_CS], (unsigned)cpu.eip,
             REG16(R_EAX), REG16(R_EBX), REG16(R_ECX), REG16(R_EDX),
@@ -693,12 +1322,12 @@ static void xtrace_line(uint32_t lin){
 
 int int_watch = -1;                     /* -intwatch NN : log INT NN calls */
 
-void cpu_step(void){
+static void step(void){
     uint8_t op;
     uint32_t a,b,r;
     int sz;
-    opsz = 16; adsz = 16; segovr = -1; rep = 0;
-    cs_base = cpu.sbase[S_CS];
+    opsz = adsz = def32 ? 32 : 16; segovr = -1; rep = 0;
+    cpu.inhibit = 0;
     if(brk_n){
         uint32_t la = cs_base + cpu.eip;
         int i;
@@ -726,8 +1355,8 @@ again:
     case 0x3E: segovr=S_DS; goto again;
     case 0x64: segovr=S_FS; goto again;
     case 0x65: segovr=S_GS; goto again;
-    case 0x66: opsz = (opsz==16)?32:16; goto again;
-    case 0x67: adsz = (adsz==16)?32:16; goto again;
+    case 0x66: opsz = def32 ? 16 : 32; goto again;
+    case 0x67: adsz = def32 ? 16 : 32; goto again;
     case 0xF0: goto again;
     case 0xF2: rep=1; goto again;
     case 0xF3: rep=2; goto again;
@@ -748,12 +1377,13 @@ again:
         if((op>>3)!=7){ if(sz==32) REG32(0)=r; else REG16(0)=(uint16_t)r; } break;
 
     case 0x06: pushv(cpu.sreg[S_ES]); break;
-    case 0x07: set_sreg(S_ES, (uint16_t)popv()); break;
+    case 0x07: { uint16_t v = (uint16_t)cpu_ld16(cpu.sbase[S_SS] + sp_get()); set_sreg(S_ES, v); sp_add((uint32_t)opsz/8); break; }
     case 0x0E: pushv(cpu.sreg[S_CS]); break;
     case 0x16: pushv(cpu.sreg[S_SS]); break;
-    case 0x17: set_sreg(S_SS, (uint16_t)popv()); break;
+    case 0x17: { uint16_t v = (uint16_t)cpu_ld16(cpu.sbase[S_SS] + sp_get());
+        set_sreg(S_SS, v); sp_add((uint32_t)opsz/8); cpu.inhibit = 1; break; }
     case 0x1E: pushv(cpu.sreg[S_DS]); break;
-    case 0x1F: set_sreg(S_DS, (uint16_t)popv()); break;
+    case 0x1F: { uint16_t v = (uint16_t)cpu_ld16(cpu.sbase[S_SS] + sp_get()); set_sreg(S_DS, v); sp_add((uint32_t)opsz/8); break; }
 
     case 0x0F: op0f(); break;
 
@@ -793,7 +1423,11 @@ again:
         else { for(i=7;i>=0;i--){ uint16_t v=pop16(); if(i!=4) REG16(i)=v; } }
         break; }
     case 0x62: modrm(); break;
-    case 0x63: modrm(); break;
+    case 0x63: modrm();                                 /* ARPL */
+        if(!PE || cpu.vm){ cpu_undef("ARPL outside protected mode"); break; }
+        a = rdE(16); b = rdG(16);
+        if((a & 3) < (b & 3)){ wrE(16, (a & ~3u) | (b & 3)); cpu.zf = 1; } else cpu.zf = 0;
+        break;
     case 0x68: pushv(opsz==32?fetch32():fetch16()); break;
     case 0x6A: pushv((uint32_t)(int32_t)(int8_t)fetch8()); break;
     case 0x69: modrm(); sz=opsz; a=rdE(sz); b=(sz==32)?fetch32():fetch16();
@@ -804,15 +1438,15 @@ again:
         if(sz==16){ int32_t p=(int32_t)(int16_t)a*(int16_t)b; wrG(16,(uint16_t)p); cpu.cf=cpu.of=((int32_t)(int16_t)p!=p); }
         else { int64_t p=(int64_t)(int32_t)a*(int32_t)b; wrG(32,(uint32_t)p); cpu.cf=cpu.of=((int64_t)(int32_t)p!=p); }
         break;
-    case 0x6C: strop(5,8); break;
-    case 0x6D: strop(5,opsz); break;
-    case 0x6E: strop(6,8); break;
-    case 0x6F: strop(6,opsz); break;
+    case 0x6C: io_check(REG16(R_EDX), 1); strop(5,8); break;
+    case 0x6D: io_check(REG16(R_EDX), opsz/8); strop(5,opsz); break;
+    case 0x6E: io_check(REG16(R_EDX), 1); strop(6,8); break;
+    case 0x6F: io_check(REG16(R_EDX), opsz/8); strop(6,opsz); break;
 
     case 0x70: case 0x71: case 0x72: case 0x73: case 0x74: case 0x75: case 0x76: case 0x77:
     case 0x78: case 0x79: case 0x7A: case 0x7B: case 0x7C: case 0x7D: case 0x7E: case 0x7F: {
         int8_t d = (int8_t)fetch8();
-        if(cond(op&15)) cpu.eip = (cpu.eip + d) & 0xFFFF;
+        if(cond(op&15)) cpu.eip = (cpu.eip + (uint32_t)(int32_t)d) & MASK(opsz);
         break; }
 
     case 0x80: case 0x82: modrm(); a=rdE(8); b=fetch8(); r=alu(reg_,a,b,8); if(reg_!=7) wrE(8,r); break;
@@ -829,7 +1463,11 @@ again:
     case 0x8B: modrm(); sz=opsz; wrG(sz, rdE(sz)); break;
     case 0x8C: modrm(); if(ea_isreg) REG16(rm_)=cpu.sreg[reg_&7]; else cpu_st16(ea, cpu.sreg[reg_&7]); break;
     case 0x8D: modrm(); wrG(opsz, ea_off); break;
-    case 0x8E: modrm(); set_sreg(reg_&7, (uint16_t)rdE(16)); break;
+    case 0x8E: modrm();
+        if(reg_ == S_CS || reg_ > S_GS){ cpu_undef("MOV to CS"); break; }
+        set_sreg(reg_, (uint16_t)rdE(16));
+        if(reg_ == S_SS) cpu.inhibit = 1;
+        break;
     case 0x8F: modrm(); { uint32_t v = popv(); wrE(opsz, v); } break;
 
     case 0x90: break;
@@ -839,10 +1477,10 @@ again:
     case 0x98: if(opsz==32) REG32(0)=(uint32_t)(int32_t)(int16_t)REG16(0); else REG16(0)=(uint16_t)(int16_t)(int8_t)REG8(0); break;
     case 0x99: if(opsz==32) REG32(R_EDX)=((int32_t)REG32(0)<0)?0xFFFFFFFFu:0; else REG16(R_EDX)=((int16_t)REG16(0)<0)?0xFFFF:0; break;
     case 0x9A: { uint32_t noff = (opsz==32)?fetch32():fetch16(); uint16_t nseg=fetch16();
-        pushv(cpu.sreg[S_CS]); pushv(cpu.eip); set_sreg(S_CS,nseg); cpu.eip=noff&0xFFFF; break; }
+        far_call(nseg, noff); break; }
     case 0x9B: break;
-    case 0x9C: pushv(cpu_getflags()); break;
-    case 0x9D: cpu_setflags(popv()); break;
+    case 0x9C: if(cpu.vm) iopl_check(); pushv(cpu_getflags() & ~0x30000u); break;
+    case 0x9D: if(cpu.vm) iopl_check(); write_flags(popv(), opsz); break;
     case 0x9E: cpu_setflags((cpu_getflags()&0xFFFFFF00u)|REG8(4)); break;
     case 0x9F: REG8(4) = (uint8_t)((cpu_getflags()&0xD5)|2); break;
 
@@ -872,32 +1510,38 @@ again:
 
     case 0xC0: modrm(); { int c=fetch8(); wrE(8, do_shift(reg_, rdE(8), c, 8)); } break;
     case 0xC1: modrm(); sz=opsz; { int c=fetch8(); wrE(sz, do_shift(reg_, rdE(sz), c, sz)); } break;
-    case 0xC2: { uint16_t n=fetch16(); cpu.eip = popv() & 0xFFFF; REG16(R_ESP)+=n; break; }
-    case 0xC3: cpu.eip = popv() & 0xFFFF; break;
-    case 0xC4: modrm(); { uint32_t v=cpu_ld16(ea); uint16_t s=cpu_ld16(ea+2); wrG(opsz,v); set_sreg(S_ES,s); } break;
-    case 0xC5: modrm(); { uint32_t v=cpu_ld16(ea); uint16_t s=cpu_ld16(ea+2); wrG(opsz,v); set_sreg(S_DS,s); } break;
+    case 0xC2: { uint16_t n=fetch16(); cpu.eip = popv() & MASK(opsz); sp_add(n); break; }
+    case 0xC3: cpu.eip = popv() & MASK(opsz); break;
+    case 0xC4: modrm(); load_far(S_ES); break;
+    case 0xC5: modrm(); load_far(S_DS); break;
     case 0xC6: modrm(); { uint8_t v=fetch8(); wrE(8,v); } break;
     case 0xC7: modrm(); sz=opsz; { uint32_t v=(sz==32)?fetch32():fetch16(); wrE(sz,v); } break;
-    case 0xC8: { uint16_t nb=fetch16(); uint8_t lvl=fetch8(); uint16_t fp; int i;
-        push16(REG16(R_EBP)); fp=REG16(R_ESP);
-        for(i=1;i<lvl;i++){ REG16(R_EBP)-=2; push16(cpu_ld16(cpu.sbase[S_SS]+REG16(R_EBP))); }
-        if(lvl>0) push16(fp);
-        REG16(R_EBP)=fp; REG16(R_ESP)-=nb; break; }
-    case 0xC9: REG16(R_ESP)=REG16(R_EBP); REG16(R_EBP)=pop16(); break;
-    case 0xCA: { uint16_t n=fetch16(); uint32_t o=popv(); uint16_t s=(uint16_t)popv();
-        cpu.eip=o&0xFFFF; set_sreg(S_CS,s); REG16(R_ESP)+=n; break; }
-    case 0xCB: { uint32_t o=popv(); uint16_t s=(uint16_t)popv(); cpu.eip=o&0xFFFF; set_sreg(S_CS,s); break; }
-    case 0xCC: cpu_interrupt(3,1); break;
+    case 0xC8: { uint16_t nb=fetch16(); uint8_t lvl=(uint8_t)(fetch8() & 31); uint32_t fp; int i;
+        /* the frame pointer is EBP in a 32-bit stack, BP otherwise */
+        pushv(REG32(R_EBP)); fp=sp_get();
+        for(i=1;i<lvl;i++){
+            uint32_t bp;
+            if(STK32) bp = REG32(R_EBP) -= (uint32_t)opsz/8;
+            else bp = REG16(R_EBP) = (uint16_t)(REG16(R_EBP) - opsz/8);
+            pushv(opsz==32 ? cpu_ld32(cpu.sbase[S_SS]+bp) : cpu_ld16(cpu.sbase[S_SS]+bp));
+        }
+        if(lvl>0) pushv(fp);
+        if(opsz==32) REG32(R_EBP)=fp; else REG16(R_EBP)=(uint16_t)fp;
+        sp_add((uint32_t)-(int32_t)nb); break; }
+    case 0xC9: set_esp(STK32 ? REG32(R_EBP) : REG16(R_EBP));
+        if(opsz==32) REG32(R_EBP)=pop32(); else REG16(R_EBP)=pop16(); break;
+    case 0xCA: { uint16_t n=fetch16(); far_ret(n); break; }
+    case 0xCB: far_ret(0); break;
+    case 0xCC: soft_int(3); break;
     case 0xCD: { uint8_t n=fetch8();
         if(int_watch >= 0 && n == int_watch)
             printf("[int%02X] AX=%04X BX=%04X CX=%04X DX=%04X DS=%04X ES=%04X from %04X:%04X\n",
                    n, REG16(R_EAX), REG16(R_EBX), REG16(R_ECX), REG16(R_EDX),
                    cpu.sreg[S_DS], cpu.sreg[S_ES],
                    cpu.sreg[S_CS], (unsigned)(cpu.eip-2));
-        cpu_interrupt(n,1); break; }
-    case 0xCE: if(cpu.of) cpu_interrupt(4,1); break;
-    case 0xCF: { uint16_t ip=pop16(), s=pop16(), f=pop16();
-        cpu.eip=ip; set_sreg(S_CS,s); cpu_setflags(f); break; }
+        soft_int(n); break; }
+    case 0xCE: if(cpu.of) soft_int(4); break;
+    case 0xCF: iret_(); break;
 
     case 0xD0: modrm(); wrE(8, do_shift(reg_, rdE(8), 1, 8)); break;
     case 0xD1: modrm(); sz=opsz; wrE(sz, do_shift(reg_, rdE(sz), 1, sz)); break;
@@ -908,7 +1552,7 @@ again:
     case 0xD5: { uint8_t base=fetch8(); REG8(0)=(uint8_t)(REG8(0)+REG8(4)*base); REG8(4)=0;
         cpu.zf=REG8(0)==0; cpu.sf=REG8(0)>>7; cpu.pf=ptab[REG8(0)]; break; }
     case 0xD6: REG8(0) = cpu.cf ? 0xFF : 0x00; break;
-    case 0xD7: REG8(0) = cpu_ld8(sb(S_DS) + ((REG16(R_EBX)+REG8(0))&0xFFFF)); break;
+    case 0xD7: REG8(0) = cpu_ld8(sb(S_DS) + (adsz==32 ? REG32(R_EBX)+REG8(0) : ((REG16(R_EBX)+REG8(0))&0xFFFF))); break;
     case 0xD8: case 0xD9: case 0xDA: case 0xDB: case 0xDC: case 0xDD: case 0xDE: case 0xDF:
         modrm();
         { char w[32];
@@ -921,26 +1565,26 @@ again:
         take = c!=0;
         if(op==0xE0) take = take && !cpu.zf;
         if(op==0xE1) take = take && cpu.zf;
-        if(take) cpu.eip=(cpu.eip+d)&0xFFFF; break; }
+        if(take) cpu.eip=(cpu.eip+(uint32_t)(int32_t)d)&MASK(opsz); break; }
     case 0xE3: { int8_t d=(int8_t)fetch8(); uint32_t c = adsz==32?REG32(R_ECX):REG16(R_ECX);
-        if(!c) cpu.eip=(cpu.eip+d)&0xFFFF; break; }
-    case 0xE4: { uint8_t p=fetch8(); REG8(0)=io_r8(p); break; }
-    case 0xE5: { uint8_t p=fetch8(); REG16(0)=io_r16(p); break; }
-    case 0xE6: { uint8_t p=fetch8(); io_w8(p, REG8(0)); break; }
-    case 0xE7: { uint8_t p=fetch8(); io_w16(p, REG16(0)); break; }
+        if(!c) cpu.eip=(cpu.eip+(uint32_t)(int32_t)d)&MASK(opsz); break; }
+    case 0xE4: { uint8_t p=fetch8(); io_check(p, 1); REG8(0)=io_r8(p); break; }
+    case 0xE5: { uint8_t p=fetch8(); io_check(p, 2); REG16(0)=io_r16(p); break; }
+    case 0xE6: { uint8_t p=fetch8(); io_check(p, 1); io_w8(p, REG8(0)); break; }
+    case 0xE7: { uint8_t p=fetch8(); io_check(p, 2); io_w16(p, REG16(0)); break; }
     case 0xE8: { int32_t d = (opsz==32)?(int32_t)fetch32():(int32_t)(int16_t)fetch16();
-        pushv(cpu.eip); cpu.eip=(cpu.eip+d)&0xFFFF; break; }
+        pushv(cpu.eip); cpu.eip=(cpu.eip+(uint32_t)d)&MASK(opsz); break; }
     case 0xE9: { int32_t d = (opsz==32)?(int32_t)fetch32():(int32_t)(int16_t)fetch16();
-        cpu.eip=(cpu.eip+d)&0xFFFF; break; }
+        cpu.eip=(cpu.eip+(uint32_t)d)&MASK(opsz); break; }
     case 0xEA: { uint32_t o=(opsz==32)?fetch32():fetch16(); uint16_t s=fetch16();
-        set_sreg(S_CS,s); cpu.eip=o&0xFFFF; break; }
-    case 0xEB: { int8_t d=(int8_t)fetch8(); cpu.eip=(cpu.eip+d)&0xFFFF; break; }
-    case 0xEC: REG8(0)=io_r8(REG16(R_EDX)); break;
-    case 0xED: REG16(0)=io_r16(REG16(R_EDX)); break;
-    case 0xEE: io_w8(REG16(R_EDX), REG8(0)); break;
-    case 0xEF: io_w16(REG16(R_EDX), REG16(0)); break;
+        far_jmp(s, o); break; }
+    case 0xEB: { int8_t d=(int8_t)fetch8(); cpu.eip=(cpu.eip+(uint32_t)(int32_t)d)&MASK(opsz); break; }
+    case 0xEC: io_check(REG16(R_EDX), 1); REG8(0)=io_r8(REG16(R_EDX)); break;
+    case 0xED: io_check(REG16(R_EDX), 2); REG16(0)=io_r16(REG16(R_EDX)); break;
+    case 0xEE: io_check(REG16(R_EDX), 1); io_w8(REG16(R_EDX), REG8(0)); break;
+    case 0xEF: io_check(REG16(R_EDX), 2); io_w16(REG16(R_EDX), REG16(0)); break;
 
-    case 0xF4: cpu.halted = 1; break;
+    case 0xF4: cpl0_check(); cpu.halted = 1; break;
     case 0xF5: cpu.cf = !cpu.cf; break;
     case 0xF6: modrm(); a=rdE(8);
         switch(reg_){
@@ -951,11 +1595,11 @@ again:
                   cpu.cf=cpu.of=((p>>8)!=0); cpu.zf=(p&0xFF)==0; cpu.sf=(p>>7)&1; cpu.pf=ptab[p&0xFF]; break; }
         case 5: { int16_t p=(int16_t)((int16_t)(int8_t)REG8(0)*(int8_t)a); REG16(0)=(uint16_t)p;
                   cpu.cf=cpu.of=((int16_t)(int8_t)p != p); break; }
-        case 6: { uint16_t n; if(!a){ cpu_interrupt(0,0); break; } n=REG16(0);
-                  if(n/a > 0xFF){ cpu_interrupt(0,0); break; } REG8(0)=(uint8_t)(n/a); REG8(4)=(uint8_t)(n%a); break; }
-        case 7: { int16_t n; int8_t d; int32_t q; if(!a){ cpu_interrupt(0,0); break; }
+        case 6: { uint16_t n; if(!a){ div_err(); break; } n=REG16(0);
+                  if(n/a > 0xFF){ div_err(); break; } REG8(0)=(uint8_t)(n/a); REG8(4)=(uint8_t)(n%a); break; }
+        case 7: { int16_t n; int8_t d; int32_t q; if(!a){ div_err(); break; }
                   n=(int16_t)REG16(0); d=(int8_t)a; q=n/d;
-                  if(q>127||q<-128){ cpu_interrupt(0,0); break; }
+                  if(q>127||q<-128){ div_err(); break; }
                   REG8(0)=(uint8_t)q; REG8(4)=(uint8_t)(n%d); break; }
         } break;
     case 0xF7: modrm(); sz=opsz; a=rdE(sz);
@@ -971,21 +1615,21 @@ again:
                             cpu.cf=cpu.of=((int32_t)(int16_t)p != p); }
                 else { int64_t p=(int64_t)(int32_t)REG32(0)*(int32_t)a; REG32(0)=(uint32_t)p; REG32(R_EDX)=(uint32_t)(p>>32);
                        cpu.cf=cpu.of=((int64_t)(int32_t)p != p); } break;
-        case 6: if(sz==16){ uint32_t n; if(!a){cpu_interrupt(0,0);break;} n=((uint32_t)REG16(R_EDX)<<16)|REG16(0);
-                            if(n/a > 0xFFFF){ cpu_interrupt(0,0); break; } REG16(0)=(uint16_t)(n/a); REG16(R_EDX)=(uint16_t)(n%a); }
-                else { uint64_t n; if(!a){cpu_interrupt(0,0);break;} n=((uint64_t)REG32(R_EDX)<<32)|REG32(0);
-                       if(n/a > 0xFFFFFFFFull){ cpu_interrupt(0,0); break; } REG32(0)=(uint32_t)(n/a); REG32(R_EDX)=(uint32_t)(n%a); } break;
-        case 7: if(sz==16){ int32_t n,q; if(!a){cpu_interrupt(0,0);break;} n=(int32_t)(((uint32_t)REG16(R_EDX)<<16)|REG16(0));
-                            q=n/(int16_t)a; if(q>32767||q<-32768){cpu_interrupt(0,0);break;}
+        case 6: if(sz==16){ uint32_t n; if(!a){div_err();break;} n=((uint32_t)REG16(R_EDX)<<16)|REG16(0);
+                            if(n/a > 0xFFFF){ div_err(); break; } REG16(0)=(uint16_t)(n/a); REG16(R_EDX)=(uint16_t)(n%a); }
+                else { uint64_t n; if(!a){div_err();break;} n=((uint64_t)REG32(R_EDX)<<32)|REG32(0);
+                       if(n/a > 0xFFFFFFFFull){ div_err(); break; } REG32(0)=(uint32_t)(n/a); REG32(R_EDX)=(uint32_t)(n%a); } break;
+        case 7: if(sz==16){ int32_t n,q; if(!a){div_err();break;} n=(int32_t)(((uint32_t)REG16(R_EDX)<<16)|REG16(0));
+                            q=n/(int16_t)a; if(q>32767||q<-32768){div_err();break;}
                             REG16(0)=(uint16_t)q; REG16(R_EDX)=(uint16_t)(n%(int16_t)a); }
-                else { int64_t n,q; if(!a){cpu_interrupt(0,0);break;} n=(int64_t)(((uint64_t)REG32(R_EDX)<<32)|REG32(0));
-                       q=n/(int32_t)a; if(q>2147483647LL||q<-2147483648LL){cpu_interrupt(0,0);break;}
+                else { int64_t n,q; if(!a){div_err();break;} n=(int64_t)(((uint64_t)REG32(R_EDX)<<32)|REG32(0));
+                       q=n/(int32_t)a; if(q>2147483647LL||q<-2147483648LL){div_err();break;}
                        REG32(0)=(uint32_t)q; REG32(R_EDX)=(uint32_t)(n%(int32_t)a); } break;
         } break;
     case 0xF8: cpu.cf=0; break;
     case 0xF9: cpu.cf=1; break;
-    case 0xFA: cpu.iflag=0; break;
-    case 0xFB: cpu.iflag=1; break;
+    case 0xFA: iopl_check(); cpu.iflag=0; break;
+    case 0xFB: iopl_check(); cpu.iflag=1; break;
     case 0xFC: cpu.df=0; break;
     case 0xFD: cpu.df=1; break;
     case 0xFE: modrm(); a=rdE(8);
@@ -994,11 +1638,12 @@ again:
         switch(reg_){
         case 0: wrE(sz, do_inc(rdE(sz),sz)); break;
         case 1: wrE(sz, do_dec(rdE(sz),sz)); break;
-        case 2: { uint32_t t=rdE(sz); pushv(cpu.eip); cpu.eip=t&0xFFFF; break; }
-        case 3: { uint32_t o=cpu_ld16(ea); uint16_t s=cpu_ld16(ea+2);
-                  pushv(cpu.sreg[S_CS]); pushv(cpu.eip); set_sreg(S_CS,s); cpu.eip=o; break; }
-        case 4: cpu.eip = rdE(sz)&0xFFFF; break;
-        case 5: { uint32_t o=cpu_ld16(ea); uint16_t s=cpu_ld16(ea+2); set_sreg(S_CS,s); cpu.eip=o; break; }
+        case 2: { uint32_t t=rdE(sz); pushv(cpu.eip); cpu.eip=t&MASK(sz); break; }
+        case 3: { uint32_t o=sz==32?cpu_ld32(ea):cpu_ld16(ea); uint16_t s=cpu_ld16(ea+(uint32_t)sz/8);
+                  far_call(s, o); break; }
+        case 4: cpu.eip = rdE(sz)&MASK(sz); break;
+        case 5: { uint32_t o=sz==32?cpu_ld32(ea):cpu_ld16(ea); uint16_t s=cpu_ld16(ea+(uint32_t)sz/8);
+                  far_jmp(s, o); break; }
         case 6: pushv(rdE(sz)); break;
         } break;
 
@@ -1011,9 +1656,23 @@ again:
     cpu.cycles++;
 }
 
+/* One instruction.  Under PE a fault jumps back here and is delivered. */
+void cpu_step(void){
+    if(!PE){ step(); return; }
+    save_state();
+    if(setjmp(fault_jb)){ deliver_fault(); cpu.cycles++; return; }
+    fault_armed = 1;
+    step();
+    fault_armed = 0;
+}
+
 void cpu_reset(void){
+    int i;
     init_ptab();
     memset(&cpu,0,sizeof(cpu));
     cpu.iflag = 1;
+    cpu.cr0 = 0x10;
+    cpu.idt_limit = 0x3FF;
+    for(i = 0; i < 6; i++) cpu.slimit[i] = 0xFFFF;
     set_sreg(S_CS,0xF000); cpu.eip=0xFFF0;
 }

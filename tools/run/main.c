@@ -519,7 +519,7 @@ int main(int argc, char **argv){
                 cpu.shutdown = 0;
                 continue;
             }
-            if(cpu.iflag){
+            if(cpu.iflag && !cpu.inhibit){
                 int v = pic_pending();
                 if(v >= 0) cpu_interrupt(v, 0);
             }

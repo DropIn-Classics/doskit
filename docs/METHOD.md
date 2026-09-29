@@ -115,7 +115,9 @@ Goal: names, records and rules in the hints, each claim checked by a
 run or marked as read from the code ("presumably", "not checked").
 
 **The runner.** `tools/run.py [options] PROGRAM [ARGS]` runs a program
-in `dosrun`: a 386 real-mode CPU, VGA (planar, chain-4, Mode X, the
+in `dosrun`: a 386 CPU (real mode; protected mode without paging and
+task switches, V86 mode; see the top of "protected mode" in
+tools/run/cpu.c; INT 15h AH=87h/88h/89h), VGA (planar, chain-4, Mode X, the
 retrace), PIT/PIC/keyboard, BIOS, the 8237 DMA and a Sound Blaster DSP
 (so the game's own sound drivers run), and a small DOS whose drives are
 all the game's files with a writable layer in `build/run/state`, each
@@ -142,8 +144,8 @@ event): key scripts with random presses, many seeds in parallel, a
 `-log` on the routine that should be reached; then repeat the seed that
 got there with `-dump`/`-shot`.
 
-Not in the runner: protected mode (DOS extenders), x87 instructions,
-EMS/XMS, a mouse driver (INT 33h), MSCDEX (CD audio), OPL FM synthesis
+Not in the runner: paging and task switches (so no extender that needs
+them), VCPI/DPMI hosts, x87 instructions, EMS/XMS, a mouse driver (INT 33h), MSCDEX (CD audio), OPL FM synthesis
 (the ports answer, nothing sounds), savestates, a window.
 
 **Files.** Each data format gets a tool in the project (`tools/NAMEfiles.py`)
@@ -240,8 +242,10 @@ linked by Microsoft LINK, 186/386 instructions in 16-bit code. Not tried:
 - protected mode: the analysis and build.py take pMAX flat images
   (`pmax` in the hints: 32-bit code, USE32 source, the descriptors as
   segments; tests/flat, and one game's main program rebuilt byte for
-  byte), not DOS/4GW's LE/LX or other extenders' formats; the runner
-  runs none of them. A 32-bit instruction with a 16-bit address and no
+  byte), not DOS/4GW's LE/LX or other extenders' formats. The runner
+  emulates the 386's protected mode (tests/pmode: the BIOS's way in, a
+  fault, an interrupt, ring 3, a call gate, V86 mode) for an extender
+  that switches by itself; no real extender run through yet. A 32-bit instruction with a 16-bit address and no
   register (67h, `[0027h]`) has no source form and stays DB;
 - other linkers' header layouts (`build.py`'s write_mz is Microsoft
   LINK's).
