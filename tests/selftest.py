@@ -161,6 +161,10 @@ def main():
         if want not in text:
             raise SystemExit(f'selftest FAILED: FLAT.ASM has no {want} (rwords stride=4 from=)')
     print('FLAT: offsets in records written as differences of labels')
+    for want in ('[ESI+11AH]', '[ESI+119H]'):
+        if want not in text:
+            raise SystemExit(f'selftest FAILED: FLAT.ASM has no {want} (a field offset into code)')
+    print('FLAT: displacements with a register into code written as numbers')
     noraw = os.path.join(PROJ, 'build', 'FLATNORAW.hints')
     with open(os.path.join(HERE, 'flat', 'src', 'FLAT.hints')) as f:
         text = ''.join(l for l in f if not l.startswith('raw'))

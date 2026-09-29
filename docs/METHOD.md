@@ -81,7 +81,9 @@ register is then used as a base; check each by eye before adding a
 `dptr`. A `dptr`/`ptr` on an instruction without an immediate names its
 displacement (`CALL [SI+table]`). A small displacement with a register
 (below 100h) is taken for a field offset unless such a hint says
-otherwise.
+otherwise; so is one with a register that lands in reached code (at an
+instruction or inside one), as a flat program's records and buffers
+have offsets far beyond 100h.
 
 **Two programs, one engine.** When a game ships two builds of one
 engine (two episodes, a demo and the full game), analyse one,

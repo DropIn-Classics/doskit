@@ -346,6 +346,7 @@ class Analysis:
         self.insns = {}           # (seg, off) -> Insn
         self.labels = {}          # (seg, off) -> name
         self.farptrs = {}         # image offset of offset word -> (seg, off)
+        self.regdisp = []         # instructions with a register and a displacement
         self.warnings = []
         self.dsmap = [(s, a, b, d) for s, a, b, d in hints.ds]
         self.esmap = [(s, a, b, d) for s, a, b, d in hints.es]
@@ -425,7 +426,23 @@ class Analysis:
             while work:
                 seg, off, ds, es = work.pop()
                 self.trace(seg, off, ds, es, work)
+        self.field_offsets()
         self.far_pointers()
+
+    def field_offsets(self):
+        """A displacement with a register that lands in code (at an
+        instruction or inside one) is a field offset, not an address: a
+        flat program's records have fields beyond 100h, and its one
+        segment holds code and data.  The others become labels."""
+        covered = set()
+        for (s, o), ins in self.insns.items():
+            covered.update((s, o + k) for k in range(ins.size))
+        for ins in self.regdisp:
+            ref = ins.refs['disp']
+            if ref in covered:
+                del ins.refs['disp']
+            else:
+                self.label(*ref)
 
     def pointer_vars(self):
         """Word variables that hold offsets: a variable loaded into a
@@ -667,7 +684,10 @@ class Analysis:
                 if not has_reg and d > T.size:
                     continue
                 ins.refs['disp'] = (sn, d)
-                self.label(sn, d)
+                if has_reg and key not in self.h.ptr:
+                    self.regdisp.append(ins)    # labelled once all code is known
+                else:
+                    self.label(sn, d)
         ia = a + ci.imm_offset
         if ci.imm_offset and ci.imm_size == 2 and ia in self.p.relsites:
             v = self.p.relsites[ia]

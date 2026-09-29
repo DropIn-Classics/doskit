@@ -84,6 +84,8 @@ OPBASE      DW O1-OPBASE, 4         ; stride=4), the offsets from the second
 O0: INC COUNT
     RET
 O1: DEC COUNT
+    MOV EAX, [ESI+11AH]             ; a field offset that lands inside the DEC
+    MOV EAX, [ESI+119H]             ; and one at an instruction: no labels
     RET
 
 CODE ENDS
