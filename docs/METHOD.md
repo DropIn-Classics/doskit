@@ -148,7 +148,11 @@ got there with `-dump`/`-shot`.
 Not in the runner: paging and task switches (so no extender that needs
 them), VCPI/DPMI hosts, x87 instructions, EMS/XMS, a mouse driver (INT 33h),
 OPL FM synthesis (the ports answer, nothing sounds), savestates, a
-window. CD audio is there as a file: MSCDEX answers for D:, a disc of one
+window. VESA is there as little as a program that sets a mode and then
+programs the card itself needs: 4F00h..4F03h, modes 100h, 101h and 103h
+in 256 colours with an SVGA card's registers (8 pixels a character
+clock, 800x600 on a 40 MHz clock), 256 KB of video memory and no bank
+switching. CD audio is there as a file: MSCDEX answers for D:, a disc of one
 data track or, with `-cue`, the tracks of a cue sheet such as GOG's
 `game.inst`; `-cd` prints the plays and the channel settings,
 `-cdwav` writes what the drive played (44.1 kHz stereo from t=0, the

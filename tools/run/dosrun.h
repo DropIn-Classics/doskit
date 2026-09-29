@@ -133,6 +133,7 @@ uint8_t vga_io_r(uint16_t p);
 void    vga_io_w(uint16_t p, uint8_t v);
 void    vga_render(uint32_t *out, int *w, int *h);
 void    vga_set_mode_bios(int mode);
+int     vga_set_mode_vesa(int mode, int clear);
 int     vga_get_mode(void);
 uint8_t vga_status1(void);
 void    vga_timing(double*,int*,int*,int*,int*,double*);

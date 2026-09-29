@@ -38,7 +38,8 @@ In build/selftest (a project as a game's would be, see kit.py):
      -cdwav holding the WAVE's samples exactly, the pregap's silence and
      the Ogg's two tones at their pitch and loudness, all on their
      channels; VGAMODE.EXE, which checks the runner's BIOS mode set
-     (modes 0Dh and 0Eh planar at A0000h, back to text) and says
+     (modes 0Dh and 0Eh planar at A0000h, back to text; VESA 4F00h,
+     4F01h, 4F02h with modes 101h and 103h, 4F03h) and says
      "vgamode ok"; SB16.EXE, which checks the runner's
      Sound Blaster 16 (the DSP's reset, the mixer's IRQ and DMA, a 16-bit
      transfer on DMA 5 and an 8-bit one on DMA 1, each ending in IRQ 7,

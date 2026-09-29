@@ -19,6 +19,12 @@ static uint8_t dac_mask = 0xFF;
 static int dac_widx, dac_ridx, dac_wcomp, dac_rcomp;
 static uint8_t latch[4];
 static int bios_mode = 3;
+/* the VESA modes (vga_set_mode_vesa) are drawn as an SVGA card draws them:
+ * a character clock of 8 pixels in 256 colours (4 on a VGA), and clock
+ * selects 2 and 3 of the misc register an external clock (40 MHz for
+ * 800x600); both back to the VGA's at a BIOS mode set */
+static int px_per_char = 4;
+static double ext_clock = 0.0;
 
 /* CRT timing cache, refreshed lazily by vga_timing_cached().  Set to 1
  * whenever a register it derives from changes. */
@@ -332,7 +338,7 @@ void vga_render(uint32_t *out, int *wp, int *hp){
         /* the CRTC's address counter to a memory address: doubleword mode
          * (mode 13h), byte mode (mode X) or word mode */
         int shift = (cr[0x14] & 0x40) ? 2 : (cr[0x17] & 0x40) ? 0 : 1;
-        w = (cr[0x01] + 1) * 4;
+        w = (cr[0x01] + 1) * px_per_char;
         h = vde() / rowh;
         if(w<16||w>1024) w=320;
         if(h<16||h>1024) h=200;
@@ -454,6 +460,8 @@ static void default_dac(void){
 
 void vga_set_mode_bios(int mode){
     bios_mode = mode;
+    px_per_char = 4;
+    ext_clock = 0.0;
     memset(vga_vram,0,sizeof(vga_vram));
     default_dac();
     /* old start addresses mean nothing in the new mode */
@@ -474,13 +482,53 @@ void vga_set_mode_bios(int mode){
 
 int vga_get_mode(void){ return bios_mode; }
 
+/* VESA modes 100h (640x400), 101h (640x480) and 103h (800x600), 256
+ * colours, chain-4 at A0000h as mode 13h is: 70, 60 and 60 Hz, with the
+ * register values an SVGA card of the time has (8 pixels a character
+ * clock).  Only the first 64 KB are reachable (no bank switching) and
+ * the card has the VGA's 256 KB: enough for a program that sets the mode
+ * and then goes planar, as mode X does.  Returns 0 for another mode. */
+static const uint8_t c_v101[25] = {
+ 0x5F,0x4F,0x50,0x82,0x54,0x80,0x0B,0x3E,0x00,0x40,0x00,0x00,0x00,0x00,0x00,0x00,
+ 0xEA,0x8C,0xDF,0x50,0x40,0xE7,0x04,0xA3,0xFF };
+static const uint8_t c_v100[25] = {
+ 0x5F,0x4F,0x50,0x82,0x54,0x80,0xBF,0x1F,0x00,0x40,0x00,0x00,0x00,0x00,0x00,0x00,
+ 0x9C,0x8E,0x8F,0x50,0x40,0x96,0xB9,0xA3,0xFF };
+/* 800x600 at 60 Hz: 1056 x 628 dots of 40 MHz */
+static const uint8_t c_v103[25] = {
+ 0x7F,0x63,0x64,0x82,0x69,0x19,0x72,0xF0,0x00,0x60,0x00,0x00,0x00,0x00,0x00,0x00,
+ 0x59,0x8D,0x57,0x64,0x40,0x58,0x70,0xA3,0xFF };
+static const uint8_t s_vesa[5] = { 0x03,0x01,0x0F,0x00,0x0E };
+
+int vga_set_mode_vesa(int mode, int clear){
+    const uint8_t *c;
+    uint8_t mo;
+    switch(mode){
+    case 0x100: c = c_v100; mo = 0x63; break;
+    case 0x101: c = c_v101; mo = 0xE3; break;
+    case 0x103: c = c_v103; mo = 0x2B; break;
+    default: return 0;
+    }
+    bios_mode = mode;
+    if(clear) memset(vga_vram,0,sizeof(vga_vram));
+    default_dac();
+    sa_n = 0;
+    apply_regs(c,s_vesa,g_13h,a_13h,mo);
+    px_per_char = 8;
+    ext_clock = 40000000.0;
+    dac_mask = 0xFF;
+    vga_dirty = 1;
+    return 1;
+}
+
 /* ---------------------------------------------------------- CRT timing  */
 /* Everything the game's frame pacing depends on comes out of these
  * registers, so compute it rather than assuming 70 Hz: mode 13h and text
  * are 70 Hz (449-line total), the 480-line mode-X timing is 60 Hz. */
 void vga_timing(double *frame_period, int *vtotal_out, int *vde_out,
                 int *vrs_out, int *vre_out, double *hde_frac){
-    double dotclk = ((misc_out >> 2) & 3) == 1 ? 28322000.0 : 25175000.0;
+    int cs = (misc_out >> 2) & 3;
+    double dotclk = cs == 1 ? 28322000.0 : cs >= 2 && ext_clock > 0.0 ? ext_clock : 25175000.0;
     int dots_per_char = (sq[1] & 0x01) ? 8 : 9;
     int htotal = cr[0x00] + 5;
     int hde    = cr[0x01] + 1;

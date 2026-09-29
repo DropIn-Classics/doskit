@@ -121,6 +121,62 @@ static void putch_tty(uint8_t c, uint8_t attr){
     vga_dirty = 1;
 }
 
+/* VESA BIOS 1.2, the least of it: 4F00h the card's block (signature, the
+ * modes 100h, 101h, 103h, 512 KB claimed; vga.c keeps 256 KB), 4F01h a
+ * mode's block, 4F02h/4F03h set and get the mode.  Everything else,
+ * bank switching (4F05h) among it, answers "failed" (AX=014Fh). */
+static const uint16_t vesa_modes[] = { 0x100, 0x101, 0x103 };
+
+static void vesa_put16(uint32_t a, uint16_t v){ mem_w8(a,(uint8_t)v); mem_w8(a+1,(uint8_t)(v>>8)); }
+
+static void bios_vesa(void){
+    uint32_t es = cpu.sbase[S_ES], p = es + DI;
+    uint16_t seg = (uint16_t)(es >> 4);
+    int i;
+    switch(AL){
+    case 0x00: {                                /* 256 bytes: the card */
+        static const char oem[] = "DOSKIT";
+        for(i=0;i<256;i++) mem_w8(p+i,0);
+        mem_w8(p,'V'); mem_w8(p+1,'E'); mem_w8(p+2,'S'); mem_w8(p+3,'A');
+        vesa_put16(p+4, 0x0102);
+        vesa_put16(p+6, (uint16_t)(DI + 0x40)); vesa_put16(p+8, seg);      /* OEM string */
+        vesa_put16(p+14, (uint16_t)(DI + 0x20)); vesa_put16(p+16, seg);    /* mode list */
+        vesa_put16(p+18, 8);                                             /* 64 KB blocks */
+        for(i=0;i<3;i++) vesa_put16(p+0x20+i*2, vesa_modes[i]);
+        vesa_put16(p+0x26, 0xFFFF);
+        for(i=0;oem[i];i++) mem_w8(p+0x40+i,(uint8_t)oem[i]);
+        AX = 0x004F; break; }
+    case 0x01: {                                /* 256 bytes: mode CX */
+        int w, h;
+        switch(CX & 0x1FF){
+        case 0x100: w = 640; h = 400; break;
+        case 0x101: w = 640; h = 480; break;
+        case 0x103: w = 800; h = 600; break;
+        default: AX = 0x014F; return;
+        }
+        for(i=0;i<256;i++) mem_w8(p+i,0);
+        vesa_put16(p+0, 0x1B);              /* supported, extended info, colour, graphics */
+        mem_w8(p+2, 7); mem_w8(p+3, 0);      /* window A read/write, B none */
+        vesa_put16(p+4, 64); vesa_put16(p+6, 64);   /* granularity, size in KB */
+        vesa_put16(p+8, 0xA000); vesa_put16(p+10, 0);
+        vesa_put16(p+16, (uint16_t)w);          /* bytes a line */
+        vesa_put16(p+18, (uint16_t)w); vesa_put16(p+20, (uint16_t)h);
+        mem_w8(p+22, 8); mem_w8(p+23, 16);   /* character cell */
+        mem_w8(p+24, 1); mem_w8(p+25, 8);    /* planes, bits a pixel */
+        mem_w8(p+26, (uint8_t)((w*h + 65535) / 65536)); /* banks */
+        mem_w8(p+27, 4); mem_w8(p+28, 64);   /* packed pixel, bank size in KB */
+        AX = 0x004F; break; }
+    case 0x02:
+        if(vga_set_mode_vesa(BX & 0x1FF, !(BX & 0x8000))) AX = 0x004F;
+        else if(BX < 0x100){
+            vga_set_mode_bios(BX & 0x7F); BDA8(0x49) = (uint8_t)(BX & 0x7F); AX = 0x004F;
+        } else AX = 0x014F;
+        break;
+    case 0x03: BX = (uint16_t)vga_get_mode(); AX = 0x004F; break;
+    default: AX = 0x014F; break;
+    }
+}
+
 static void bios_int10(void){
     switch(AH){
     case 0x00: vga_set_mode_bios(AL & 0x7F); BDA8(0x49)=AL&0x7F; BDA16_SET(0x4A, 80); BDA16_SET(0x50, 0); break;
@@ -205,7 +261,7 @@ static void bios_int10(void){
         break; }
     case 0x1A: AL = 0x1A; BL = 0x08; BH = 0x00; break;
     case 0x1B: break;
-    case 0x4F: AH = 0x01; break;                /* no VESA */
+    case 0x4F: bios_vesa(); break;
     default: break;
     }
 }
