@@ -43,7 +43,7 @@ START:
     MOVZX EAX, WORD PTR [ESI]       ; = movzx eax, word ptr [esi] [3]
     MOVSX AX, BL                    ; = movsx ax, bl [4]
     ADD EAX, EBX                    ; = add eax, ebx [2]
-    ADD EAX, 5                      ; = add eax, 5 [5]
+    ADD EAX, 5                      ; = add eax, 5 [3]
     ADD EBX, 5                      ; = add ebx, 5 [3]
     ADD EBX, 500H                   ; = add ebx, 0x500 [6]
     SUB EBX, -1                     ; = sub ebx, -1 [3]

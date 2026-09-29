@@ -327,9 +327,11 @@ def enc_alu(e, mn, toks):
     size = need(size)
     small = is_small_imm(s, size)
     if d.reg in ('AL', 'AX', 'EAX'):
-        # the accumulator form, or (MASM, `asm alu_ax_short=0`) the
-        # sign-extended byte form where it fits
-        if size == 1 or not small or getattr(e.a, 'alu_ax_short', True):
+        # the accumulator form where it is not longer (AL; AX with 66h,
+        # 4 bytes either way), or (MASM, `asm alu_ax_short=0`) the
+        # sign-extended byte form where it fits; EAX with a byte-sized
+        # immediate always takes the shorter 3-byte form
+        if size == 1 or not small or (size == 2 and getattr(e.a, 'alu_ax_short', True)):
             prefixes(e, size)
             e.b(n * 8 + (4 if size == 1 else 5))
             imm(e, s, size)
