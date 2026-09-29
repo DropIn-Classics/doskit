@@ -71,7 +71,9 @@ docs/NEW-PROJECT.md how to start a new game.
     buttons to keys), `cdimage.h` (a GOG release found and its image
     unpacked), `sys.h` (files, folders, the data folder), `sha256.h`.
 - `template/`: the start of a new port's repository (rules, hook, build
-  scripts, a C skeleton).
+  scripts, a C skeleton, `.claude/agents/` for Claude Code subagents such
+  as `doskit-collector`, a cheaper model for repetitive stage 1/2 data
+  collection).
 - `tests/`: `selftest.py`, the whole way on a program of our own
   (`tests/hello`), no game needed; the 32-bit encoder (`tests/enc32`) and
   a pMAX image rebuilt (`tests/flat`).
