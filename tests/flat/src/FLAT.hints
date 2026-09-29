@@ -1,0 +1,21 @@
+; The kit's test of a pMAX image (tests/selftest.py): tests/flat/FLAT.ASM,
+; written as a pMAX image into the build folder by the selftest.
+pmax       build/files/FLAT.386
+segment    CODE 0 CODE
+segment    MORE 1 DATA
+
+words      CODE:0006 3 CODE
+dptr       CODE:004B CODE
+ptr        CODE:0057 CODE
+
+name       CODE:0000 SAVED_DS
+name       CODE:0002 COUNT
+name       CODE:0006 HANDLERS
+name       CODE:0012 FAR_SUB
+name       CODE:0018 TEXT
+code       CODE:002E START
+name       CODE:0057 NEXT
+name       CODE:008E SHOW
+name       MORE:0004 OTHER
+comment    CODE:0006 near pointers, called in turn
+raw        CODE:0086               ; FNINIT, no x87 in tasm.py

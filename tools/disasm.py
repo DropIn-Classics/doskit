@@ -4,8 +4,9 @@ to the same bytes.
 
     disasm.py HINTS [-o OUT.ASM]
 
-HINTS names the program (relative to the game's files, see kit.py) and says what the analysis
-cannot find out by itself: the segments, entry points the code reaches
+HINTS names the program (relative to the game's files, see kit.py, or
+`build/...` for a file a project's tool unpacked into its build folder)
+and says what the analysis cannot find out by itself: the segments, entry points the code reaches
 only through pointers, tables, names and comments.  It holds no bytes of
 the game, so the source is made from the player's own copy each time.
 
@@ -19,14 +20,27 @@ The analysis:
   * data: the bytes nothing decoded as code, as DB lines (text as
     strings), cut at every label.
 
+Two kinds of program:
+  * an MZ program (`exe`), 16-bit real mode;
+  * a pMAX flat image (`pmax`), the 32-bit protected-mode program of the
+    pMAX DOS extender: its descriptors are the segments, its selector
+    relocations name a descriptor (the word itself is 0 in the file).
+    The source has USE32 segments; offsets, near pointers and `words`
+    tables are 32 bits wide.  With one segment (a flat program) DS holds
+    CODE too.
+
 Hints syntax (one per line, ';' starts a comment, numbers are hex):
-    exe        GAME/GAME.EXE
-    segment    NAME FRAME CLASS [stack] [size=N]   in image order
+    exe        GAME/GAME.EXE           an MZ program
+    pmax       GAME/GAME.386           a pMAX image
+    segment    NAME FRAME CLASS [stack] [size=N]   in image order; in a
+                                       pMAX image FRAME is the descriptor's
+                                       number (base and size are its own)
     code       SEG:OFF [NAME]          an entry point
     coderange  SEG:OFF-END             code throughout, a routine after every
                                        RET/JMP (handlers reached by pointers)
     words      SEG:OFF COUNT TARGETSEG a table of near pointers into TARGETSEG
-                                       (TARGETSEG CODE also seeds code)
+                                       (TARGETSEG CODE also seeds code); 32-bit
+                                       ones in a pMAX image
     name       SEG:OFF NAME            a label's name
     ptr        SEG:OFF TARGETSEG       the immediate of the instruction at
                                        SEG:OFF is an offset in TARGETSEG (without
@@ -87,7 +101,19 @@ class Seg:
         self.prefix = name[0]
 
 
+def program_path(name):
+    """a program as the hints name it: relative to the game's files, or
+    build/... in the project's build folder (a file a tool unpacked)"""
+    parts = name.replace('\\', '/').split('/')
+    if parts[0] == 'build':
+        return build_dir(*parts[1:])
+    return os.path.join(game_dir(), name)
+
+
 class Program:
+    """an MZ program"""
+    kind, bits, descs = 'mz', 16, None
+
     def __init__(self, path):
         d = open(path, 'rb').read()
         self.file = d
@@ -106,6 +132,43 @@ class Program:
             a = seg * 16 + off
             self.relsites[a] = struct.unpack_from('<H', self.img, a)[0]
 
+    def entry(self, byframe):
+        return byframe[self.cs].name if self.cs in byframe else 'CODE', self.ip
+
+
+PMAX_HDR = '<IIBBIIH'
+
+
+class PmaxProgram:
+    """A pMAX flat image: a 20-byte header, the descriptors (base and
+    size, 32 bits each), the image, the selector relocations (32-bit image
+    offset, 8-bit descriptor number) to the end of the file.  The header:
+    a word not understood (0 in the image examined), the size to allocate,
+    a format number (1), the number of descriptors, the image's size, the
+    entry point (an image offset), the number of relocations."""
+    kind, bits = 'pmax', 32
+
+    def __init__(self, path):
+        d = open(path, 'rb').read()
+        self.file = d
+        (self.word0, self.alloc, self.version, n, size, self.ip,
+         nrel) = struct.unpack_from(PMAX_HDR, d)
+        self.descs = [struct.unpack_from('<II', d, 20 + 8 * i) for i in range(n)]
+        start = 20 + 8 * n
+        self.img = d[start:start + size]
+        rel = start + size
+        if rel + 5 * nrel != len(d):
+            raise SystemExit(f'{path}: not a pMAX image ({len(d)} bytes, header says {rel + 5 * nrel})')
+        self.relocs = [struct.unpack_from('<IB', d, rel + 5 * i) for i in range(nrel)]
+        self.relsites = dict(self.relocs)      # image offset -> descriptor number
+        self.tail = b''
+
+    def entry(self, byframe):
+        for S in byframe.values():
+            if S.base <= self.ip < S.base + S.size:
+                return S.name, self.ip - S.base
+        raise SystemExit(f'entry point {self.ip:X} in no segment')
+
 
 # ---------------------------------------------------------------- hints
 
@@ -113,6 +176,7 @@ class Hints:
     def __init__(self, path):
         self.path = path
         self.exe = None
+        self.kind = 'mz'
         self.segs = []
         self.code = []            # (seg, off, name)
         self.coderanges = []      # (seg, start, end)
@@ -136,8 +200,8 @@ class Hints:
             f = line.split()
             k = f[0]
             try:
-                if k == 'exe':
-                    self.exe = f[1]
+                if k in ('exe', 'pmax'):
+                    self.exe, self.kind = f[1], 'mz' if k == 'exe' else 'pmax'
                 elif k == 'segment':
                     opts = f[4:]
                     size = next((int(o[5:], 16) for o in opts if o.startswith('size=')), None)
@@ -199,9 +263,16 @@ class Hints:
 
 JUMPS = {'jmp', 'je', 'jne', 'jb', 'jae', 'jbe', 'ja', 'jl', 'jge', 'jle', 'jg', 'js', 'jns',
          'jo', 'jno', 'jp', 'jnp', 'jcxz', 'loop', 'loope', 'loopne'}
-STOP = {'jmp', 'ret', 'retf', 'iret', 'ljmp'}
+STOP = {'jmp', 'ret', 'retf', 'iret', 'iretd', 'ljmp'}
+JUMPS.add('jecxz')
 
 SEGREGS = {x86.X86_REG_ES: 'ES', x86.X86_REG_CS: 'CS', x86.X86_REG_SS: 'SS', x86.X86_REG_DS: 'DS'}
+
+
+def regkey(ci, reg):
+    """a register's name for the tracking of segment values: EAX as AX"""
+    n = ci.reg_name(reg).upper()
+    return n[1:] if len(n) == 3 and n[0] == 'E' and n[1] in 'ABCDSI' else n
 
 
 class Insn:
@@ -219,14 +290,24 @@ class Analysis:
     def __init__(self, prog, hints):
         self.p, self.h = prog, hints
         self.segs = hints.segs
+        for s in self.segs if prog.descs is not None else ():
+            s.base, s.size = prog.descs[s.frame]
         for i, s in enumerate(self.segs):
             if s.size is None:
                 nxt = self.segs[i + 1].base if i + 1 < len(self.segs) else len(prog.img)
                 s.size = nxt - s.base
         self.byname = {s.name: s for s in self.segs}
         self.byframe = {s.frame: s for s in self.segs}
-        self.md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_16)
+        self.bits = prog.bits
+        self.w = prog.bits // 8                 # bytes of an offset
+        self.mask = (1 << prog.bits) - 1
+        self.md = capstone.Cs(capstone.CS_ARCH_X86,
+                              capstone.CS_MODE_32 if prog.bits == 32 else capstone.CS_MODE_16)
         self.md.detail = True
+        # what DS holds where nothing says otherwise: DATA, or in a
+        # program without one (a flat image) CODE
+        self.dflt_ds = 'DATA' if 'DATA' in self.byname else 'CODE'
+        self.entry = prog.entry(self.byframe)
         self.insns = {}           # (seg, off) -> Insn
         self.labels = {}          # (seg, off) -> name
         self.farptrs = {}         # image offset of offset word -> (seg, off)
@@ -260,12 +341,12 @@ class Analysis:
     # ---- code
     def run(self):
         work = []
-        code = self.byname['CODE']
-        e = (self.p.cs, self.p.ip)
-        work.append(('CODE', e[1], 'DATA', None))
-        self.label('CODE', e[1], 'code')
+        dd = self.dflt_ds
+        es, eo = self.entry
+        work.append((es, eo, dd, None))
+        self.label(es, eo, 'code')
         for s, o, n in self.h.code:
-            work.append((s, o, 'DATA', None))
+            work.append((s, o, dd, None))
             self.label(s, o, 'code')
         for s, a_, b_ in self.h.coderanges:
             S = self.byname[s]
@@ -276,16 +357,16 @@ class Analysis:
                 if ci is None:
                     break
                 if start:
-                    work.append((s, o, 'DATA', None))
+                    work.append((s, o, dd, None))
                     self.label(s, o, 'code')
                 start = ci.mnemonic in STOP
                 o += ci.size
         for s, o, cnt, t in self.h.words:
             base = self.byname[s].base + o
             for i in range(cnt):
-                v = struct.unpack_from('<H', self.p.img, base + 2 * i)[0]
+                v = int.from_bytes(self.p.img[base + self.w * i:base + self.w * (i + 1)], 'little')
                 if t == 'CODE':
-                    work.append(('CODE', v, 'DATA', None))
+                    work.append(('CODE', v, dd, None))
                 self.label(t, v, 'code' if t == 'CODE' else None)
         while work:
             seg, off, ds, es = work.pop()
@@ -316,11 +397,11 @@ class Analysis:
                 continue
             ops = ci.operands
             if ci.mnemonic in ('call', 'jmp') and ops[0].type == x86.X86_OP_MEM \
-                    and ops[0].size == 2 and not ops[0].mem.base and not ops[0].mem.index:
+                    and ops[0].size == self.w and not ops[0].mem.base and not ops[0].mem.index:
                 votes.setdefault(ref, set()).add(k[0])
                 continue
             if not (ci.mnemonic == 'mov' and len(ops) == 2 and ops[0].type == x86.X86_OP_REG
-                    and ops[0].size == 2 and ops[1].type == x86.X86_OP_MEM
+                    and ops[0].size == self.w and ops[1].type == x86.X86_OP_MEM
                     and not ops[1].mem.base and not ops[1].mem.index):
                 continue
             r = ops[0].reg
@@ -363,12 +444,12 @@ class Analysis:
             ins = self.insns[k]
             ci = ins.ci
             ref = ins.refs.get('disp')
-            if ref not in types or 'imm' in ins.refs or ci.mnemonic != 'mov' or ci.imm_size != 2:
+            if ref not in types or 'imm' in ins.refs or ci.mnemonic != 'mov' or ci.imm_size != self.w:
                 continue
             if ci.operands[0].type != x86.X86_OP_MEM:
                 continue
             t = types[ref]
-            v = int.from_bytes(ci.bytes[ci.imm_offset:ci.imm_offset + 2], 'little')
+            v = int.from_bytes(ci.bytes[ci.imm_offset:ci.imm_offset + self.w], 'little')
             T = self.byname[t]
             if v == 0 or v > T.size:
                 continue
@@ -376,7 +457,7 @@ class Analysis:
             if T.cls == 'CODE':
                 self.label(t, v, 'code')
                 if (t, v) not in self.insns:
-                    seeds.append((t, v, 'DATA', None))
+                    seeds.append((t, v, self.dflt_ds, None))
             else:
                 self.label(t, v)
         return seeds
@@ -405,7 +486,8 @@ class Analysis:
                 return
             # a segment value the loader relocates can only be an immediate
             rel = [k for k in range(ci.size) if a + k in self.p.relsites]
-            if rel and not (ci.imm_size == 2 and rel == [ci.imm_offset]):
+            if rel and not (ci.imm_size == 2 and rel == [ci.imm_offset]) \
+                    and not (ci.mnemonic in ('lcall', 'ljmp') and rel == [ci.size - 2]):
                 self.warnings.append(f'{seg}:{off:04X}: decoding ran into a relocated word')
                 return
             dsh = self.ds_override(seg, off)
@@ -419,13 +501,13 @@ class Analysis:
             if m == 'mov' and len(ops) == 2:
                 d, s_ = ops
                 if d.type == x86.X86_OP_REG:
-                    dn = ci.reg_name(d.reg).upper()
+                    dn = regkey(ci, d.reg)
                     val = None
                     if s_.type == x86.X86_OP_IMM:
                         r = self.p.relsites.get(a + ci.imm_offset) if ci.imm_offset else None
                         val = self.byframe[r].name if r is not None and r in self.byframe else None
                     elif s_.type == x86.X86_OP_REG:
-                        sn = ci.reg_name(s_.reg).upper()
+                        sn = regkey(ci, s_.reg)
                         val = {'DS': ds, 'ES': es}.get(sn, regs.get(sn))
                     if dn == 'DS':
                         ds = val
@@ -434,12 +516,12 @@ class Analysis:
                     else:
                         regs[dn] = val
             elif m == 'push' and ops and ops[0].type == x86.X86_OP_REG:
-                rn = ci.reg_name(ops[0].reg).upper()
+                rn = regkey(ci, ops[0].reg)
                 stack.append({'DS': ds, 'ES': es, 'CS': seg}.get(rn, regs.get(rn)))
             elif m == 'push':
                 stack.append(None)         # an immediate or memory: keeps the stack in step
             elif m == 'pop' and ops and ops[0].type == x86.X86_OP_REG:
-                rn = ci.reg_name(ops[0].reg).upper()
+                rn = regkey(ci, ops[0].reg)
                 v = stack.pop() if stack else None
                 if rn == 'DS':
                     ds = v
@@ -447,7 +529,7 @@ class Analysis:
                     es = v
                 else:
                     regs[rn] = v
-            elif m in ('pushaw', 'popaw'):
+            elif m in ('pushaw', 'popaw', 'pushal', 'popal'):
                 regs = {}
             elif m in ('les', 'lds'):
                 if m == 'lds':
@@ -467,7 +549,9 @@ class Analysis:
         S = self.byname[seg]
         a = S.base + off
         b = self.p.img
-        if b[a - 3] == 0xB8:
+        if self.w == 4 and b[a - 5] == 0xB8:
+            return b[a - 3]
+        if self.w == 2 and b[a - 3] == 0xB8:
             return b[a - 1]
         if b[a - 2] == 0xB4:
             return b[a - 1]
@@ -497,28 +581,30 @@ class Analysis:
         if m in JUMPS or m == 'call':
             op = ci.operands[0]
             if op.type == x86.X86_OP_IMM:
-                t = op.imm & 0xFFFF
+                t = op.imm & self.mask
                 ins.refs['target'] = (ins.seg, t)
                 self.label(ins.seg, t, 'code')
-                work.append((ins.seg, t, ins.ds if m != 'call' else 'DATA', ins.es if m != 'call' else None))
+                work.append((ins.seg, t, ins.ds if m != 'call' else self.dflt_ds, ins.es if m != 'call' else None))
                 return
         if m in ('lcall', 'ljmp') and ci.operands and ci.operands[0].type == x86.X86_OP_IMM:
-            o, s = struct.unpack_from('<HH', self.p.img, a + 1)
+            o = int.from_bytes(self.p.img[a + 1:a + 1 + self.w], 'little')
+            sa = a + 1 + self.w
+            s = self.p.relsites.get(sa, struct.unpack_from('<H', self.p.img, sa)[0])
             T = self.byframe.get(s)
             if T:
                 ins.refs['far'] = (T.name, o)
                 self.label(T.name, o, 'code')
-                work.append((T.name, o, 'DATA', None))
+                work.append((T.name, o, self.dflt_ds, None))
             return
         for op in ci.operands:
-            if op.type == x86.X86_OP_MEM and ci.disp_size == 2 and key not in self.h.num:
+            if op.type == x86.X86_OP_MEM and ci.disp_size == self.w and key not in self.h.num:
                 has_reg = op.mem.base != 0 or op.mem.index != 0
                 sn = self.mem_seg(ins, op)
-                if key in self.h.ptr and not (ci.imm_offset and ci.imm_size == 2):
+                if key in self.h.ptr and not (ci.imm_offset and ci.imm_size == self.w):
                     sn = self.h.ptr[key]        # LEA of an address used with another DS
                 if sn is None or sn not in self.byname:
                     continue
-                d = op.mem.disp & 0xFFFF
+                d = op.mem.disp & self.mask
                 T = self.byname[sn]
                 # a small displacement with a register is most often a
                 # field offset, not an address; a ptr hint says otherwise
@@ -528,48 +614,57 @@ class Analysis:
                     continue
                 ins.refs['disp'] = (sn, d)
                 self.label(sn, d)
-        if ci.imm_offset and ci.imm_size == 2:
-            ia = a + ci.imm_offset
-            if ia in self.p.relsites:
-                v = self.p.relsites[ia]
-                if v in self.byframe:
-                    ins.refs['imm'] = 'SEG:' + self.byframe[v].name
-                else:
-                    self.warnings.append(f'{ins.seg}:{ins.off:04X}: segment value {v:04X} is no segment')
-            elif key in self.h.ptr:
-                t = self.h.ptr[key]
-                v = struct.unpack_from('<H', self.p.img, ia)[0]
-                ins.refs['imm'] = (t, v)
-                code = t == 'CODE' and key not in self.h.dptr
-                self.label(t, v, 'code' if code else None)
-                if code:
-                    work.append(('CODE', v, 'DATA', None))
+        ia = a + ci.imm_offset
+        if ci.imm_offset and ci.imm_size == 2 and ia in self.p.relsites:
+            v = self.p.relsites[ia]
+            if v in self.byframe:
+                ins.refs['imm'] = 'SEG:' + self.byframe[v].name
+            else:
+                self.warnings.append(f'{ins.seg}:{ins.off:04X}: segment value {v:04X} is no segment')
+        elif ci.imm_offset and ci.imm_size == self.w and key in self.h.ptr:
+            t = self.h.ptr[key]
+            v = int.from_bytes(self.p.img[ia:ia + self.w], 'little')
+            ins.refs['imm'] = (t, v)
+            code = t == 'CODE' and key not in self.h.dptr
+            self.label(t, v, 'code' if code else None)
+            if code:
+                work.append(('CODE', v, self.dflt_ds, None))
 
     def far_pointers(self):
-        """relocated segment words with an offset word before them: DD label"""
+        """relocated segment words with an offset before them: DD label
+        (DF in a 32-bit program)"""
+        w = self.w
         for a, v in self.p.relsites.items():
             T = self.byframe.get(v)
             if T is None:
                 continue
             S = self.seg_at(a)
             if (S.name, a - S.base) in self.insns or any(
-                    (S.name, a - S.base - k) in self.insns for k in range(1, 6)):
+                    (S.name, a - S.base - k) in self.insns for k in range(1, 6 if w == 2 else 12)):
                 continue
-            o = struct.unpack_from('<H', self.p.img, a - 2)[0]
+            o = int.from_bytes(self.p.img[a - w:a], 'little')
             if o <= T.size:
-                self.farptrs[a - 2] = (T.name, o)
+                self.farptrs[a - w] = (T.name, o)
                 self.label(T.name, o, 'code' if T.cls == 'CODE' and (T.name, o) in self.insns else None)
 
 
 # ---------------------------------------------------------------- formatting
 
-SIZEPTR = {1: 'BYTE PTR', 2: 'WORD PTR', 4: 'DWORD PTR', 6: 'FWORD PTR'}
+SIZEPTR = {1: 'BYTE PTR', 2: 'WORD PTR', 4: 'DWORD PTR', 6: 'FWORD PTR', 8: 'QWORD PTR',
+           10: 'TBYTE PTR'}
 STRINGOPS = {'movsb', 'movsw', 'lodsb', 'lodsw', 'stosb', 'stosw', 'scasb', 'scasw',
              'cmpsb', 'cmpsw', 'insb', 'insw', 'outsb', 'outsw'}
+STRINGOPS32 = STRINGOPS | {'movsd', 'lodsd', 'stosd', 'scasd', 'cmpsd', 'insd', 'outsd'}
 RENAME = {'pushaw': 'PUSHA', 'popaw': 'POPA', 'xlatb': 'XLAT', 'lcall': 'CALL', 'ljmp': 'JMP',
           'pushfw': 'PUSHF', 'popfw': 'POPF', 'iretw': 'IRET', 'int1': 'INT 1',
           'cwde': 'CBW', 'cdq': 'CWD', 'cbw': 'CBW', 'cwd': 'CWD'}
-PREFIXES = {0x26: 'ES', 0x2E: 'CS', 0x36: 'SS', 0x3E: 'DS', 0xF2: 'REPNE', 0xF3: 'REP', 0xF0: 'LOCK'}
+# in a 32-bit program capstone names what differs by the operand size
+RENAME32 = {'pushal': 'PUSHAD', 'popal': 'POPAD', 'xlatb': 'XLAT', 'lcall': 'CALL', 'ljmp': 'JMP',
+            'int1': 'INT 1', 'iret': 'IRETW'}
+PREFIXES = {0x26: 'ES', 0x2E: 'CS', 0x36: 'SS', 0x3E: 'DS', 0x64: 'FS', 0x65: 'GS',
+            0xF2: 'REPNE', 0xF3: 'REP', 0xF0: 'LOCK'}
+SEGPFX = (0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65)
+SIZEPFX = (0x66, 0x67)          # follow from the operands' registers
 
 
 class Unformattable(Exception):
@@ -579,7 +674,8 @@ class Unformattable(Exception):
 class Formatter:
     def __init__(self, an):
         self.an = an
-        self.assumed_ds = 'DATA'     # what the source's last ASSUME gives DS
+        self.assumed_ds = an.dflt_ds  # what the source's last ASSUME gives DS
+        self.w = an.w
 
     def sym(self, ref):
         if isinstance(ref, str):
@@ -591,7 +687,7 @@ class Formatter:
         b = self.an.p.img[self.an.byname[ins.seg].base + ins.off:]
         out = []
         for x in b[:ins.size]:
-            if x in PREFIXES:
+            if x in PREFIXES or x in SIZEPFX:
                 out.append(x)
             else:
                 break
@@ -604,14 +700,14 @@ class Formatter:
         if m.base:
             parts.append(ci.reg_name(m.base).upper())
         if m.index:
-            parts.append(ci.reg_name(m.index).upper())
+            parts.append(ci.reg_name(m.index).upper() + (f'*{m.scale}' if m.scale > 1 else ''))
         seg = ci.reg_name(m.segment).upper() if m.segment else None
         pf = self.prefixes(ins)
-        segpf = [PREFIXES[x] for x in pf if x in (0x26, 0x2E, 0x36, 0x3E)]
+        segpf = [PREFIXES[x] for x in pf if x in SEGPFX]
         if len(segpf) > 1:
             raise Unformattable('two segment prefixes')
         seg = segpf[0] if segpf else None
-        disp = m.disp & 0xFFFF
+        disp = m.disp & (0xFFFF if ci.disp_size < 4 else 0xFFFFFFFF)
         ref = ins.refs.get('disp')
         if ref:
             parts.append(self.sym(ref))
@@ -619,7 +715,7 @@ class Formatter:
         else:
             dtxt = disp
         if dtxt is not None and (dtxt or not parts) and not (ci.disp_size == 0):
-            if parts and ci.disp_size == 1:
+            if parts and (ci.disp_size == 1 or ci.disp_size == 4 and m.disp < 0):
                 v = m.disp
                 parts_s = '+'.join(parts) + (f'+{hexnum(v)}' if v >= 0 else f'-{hexnum(-v)}')
             elif parts:
@@ -658,13 +754,14 @@ class Formatter:
         m = ci.mnemonic
         pf = self.prefixes(ins)
         rep = [PREFIXES[x] for x in pf if x in (0xF2, 0xF3, 0xF0)]
-        segpf = [PREFIXES[x] for x in pf if x in (0x26, 0x2E, 0x36, 0x3E)]
-        if len(pf) != len(rep) + len(segpf):
+        segpf = [PREFIXES[x] for x in pf if x in SEGPFX]
+        size = [x for x in pf if x in SIZEPFX]
+        if len(pf) != len(rep) + len(segpf) + len(size) or len(size) != len(set(size)):
             raise Unformattable('prefix')
         base = m.split()[-1]
         ops = ci.operands
         # string instructions
-        if base in STRINGOPS:
+        if base in (STRINGOPS32 if self.w == 4 else STRINGOPS):
             r = ''
             if rep:
                 if len(rep) > 1:
@@ -674,32 +771,40 @@ class Formatter:
             if not segpf:
                 return r + base.upper()
             s = segpf[0]
-            w = 'BYTE PTR' if base.endswith('b') else 'WORD PTR'
+            w = {'b': 'BYTE PTR', 'w': 'WORD PTR', 'd': 'DWORD PTR'}[base[-1]]
+            # the index registers as the address size has them
+            e = 'E' if self.w == 4 and 0x67 not in pf or self.w == 2 and 0x67 in pf else ''
+            si, di = e + 'SI', e + 'DI'
             if base.startswith('lods'):
-                return f'{r}LODS {w} {s}:[SI]'
+                return f'{r}LODS {w} {s}:[{si}]'
             if base.startswith('movs'):
-                return f'{r}MOVS {w} ES:[DI],{w} {s}:[SI]'
+                return f'{r}MOVS {w} ES:[{di}],{w} {s}:[{si}]'
             if base.startswith('cmps'):
-                return f'{r}CMPS {w} {s}:[SI],{w} ES:[DI]'
+                return f'{r}CMPS {w} {s}:[{si}],{w} ES:[{di}]'
             if base.startswith('outs'):
-                return f'{r}OUTS DX,{w} {s}:[SI]'
+                return f'{r}OUTS DX,{w} {s}:[{si}]'
             raise Unformattable('string op override')
         if rep:
             raise Unformattable('rep on non-string')
         if segpf and not any(o.type == x86.X86_OP_MEM for o in ops):
             raise Unformattable('segment prefix without memory operand')
-        mn = RENAME.get(m, m.upper())
+        mn = (RENAME32 if self.w == 4 else RENAME).get(m, m.upper())
+        # an indirect far CALL/JMP (FF /3, /5), which capstone does not
+        # always name lcall/ljmp
+        far = ci.opcode[0] == 0xFF and (ci.modrm >> 3) & 7 in (3, 5)
         if m in JUMPS or m == 'call':
             op = ops[0]
             if op.type == x86.X86_OP_IMM:
                 return f'{mn} {self.sym(ins.refs["target"])}'
-        if m in ('lcall', 'ljmp'):
+        if m in ('lcall', 'ljmp') or far:
+            mn = 'CALL' if m in ('lcall', 'call') else 'JMP'
             if ops[0].type == x86.X86_OP_IMM:
                 if 'far' not in ins.refs:
                     raise Unformattable('far to unknown segment')
                 return f'{mn} FAR PTR {self.sym(ins.refs["far"])}'
-            op = ops[0]
-            return f'{mn} DWORD PTR {self.memtext(ins, op, need_size=False)}'
+            op = ops[-1]
+            size = 'FWORD PTR' if (self.w == 4) != (0x66 in pf) else 'DWORD PTR'
+            return f'{mn} {size} {self.memtext(ins, op, need_size=False)}'
         if m == 'int' and ops[0].imm == 3 and ci.bytes[0] == 0xCC:
             return 'INT 3'
         out = []
@@ -719,11 +824,16 @@ class Formatter:
                 out.append(self.imm(ins, op, size))
             elif op.type == x86.X86_OP_MEM:
                 need = m not in ('lea', 'les', 'lds') and (regsize is None or m in ('movzx', 'movsx'))
-                if m in ('les', 'lds', 'lea'):
+                if m in ('les', 'lds', 'lea', 'lfs', 'lgs', 'lss'):
                     need = False
+                # a segment register stored with 66h: WORD PTR makes the
+                # assembler write the prefix
+                if m == 'mov' and 0x66 in pf and ops[-1].type == x86.X86_OP_REG \
+                        and ci.reg_name(ops[-1].reg).upper() in ('ES', 'CS', 'SS', 'DS', 'FS', 'GS'):
+                    need = True
                 out.append(self.memtext(ins, op, need_size=need))
         # capstone writes the implicit shift count 1 and 'in al, dx' fine; a few need care
-        if m in ('shl', 'shr', 'sar', 'sal', 'rol', 'ror', 'rcl', 'rcr') and ci.bytes[0] in (0xD0, 0xD1):
+        if m in ('shl', 'shr', 'sar', 'sal', 'rol', 'ror', 'rcl', 'rcr') and ci.opcode[0] in (0xD0, 0xD1):
             out = out[:1] + ['1']
         # XCHG reg,reg: the assembler puts the first operand in the reg field
         if m == 'xchg' and len(ops) == 2 and all(o.type == x86.X86_OP_REG for o in ops) \
@@ -733,6 +843,8 @@ class Formatter:
             names8 = ['AL', 'CL', 'DL', 'BL', 'AH', 'CH', 'DH', 'BH']
             names16 = ['AX', 'CX', 'DX', 'BX', 'SP', 'BP', 'SI', 'DI']
             names = names8 if ci.bytes[-2] == 0x86 else names16
+            if ops[0].size == 4:
+                names = ['E' + r for r in names16]
             out = [names[reg], names[modrm & 7]]
         return mn + (' ' + ','.join(out) if out else '')
 
@@ -792,20 +904,21 @@ class Emitter:
     def emit(self):
         an = self.an
         self.out('; generated by tools/disasm.py from ' + an.h.exe + ' - do not edit, edit the hints')
-        self.out('.186')
+        self.out('.386' if an.w == 4 else '.186')
+        use = ' USE32' if an.w == 4 else ''
         order = an.segs
         for S in order:
             if S.cls == 'CODE':
-                self.out(f'{S.name} SEGMENT PARA PUBLIC \'{S.cls}\'')
-                self.out(f'\tASSUME CS:{S.name},DS:DATA,ES:NOTHING,SS:NOTHING')
+                self.out(f'{S.name} SEGMENT PARA PUBLIC{use} \'{S.cls}\'')
+                self.out(f'\tASSUME CS:{S.name},DS:{an.dflt_ds},ES:NOTHING,SS:NOTHING')
             elif S.stack:
-                self.out(f'{S.name} SEGMENT PARA STACK \'{S.cls}\'')
+                self.out(f'{S.name} SEGMENT PARA STACK{use} \'{S.cls}\'')
             else:
-                self.out(f'{S.name} SEGMENT PARA PUBLIC \'{S.cls}\'')
+                self.out(f'{S.name} SEGMENT PARA PUBLIC{use} \'{S.cls}\'')
             self.segment(S)
             self.out(f'{S.name} ENDS')
             self.out('')
-        e = an.labels[('CODE', an.p.ip)]
+        e = an.labels[an.entry]
         self.out(f'\tEND {e}')
 
     def label_lines(self, S, off):
@@ -827,7 +940,8 @@ class Emitter:
         tables = set(o for s, o, cnt, t in an.h.words if s == S.name)
         import bisect
         off = 0
-        self.f.assumed_ds = 'DATA'          # as the ASSUME at the segment's start says
+        w = an.w
+        self.f.assumed_ds = an.dflt_ds      # as the ASSUME at the segment's start says
         while off < S.size:
             key = (S.name, off)
             ins = an.insns.get(key)
@@ -862,9 +976,9 @@ class Emitter:
             a = S.base + off
             if a in an.farptrs:
                 t = an.farptrs[a]
-                self.inner_labels(S, off, 4)
-                self.out(f'\tDD {an.labels[t]}', (S.name, off, 4))
-                off += 4
+                self.inner_labels(S, off, w + 2)
+                self.out(f'\t{"DF" if w == 4 else "DD"} {an.labels[t]}', (S.name, off, w + 2))
+                off += w + 2
                 continue
             if a in an.p.relsites:
                 v = an.p.relsites[a]
@@ -883,12 +997,12 @@ class Emitter:
             if ws:
                 t, n = ws
                 for i in range(n):
-                    v = struct.unpack_from('<H', img, a + 2 * i)[0]
+                    v = int.from_bytes(img[a + w * i:a + w * (i + 1)], 'little')
                     if i:
-                        self.label_lines(S, off + 2 * i)
-                    self.inner_labels(S, off + 2 * i, 2)
-                    self.out(f'\tDW {an.labels[(t, v)]}', (S.name, off + 2 * i, 2))
-                off += 2 * n
+                        self.label_lines(S, off + w * i)
+                    self.inner_labels(S, off + w * i, w)
+                    self.out(f'\t{"DD" if w == 4 else "DW"} {an.labels[(t, v)]}', (S.name, off + w * i, w))
+                off += w * n
                 continue
             p = off
             for ln in db_lines(data):
@@ -928,7 +1042,8 @@ def generate(hints_path, raw_extra=()):
     h = Hints(hints_path)
     for r in raw_extra:
         h.raw.add(r)
-    prog = Program(os.path.join(game_dir(), h.exe))
+    path = program_path(h.exe)
+    prog = PmaxProgram(path) if h.kind == 'pmax' else Program(path)
     an = Analysis(prog, h)
     an.run()
     em = Emitter(an)

@@ -36,7 +36,8 @@ docs/NEW-PROJECT.md how to start a new game.
 - `tools/` (Python 3 with `capstone`; run from the project's folder, see
   `kit.py`):
   - `disasm.py`: analysis and source generator (the hints syntax is in
-    its docstring); `build.py`: generate, assemble, link, compare;
+    its docstring), for MZ programs and pMAX (a DOS extender's) 32-bit
+    flat images; `build.py`: generate, assemble, link, compare;
     `tasm.py`, `x86enc.py`, `tlink.py`: assembler and linker work-alikes
     (with switches for other assemblers' encodings, the `asm` hint).
   - `gaps.py`: what of a code segment is not reached yet, and where the
@@ -72,7 +73,8 @@ docs/NEW-PROJECT.md how to start a new game.
 - `template/`: the start of a new port's repository (rules, hook, build
   scripts, a C skeleton).
 - `tests/`: `selftest.py`, the whole way on a program of our own
-  (`tests/hello`), no game needed.
+  (`tests/hello`), no game needed; the 32-bit encoder (`tests/enc32`) and
+  a pMAX image rebuilt (`tests/flat`).
 
 ## Use
 

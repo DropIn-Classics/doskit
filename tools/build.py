@@ -4,14 +4,17 @@ compare the result with the shipped program.
 
     build.py HINTS [--rounds N]
 
-Writes build/NAME.ASM and build/NAME.EXE (in the project, see kit.py).
+Writes build/NAME.ASM and build/NAME.EXE (in the project, see kit.py;
+for a pMAX image NAME with the program's own extension).
 Every line of the source knows the address it came from, so the
 comparison works line by line: an instruction the assembler encodes
 differently (tasm.py and the original's assembler do not always agree)
 is reported and written as DB in the next round; a data line that
 differs is a bug of disasm.py.  Ends with the byte comparison of the
 whole file.  The EXE header is laid out as Microsoft LINK lays it out
-(write_mz); a program linked otherwise needs its own layout there.
+(write_mz); a program linked otherwise needs its own layout there.  A
+pMAX image is written by write_pmax.  A line tasm.py cannot assemble is
+written as DB in the next round too.
 """
 import argparse, os, struct, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -44,15 +47,55 @@ def write_mz(out, prog, reloc_segs):
     return bytes(h) + stored
 
 
+def write_pmax(out, segs):
+    """A pMAX flat image from the linked program: the hints' segments are
+    the descriptors, in their order; a selector word (SEG fixup) becomes a
+    relocation to the descriptor of its segment, the word itself 0.  Not
+    known and written as the one image examined has them: the header's
+    first word (0), the format number (1), the size to allocate (the
+    image's), the relocations in address order, uninitialised bytes stored
+    as zeros, the entry point as an image offset."""
+    img = bytearray(out.img)
+    desc = {}
+    for i, s in enumerate(segs):
+        desc.setdefault(out.byname[s.name]['frame'], i)
+    rel = []
+    for a, fr, _ in out.relocs:
+        rel.append((a, desc[struct.unpack_from('<H', img, a)[0]]))
+        img[a:a + 2] = b'\0\0'
+    rel.sort()
+    h = struct.pack(disasm.PMAX_HDR, 0, len(img), 1, len(segs), len(img), out.cs * 16 + out.ip, len(rel))
+    for s in segs:
+        sg = out.byname[s.name]
+        h += struct.pack('<II', sg['start'], sg['end'] - sg['start'])
+    return h + bytes(img) + b''.join(struct.pack('<IB', a, d) for a, d in rel)
+
+
+def assemble(asm_path, an, em):
+    """tasm.py on the source; the lines it refuses are returned as the
+    addresses they came from, to be written as DB"""
+    a = tasm.Assembler(asm_path)
+    for k, v in an.h.asm.items():         # the hints' `asm` switches
+        setattr(a, k, v)
+    a.collect = []
+    a.assemble()
+    refused = {}
+    for passno, (where, lineno), err, text in a.collect:
+        loc = em.map[lineno - 1] if lineno <= len(em.map) else None
+        if loc is None or (loc[0], loc[1]) not in an.insns:
+            raise tasm.AsmError(f'{where}:{lineno}: {err}\n    {text}')
+        refused[(loc[0], loc[1])] = (loc[0], loc[1], 'asm', f'{text}  {err}')
+    return a, list(refused.values())
+
+
 def build_once(hints, raw):
     an, em = disasm.generate(hints, raw)
     name = os.path.splitext(os.path.basename(hints))[0]
     asm_path = build_dir(name + '.ASM')
     open(asm_path, 'w', newline='\r\n').write('\n'.join(em.lines) + '\n')
-    a = tasm.Assembler(asm_path)
-    for k, v in an.h.asm.items():         # the hints' `asm` switches
-        setattr(a, k, v)
-    a.assemble()
+    a, refused = assemble(asm_path, an, em)
+    if refused:
+        return an, em, a, None, None, refused, name
     m = tlink.module_from_asm(a, name)
     out = tlink.link([m])
     # line by line, independent of where earlier lines put it: a line is
@@ -90,11 +133,14 @@ def build_once(hints, raw):
                     mask |= set(range(ci.imm_offset, ci.imm_offset + ci.imm_size))
                 if ci.mnemonic in disasm.JUMPS or ci.mnemonic == 'call':
                     mask |= set(range(1, n))
-            elif 'DW ' in text or 'DD ' in text:
+            elif 'DW ' in text or 'DD ' in text or 'DF ' in text:
                 continue
             if any(got[k] != want[k] for k in range(n) if k not in mask):
                 bad.append((s, off, 'bytes', f'{text.strip()}  got {got.hex()} want {want.hex()}'))
-    exe = write_mz(out, an.p, [an.byname[s].frame for s in an.h.relocorder])
+    if an.p.kind == 'pmax':
+        exe = write_pmax(out, an.segs)
+    else:
+        exe = write_mz(out, an.p, [an.byname[s].frame for s in an.h.relocorder])
     if an.h.keeptail:
         exe += an.p.tail
     return an, em, a, out, exe, bad, name
@@ -118,7 +164,10 @@ def main():
         if not new:
             break
         raw |= new
-    path = build_dir(name + '.EXE')
+    if exe is None:
+        sys.exit(f'lines tasm.py refuses are left after {args.rounds} rounds')
+    ext = os.path.splitext(an.h.exe)[1] if an.p.kind == 'pmax' else '.EXE'
+    path = build_dir(name + ext)
     open(path, 'wb').write(exe)
     ref = an.p.file
     same = exe == ref

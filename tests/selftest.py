@@ -7,10 +7,14 @@ program of our own (tests/hello/HELLO.ASM), so no game is needed.
 In build/selftest (a project as a game's would be, see kit.py):
 
   1. HELLO.ASM assembled and linked with tasm.py and tlink.py into
-     game/HELLO/HELLO.EXE (the "shipped program");
-  2. check.py: disasm.py makes its source from tests/hello/src/HELLO.hints,
-     build.py rebuilds it byte for byte; PROVENANCE.md (the template's)
-     is there; the names header symmap.py wrote is up to date;
+     game/HELLO/HELLO.EXE (the "shipped program"); tests/flat/FLAT.ASM,
+     32-bit, the same way into a pMAX image, build/files/FLAT.386 (as a
+     project's tool would unpack it);
+  2. check.py: disasm.py makes their sources from tests/hello/src/HELLO.hints
+     and tests/flat/src/FLAT.hints, build.py rebuilds them byte for byte;
+     PROVENANCE.md (the template's) is there; the names header symmap.py
+     wrote is up to date; FLAT without its raw hint rebuilds too (the
+     line tasm.py refuses written as DB by build.py);
   3. run.py: the program in the runner, stopped at its end (CODE:0026),
      its console line read, memory and video memory written out;
   4. the C runtime: tests/hello/port.c (HELLO in C over rmem.h and vga.h,
@@ -66,6 +70,19 @@ def make_exe():
     return len(exe)
 
 
+def make_flat():
+    """tests/flat/FLAT.ASM as a pMAX image, its segments the descriptors"""
+    a = tasm.Assembler(os.path.join(HERE, 'flat', 'FLAT.ASM'))
+    a.assemble()
+    out = tlink.link([tlink.module_from_asm(a, 'FLAT')])
+    segs = [type('Seg', (), {'name': n}) for n in a.segorder]
+    img = build.write_pmax(out, segs)
+    os.makedirs(os.path.join(PROJ, 'build', 'files'))
+    with open(os.path.join(PROJ, 'build', 'files', 'FLAT.386'), 'wb') as f:
+        f.write(img)
+    return len(img)
+
+
 def check_enc32():
     """tests/enc32/ENC32.ASM: what capstone reads from each 32-bit
     instruction tasm.py makes, and its length, as the line's comment says."""
@@ -113,8 +130,9 @@ def main():
     print(f'{check_enc32()} lines as capstone reads them')
 
     step('1. HELLO.EXE assembled and linked')
-    print(f'{make_exe()} bytes')
+    print(f'{make_exe()} bytes; FLAT.386 {make_flat()} bytes')
     shutil.copy(os.path.join(HERE, 'hello', 'src', 'HELLO.hints'), os.path.join(PROJ, 'src'))
+    shutil.copy(os.path.join(HERE, 'flat', 'src', 'FLAT.hints'), os.path.join(PROJ, 'src'))
     # every project carries PROVENANCE.md (check.py insists)
     with open(os.path.join(KIT, 'template', 'PROVENANCE.md'), 'rb') as f:
         text = f.read().replace(b'{{NAME}}', b'HELLO (the kit\'s test program)')
@@ -129,6 +147,16 @@ def main():
     print(out)
     if not out.splitlines()[-1].startswith('all ok'):
         raise SystemExit('selftest FAILED: check.py')
+    noraw = os.path.join(PROJ, 'build', 'FLATNORAW.hints')
+    with open(os.path.join(HERE, 'flat', 'src', 'FLAT.hints')) as f:
+        text = ''.join(l for l in f if not l.startswith('raw'))
+    with open(noraw, 'w') as f:
+        f.write(text)
+    out = run([py, os.path.join(TOOLS, 'build.py'), noraw])
+    if 'IDENTICAL' not in out or 'raw CODE:0086' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: FLAT without its raw hint')
+    print('FLAT without its raw hint: IDENTICAL, CODE:0086 written as DB')
 
     step('3. run in the runner (run.py)')
     b = os.path.join(PROJ, 'build')
@@ -190,8 +218,9 @@ def main():
     if r.returncode:
         print(r.stdout + r.stderr)
         raise SystemExit('selftest FAILED: the template\'s port did not find the game')
+    # named, as the folder above (the kit inside a project) may be a project too
     out = subprocess.run([py, os.path.join(TOOLS, 'check.py')], cwd=new, capture_output=True,
-                         text=True, env={k: v for k, v in os.environ.items() if k != 'DOSKIT_PROJECT'})
+                         text=True, env=dict(os.environ, DOSKIT_PROJECT=new))
     print(out.stdout.strip())
     if out.returncode:
         raise SystemExit('selftest FAILED: check.py in the new project')

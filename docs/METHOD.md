@@ -230,8 +230,12 @@ linked by Microsoft LINK, 186/386 instructions in 16-bit code. Not tried:
   will want more hints and probably new analysis;
 - COM programs (no MZ header), overlays, EXEPACK/PKLITE-packed programs
   (unpack first; the runner runs them as they are);
-- protected mode (DOS/4GW and other extenders, LE/LX): neither the
-  analysis nor the runner;
+- protected mode: the analysis and build.py take pMAX flat images
+  (`pmax` in the hints: 32-bit code, USE32 source, the descriptors as
+  segments; tests/flat, and one game's main program rebuilt byte for
+  byte), not DOS/4GW's LE/LX or other extenders' formats; the runner
+  runs none of them. A 32-bit instruction with a 16-bit address and no
+  register (67h, `[0027h]`) has no source form and stays DB;
 - other linkers' header layouts (`build.py`'s write_mz is Microsoft
   LINK's).
 

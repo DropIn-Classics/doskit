@@ -7,7 +7,7 @@ Each gap is shown with its first instructions (linear decoding), to decide
 whether it is code only reached through a pointer or data."""
 import argparse, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import disasm, capstone
+import disasm
 
 ap = argparse.ArgumentParser()
 ap.add_argument('hints')
@@ -16,7 +16,7 @@ ap.add_argument('--seg', default='CODE')
 a = ap.parse_args()
 an, em = disasm.generate(a.hints)
 S = an.byname[a.seg]
-md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_16)
+md = an.md
 g = disasm.gaps(an, a.seg)
 tot = sum(e - s for s, e in g)
 print(f'{len(g)} gaps, {tot} of {S.size} bytes not reached as code')
@@ -38,11 +38,9 @@ print('\nwhere gap starts appear as words:')
 imm_at = {}
 for (s, o), ins in an.insns.items():
     ci = ins.ci
-    if ci.imm_size == 2:
-        v = int.from_bytes(ci.bytes[ci.imm_offset:ci.imm_offset + 2], 'little')
+    if ci.imm_size == an.w:
+        v = int.from_bytes(ci.bytes[ci.imm_offset:ci.imm_offset + an.w], 'little')
         imm_at.setdefault(v, []).append(f'{s}:{o:04X} {ci.mnemonic} {ci.op_str}')
-    if ci.disp_size == 2:
-        pass
 img = an.p.img
 for s, e in g:
     b = bytes(img[S.base + s:S.base + e])
@@ -52,7 +50,7 @@ for s, e in g:
         if k != s and (a.seg, k) not in an.labels:
             continue
         hits = list(imm_at.get(k, []))
-        w = k.to_bytes(2, 'little')
+        w = k.to_bytes(an.w, 'little')
         p = img.find(w)
         while p >= 0 and len(hits) < 8:
             T = an.seg_at(p)

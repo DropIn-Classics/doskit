@@ -3,7 +3,7 @@
 
     ptrscan.py HINTS [--hints]
 
-A MOV r16,imm whose register then serves as a base or index register (or
+A MOV r16,imm (r32 in a 32-bit program) whose register then serves as a base or index register (or
 is compared, or stored), before anything else is loaded into it, most
 likely holds an offset.  The segment is the one the memory operand goes
 through (DS/ES as the analysis tracks them).  With --hints the result is
@@ -33,7 +33,7 @@ found = []
 for i, k in enumerate(keys):
     ins = an.insns[k]
     ci = ins.ci
-    if ci.mnemonic != 'mov' or 'imm' in ins.refs or ci.imm_size != 2:
+    if ci.mnemonic != 'mov' or 'imm' in ins.refs or ci.imm_size != an.w:
         continue
     d, s = ci.operands
     if d.type != x86.X86_OP_REG or s.type != x86.X86_OP_IMM:
@@ -41,7 +41,7 @@ for i, k in enumerate(keys):
     r = ci.reg_name(d.reg).upper()
     if r in ('AX', 'CX', 'DX') and False:
         continue
-    v = s.imm & 0xFFFF
+    v = s.imm & an.mask
     if v < 0x100:
         continue
     # follow the straight line of instructions after it
