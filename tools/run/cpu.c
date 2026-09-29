@@ -913,7 +913,9 @@ static void strop(int op, int sz){
             if(op==1||op==4){ if(rep==2 && !cpu.zf) break; if(rep==1 && cpu.zf) break; }
         }
     }
-    cpu.cycles += cnt;
+    /* one cycle an element done: REPE/REPNE may stop long before ECX runs
+     * out (a string's length with ECX = -1 would be 4 billion) */
+    cpu.cycles += i < cnt ? i + 1 : cnt;
 }
 
 /* ---------------------------------------------------- emulator callbacks */

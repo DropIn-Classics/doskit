@@ -1,6 +1,8 @@
 ; PMODE.EXE - the kit's test of the runner's protected mode
 ; (tests/selftest.py): enters it through the BIOS (INT 15h AH=89h), then
-;   1. writes and reads memory above 1 MB through a flat 32-bit selector,
+;   1. writes and reads memory above 1 MB through a flat 32-bit selector;
+;      times REPNE SCASB with ECX = -1 on a short string with RDTSC (the
+;      runner's instruction count: the elements done, not ECX),
 ;   2. loads a selector beyond the GDT: #GP with the selector as the error
 ;      code, the handler steps over the instruction,
 ;   3. waits with HLT for IRQ0, through the IDT (the PIC's base from BH),
@@ -147,6 +149,10 @@ checks:
 	JNE failed
 	CMP WORD PTR r_flat+2,1234H
 	JNE failed
+	CMP WORD PTR r_scas+2,0
+	JNE failed
+	CMP WORD PTR r_scas,100
+	JA failed
 	MOV BL,'2'
 	CMP r_gperr,0F8H
 	JNE failed
@@ -245,6 +251,19 @@ start32:
 	MOV DWORD PTR ES:[200000H],12345678H
 	MOV EAX,ES:[200000H]
 	MOV r_flat,EAX
+	PUSH ES
+	PUSH DS
+	POP ES
+	DB 0FH,31H                      ; RDTSC
+	MOV EBX,EAX
+	MOV EDI,OFFSET own_name
+	XOR AL,AL
+	MOV ECX,-1
+	REPNE SCASB
+	DB 0FH,31H                      ; RDTSC
+	SUB EAX,EBX
+	MOV r_scas,EAX
+	POP ES
 	; 2. a selector beyond the GDT
 	MOV AX,0F8H
 	MOV DS,AX
@@ -404,6 +423,7 @@ int30_ss DW 0
 int30_fl DD 0
 r_extkb	DW 0
 r_flat	DD 0
+r_scas	DD 0
 r_gperr	DW 0
 r_r3cs	DW 0
 r_r3ss	DW 0
