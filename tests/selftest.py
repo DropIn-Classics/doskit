@@ -20,7 +20,8 @@ In build/selftest (a project as a game's would be, see kit.py):
      its console line read, memory and video memory written out; PMODE.EXE
      in the runner, which checks the runner's protected mode itself (into
      it through INT 15h AH=89h, a #GP, IRQ0 through the IDT, ring 3, a
-     call gate, V86 mode with the I/O bitmap, back to real mode) and says
+     call gate, V86 mode with the I/O bitmap, back to real mode; then its
+     own file opened for writing, with no layer folder yet) and says
      "pmode ok";
   4. the C runtime: tests/hello/port.c (HELLO in C over rmem.h and vga.h,
      on plat_null.c) built with cc, run on the same program; its memory

@@ -377,11 +377,13 @@ static void layer_path(const char *root, const char *gpath, char *out, size_t n)
 #endif
 }
 
+/* the folders above a file in the layer, the layer's root and the folders
+ * above it too (a fresh build/ has no run/state yet) */
 static void mkdirs_for(const char *hostfile){
     char tmp[700];
     size_t i;
     snprintf(tmp, sizeof(tmp), "%s", hostfile);
-    for(i = strlen(state_root) + 1; tmp[i]; i++){
+    for(i = 1; tmp[i]; i++){
         if(tmp[i]=='\\' || tmp[i]=='/'){
             char c = tmp[i]; tmp[i] = 0; mkdir_host(tmp); tmp[i] = c;
         }

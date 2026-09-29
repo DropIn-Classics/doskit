@@ -9,8 +9,11 @@
 ;      ring 0,
 ;   5. goes to V86 mode by IRETD: INT 30h from there, IN from a port the
 ;      I/O bitmap allows, OUT to one it refuses (#GP), INT 31h back,
-;   6. returns to real mode and prints "pmode ok", or "pmode FAILED" and
-;      the number of the check that failed.
+;   6. returns to real mode and opens its own file for writing (the
+;      runner's DOS copies it into its writable layer, whose folder does
+;      not exist yet in the selftest),
+; and prints "pmode ok", or "pmode FAILED" and the number of the check
+; that failed.
 ; tasm.py has no system instructions: they are written as DB.  Written
 ; for the kit; no game's code.
 .386
@@ -181,6 +184,14 @@ checks5:
 	JNE failed_b
 	CMP r_v86err,0
 	JNE failed_b
+	MOV BL,'6'
+	MOV DX,OFFSET own_name
+	MOV AX,3D02H
+	INT 21H
+	JC failed_b
+	MOV BX,AX
+	MOV AH,3EH
+	INT 21H
 	MOV DX,OFFSET text_ok
 	MOV AH,9
 	INT 21H
@@ -404,6 +415,7 @@ r_v86fl	DD 0
 r_v86in	DW 0
 r_v86err DW 0
 text_ok	DB 'pmode ok',13,10,'$'
+own_name DB 'PMODE.EXE',0
 text_failed DB 'pmode FAILED at check '
 text_which DB '?',13,10,'$'
 DATA ENDS
