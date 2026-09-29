@@ -1,7 +1,8 @@
 /* dosrun - a headless PC for running the shipped programs of a DOS game.
  * The emulation core: cpu.c (386: real, protected and V86 mode), vga.c, dev.c (PIC,
  * PIT, keyboard controller), bios.c, sound.c (DMA, Sound Blaster),
- * vgafont.c, png.c; dos.c is the DOS layer (memory, EXEC, files).  main.c
+ * vgafont.c, png.c; dos.c is the DOS layer (memory, EXEC, files), mscdex.c
+ * the CD-ROM extensions.  main.c
  * is the session: options, the loop, what is written out.
  */
 #ifndef DOSRUN_H
@@ -165,6 +166,12 @@ void dos_flush_con(void);             /* the last line printed without CR/LF */
 /* Called for each program EXEC loads, with its load segment (PSP + 10h),
  * so main.c can resolve addresses given relative to one program. */
 extern void (*dos_on_load)(const char *dospath, uint16_t load_seg);
+
+/* ---------------------------------------------------------- MSCDEX ----- */
+/* INT 2Fh AH=15h with D: as the CD drive, a disc of one data track
+ * (mscdex.c); installed after dos_init */
+void mscdex_init(void);
+extern int cd_log;                    /* -cd: print the CD requests */
 
 /* ----------------------------------------------------------- sound ------ */
 void sound_init(void);

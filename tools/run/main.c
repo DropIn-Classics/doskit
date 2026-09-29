@@ -46,6 +46,7 @@
  *                    byte 4*o+p = plane p, offset o) at the end
  *   -wav FILE        what the Sound Blaster played
  *   -dos             print every INT 21h call
+ *   -cd              print every MSCDEX call and CD request
  *   -intwatch NN     print every INT NN call (hex)
  *   -prof            the busiest CS:IP at the end
  *   -v               the devices' and DOS's trace on stderr
@@ -371,6 +372,7 @@ int main(int argc, char **argv){
         else if(!strcmp(a,"-vram")){ NEED(1); vram_file = argv[++i]; }
         else if(!strcmp(a,"-wav")){ NEED(1); wav_file = argv[++i]; }
         else if(!strcmp(a,"-dos")) dos_log = 1;
+        else if(!strcmp(a,"-cd")) cd_log = 1;
         else if(!strcmp(a,"-loadfix")) loadfix = 1;
         else if(!strcmp(a,"-intwatch")){ NEED(1); int_watch = (int)strtol(argv[++i], NULL, 16); }
         else if(!strcmp(a,"-prof")) prof_on = 1;
@@ -393,6 +395,7 @@ int main(int argc, char **argv){
     dev_init();
     bios_init();
     dos_init(game, state);
+    mscdex_init();
     if(loadfix) dos_loadfix();
     dos_on_load = on_load;
     put_files();

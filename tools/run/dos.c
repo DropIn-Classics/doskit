@@ -1055,6 +1055,15 @@ static void dos_int21(void){
     case 0x50: cur_psp = BX; break;
     case 0x51: case 0x62: BX = cur_psp; break;
     case 0x54: AL = 0; break;
+    case 0x57: {
+        /* a file's date and time: the fixed day at midnight, as the
+         * directory entries say; setting them is taken and not kept */
+        int h = BX;
+        if(h>=64 || (h>=5 && !fh[h].used)){ AX = 6; bios_set_cf(1); break; }
+        if(AL==0){ CX = 0; DX = FIX_DOSDATE; bios_set_cf(0); }
+        else if(AL==1) bios_set_cf(0);
+        else { AX = 1; bios_set_cf(1); }
+        break; }
     case 0x58:
         switch(AL){
         case 0x00: AX = dos_alloc_strategy; bios_set_cf(0); break;

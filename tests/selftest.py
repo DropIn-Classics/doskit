@@ -10,7 +10,7 @@ In build/selftest (a project as a game's would be, see kit.py):
      game/HELLO/HELLO.EXE (the "shipped program"); tests/flat/FLAT.ASM,
      32-bit, the same way into a pMAX image, build/files/FLAT.386 (as a
      project's tool would unpack it); tests/pmode/PMODE.ASM into
-     game/PMODE/PMODE.EXE;
+     game/PMODE/PMODE.EXE, tests/cdrom/CDROM.ASM into game/CDROM/CDROM.EXE;
   2. check.py: disasm.py makes their sources from tests/hello/src/HELLO.hints
      and tests/flat/src/FLAT.hints, build.py rebuilds them byte for byte;
      PROVENANCE.md (the template's) is there; the names header symmap.py
@@ -22,7 +22,9 @@ In build/selftest (a project as a game's would be, see kit.py):
      it through INT 15h AH=89h, a #GP, IRQ0 through the IDT, ring 3, a
      call gate, V86 mode with the I/O bitmap, back to real mode; then its
      own file opened for writing, with no layer folder yet) and says
-     "pmode ok";
+     "pmode ok"; CDROM.EXE, which checks the runner's MSCDEX (the drive,
+     device requests, an audio play and stop; INT 21h AH=57h) and says
+     "cdrom ok";
   4. the C runtime: tests/hello/port.c (HELLO in C over rmem.h and vga.h,
      on plat_null.c) built with cc, run on the same program; its memory
      compared with the runner's by memcmp.py (CODE, DATA and video memory;
@@ -136,7 +138,8 @@ def main():
     print(f'{check_enc32()} lines as capstone reads them')
 
     step('1. HELLO.EXE assembled and linked')
-    print(f'{make_exe()} bytes; FLAT.386 {make_flat()} bytes; PMODE.EXE {make_exe("PMODE")} bytes')
+    print(f'{make_exe()} bytes; FLAT.386 {make_flat()} bytes; PMODE.EXE {make_exe("PMODE")} bytes; '
+          f'CDROM.EXE {make_exe("CDROM")} bytes')
     shutil.copy(os.path.join(HERE, 'hello', 'src', 'HELLO.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'flat', 'src', 'FLAT.hints'), os.path.join(PROJ, 'src'))
     # every project carries PROVENANCE.md (check.py insists)
@@ -205,6 +208,11 @@ def main():
     if 'con: pmode ok' not in out:
         print(out)
         raise SystemExit('selftest FAILED: PMODE.EXE (the runner\'s protected mode)')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', 'CDROM/CDROM.EXE'])
+    print('\n'.join(l for l in out.splitlines() if l.startswith('con:')))
+    if 'con: cdrom ok' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: CDROM.EXE (the runner\'s MSCDEX)')
 
     step('4. the C port over the runtime, compared (memcmp.py)')
     exe = os.path.join(b, 'port')
