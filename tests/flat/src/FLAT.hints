@@ -10,6 +10,7 @@ ptr        CODE:0057 CODE
 rwords     CODE:00D6 4             ; the switch's offsets from the table
 dptr       CODE:00C5 CODE          ; MOVSX EDI,SWTAB[EDI*2]
 dptr       CODE:00CD CODE          ; LEA EDI,[EDI+SWTAB]
+words      CODE:00F0 2 CODE stride=8   ; the handlers of the records at CODE:00EC
 
 name       CODE:0000 SAVED_DS
 name       CODE:0002 COUNT

@@ -74,6 +74,11 @@ S1: INC COUNT
     RET
 S2: DEC COUNT
     RET
+EVENTS      DD 5, E0, 9, E1         ; records of a time and a handler (words stride=8)
+E0: INC COUNT
+    RET
+E1: DEC COUNT
+    RET
 
 CODE ENDS
 

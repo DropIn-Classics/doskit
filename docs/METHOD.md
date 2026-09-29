@@ -63,7 +63,8 @@ Single instructions encoded by hand (a DB in the original source) are
 points, tracking what DS and ES hold. Then `tools/gaps.py` lists what of
 CODE is not reached: every gap is either code reached through a pointer
 or data. For code, find the pointer and say where it comes from in a
-comment: `code` (an entry point), `words` (a table of near pointers), `rwords` (a compiled switch: 16-bit
+comment: `code` (an entry point), `words` (a table of near pointers;
+with `stride=N` one pointer in each record of N bytes), `rwords` (a compiled switch: 16-bit
 offsets from the table's own start, `LEA reg,[reg+table]; JMP reg`),
 `ptr` (an immediate that is a code offset: `MOV DX,offset handler`
 before INT 21h AH=25h), `coderange` (a run of handlers). gaps.py shows

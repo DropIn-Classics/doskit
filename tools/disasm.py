@@ -41,6 +41,9 @@ Hints syntax (one per line, ';' starts a comment, numbers are hex):
     words      SEG:OFF COUNT TARGETSEG a table of near pointers into TARGETSEG
                                        (TARGETSEG CODE also seeds code); 32-bit
                                        ones in a pMAX image
+    words      SEG:OFF COUNT TARGETSEG stride=N
+                                       COUNT pointers N bytes apart (a field
+                                       of records), the bytes between as data
     rwords     SEG:OFF COUNT           a table of signed 16-bit offsets from
                                        the table's own start (a compiled
                                        switch: LEA reg,[reg+table]; JMP reg),
@@ -223,7 +226,13 @@ class Hints:
                         self.names.setdefault((s, o), f[2])
                 elif k == 'words':
                     s, o = self.addr(f[1])
-                    self.words.append((s, o, int(f[2], 16), f[3]))
+                    stride = next((int(x[7:], 16) for x in f[4:] if x.startswith('stride=')), None)
+                    if stride:
+                        # one pointer every STRIDE bytes (records): tables of one
+                        for i in range(int(f[2], 16)):
+                            self.words.append((s, o + stride * i, 1, f[3]))
+                    else:
+                        self.words.append((s, o, int(f[2], 16), f[3]))
                 elif k == 'rwords':
                     s, o = self.addr(f[1])
                     self.rwords.append((s, o, int(f[2], 16)))
