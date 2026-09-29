@@ -340,6 +340,13 @@ def main():
     if out.returncode:
         raise SystemExit('selftest FAILED: check.py in the new project')
 
+    for agent in ('doskit-collector', 'git-committer'):
+        p = os.path.join(new, '.claude', 'agents', f'{agent}.md')
+        if not os.path.isfile(p):
+            raise SystemExit(f'selftest FAILED: the template did not carry {p}')
+        if agent not in open(os.path.join(new, 'AGENTS.md')).read():
+            raise SystemExit(f'selftest FAILED: AGENTS.md does not mention {agent}')
+
     print('selftest ok')
 
 

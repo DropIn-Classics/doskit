@@ -26,6 +26,15 @@ first; this file is the rules. The method and the tools are doskit's
 7. A change to the kit (a tool, the runtime) goes into doskit with a
    test there, not into a copy here.
 
+## Subagents
+
+`.claude/agents/` sets up two: `doskit-collector` for read-only stage
+1/2 collection (disasm.py, gaps.py, ptrscan.py, run.py, memcmp.py
+output) that the lead then interprets and writes into the hints, and
+`git-committer` for every commit and push, so the checks and the
+message stay uniform. Delegate to them instead of doing their job
+inline.
+
 ## Provenance (permanent)
 
 PROVENANCE.md is part of the project and binding; it holds in full. In
