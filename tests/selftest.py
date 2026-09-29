@@ -16,8 +16,8 @@ In build/selftest (a project as a game's would be, see kit.py):
      into game/CDPLAY/CDPLAY.EXE;
   2. check.py: disasm.py makes their sources from tests/hello/src/HELLO.hints
      and tests/flat/src/FLAT.hints, build.py rebuilds them byte for byte;
-     PROVENANCE.md (the template's) is there; the names header symmap.py
-     wrote is up to date; FLAT without its raw hint rebuilds too (the
+     PROVENANCE.md (the template's) is there; the names headers symmap.py
+     wrote (HELLO's, FLAT's) are up to date; FLAT without its raw hint rebuilds too (the
      line tasm.py refuses written as DB by build.py);
   3. run.py: its table of the runner's options has every option the
      runner parses (one it lacks is taken for PROGRAM, and the addresses
@@ -54,7 +54,11 @@ In build/selftest (a project as a game's would be, see kit.py):
      the stack is not the same and not compared); its picture as a PNG
      (shot.c, DK_SHOTS) read back and compared with its PPM (DK_DUMP);
      tests/shot/shottest.c's PNGs (noise, long runs, far repeats) read
-     back and compared with the pixels it wrote;
+     back and compared with the pixels it wrote; tests/flat/port.c (the
+     start of FLAT.386 in C over pmem.h, loaded at a linear address with
+     a selector per descriptor) against the memory made here from the
+     image, by memcmp.py --base, which also finds a byte changed in it;
+     the runner's -mem (the HELLO run of step 3) begins with -ram's bytes;
   5. every runtime module compiled with warnings as errors (plat_sdl.c
      only when runtime/sdl2-flags.sh finds SDL2; plat_win32.c not here);
   6. new_project.py: a project made from template/ in build/selftest-new
@@ -254,6 +258,49 @@ def make_flat():
     return len(img)
 
 
+def check_pmem(py, b):
+    """tests/flat/port.c (the start of FLAT.386 in C over pmem.h) against
+    the memory the image should have there, made here from the file: the
+    image at BASE, its selector relocations set, SAVED_DS and COUNT as
+    START leaves them; memcmp.py --base finds no difference, and finds
+    the one put into a copy."""
+    base, sels = 0x11F2A0, (0x1C, 0x24)
+    exe = os.path.join(b, 'flatport')
+    run([CC] + CFLAGS + ['-I', RUNTIME, '-I', os.path.join(PROJ, 'port'), '-o', exe,
+                         os.path.join(HERE, 'flat', 'port.c')] +
+        [os.path.join(RUNTIME, f) for f in ('pmem.c', 'sys.c', 'sha256.c')])
+    port_mem = os.path.join(b, 'flatport.mem')
+    print(run([exe, os.path.join(PROJ, 'build', 'files', 'FLAT.386'), '%X' % base, port_mem]))
+    f = open(os.path.join(PROJ, 'build', 'files', 'FLAT.386'), 'rb').read()
+    _, alloc, _, n, size, _, nrel = struct.unpack_from('<IIBBIIH', f)
+    descs = [struct.unpack_from('<II', f, 20 + 8 * i) for i in range(n)]
+    mem = bytearray(0x1000000)
+    mem[base:base + size] = f[20 + 8 * n:20 + 8 * n + size]
+    for i in range(nrel):
+        off, d = struct.unpack_from('<IB', f, 20 + 8 * n + size + 5 * i)
+        struct.pack_into('<H', mem, base + off, sels[d])
+    a = tasm.Assembler(os.path.join(HERE, 'flat', 'FLAT.ASM'))
+    a.assemble()
+    code, more = base + descs[0][0], base + descs[1][0]
+    struct.pack_into('<H', mem, code + a.syms['SAVED_DS'].value, sels[0])
+    count, other = code + a.syms['COUNT'].value, more + a.syms['OTHER'].value
+    mem[count:count + 4] = mem[other:other + 4]
+    orig = os.path.join(b, 'flat.mem')
+    with open(orig, 'wb') as out:
+        out.write(mem)
+    cmd = [py, os.path.join(TOOLS, 'memcmp.py'), 'src/FLAT.hints', orig, port_mem, '--base', '%X' % base]
+    print(run(cmd))
+    mem[code + a.syms['COUNT'].value + 2] ^= 0xFF
+    with open(orig, 'wb') as out:
+        out.write(mem)
+    r = subprocess.run(cmd, cwd=PROJ, capture_output=True, text=True,
+                       env=dict(os.environ, DOSKIT_PROJECT=PROJ))
+    if r.returncode != 1 or 'COUNT+2' not in r.stdout:
+        print(r.stdout + r.stderr)
+        raise SystemExit('selftest FAILED: memcmp.py --base did not find the changed COUNT')
+    print('memcmp.py --base: a changed byte found at COUNT+2')
+
+
 def check_enc32():
     """tests/enc32/ENC32.ASM: what capstone reads from each 32-bit
     instruction tasm.py makes, and its length, as the line's comment says."""
@@ -316,6 +363,8 @@ def main():
     py = sys.executable
     print(run([py, os.path.join(TOOLS, 'symmap.py'), 'port/hello_names.h', 'HELLO',
                'HELLO=src/HELLO.hints']))
+    print(run([py, os.path.join(TOOLS, 'symmap.py'), 'port/flat_names.h', 'FLAT',
+               'FLAT=src/FLAT.hints']))
     out = run([py, os.path.join(TOOLS, 'check.py')])
     print(out)
     if not out.splitlines()[-1].startswith('all ok'):
@@ -369,10 +418,16 @@ def main():
     b = os.path.join(PROJ, 'build')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-break', 'CODE:0026',
                '-dump', 'counter', '2', '-ram', os.path.join(b, 'orig.ram'),
+               '-mem', os.path.join(b, 'orig.mem'),
                '-vram', os.path.join(b, 'orig.vram'), 'HELLO/HELLO.EXE'])
     print('\n'.join(l for l in out.splitlines() if l.startswith(('con:', 'break', 'dump'))))
     if 'con: hello from doskit' not in out:
         raise SystemExit('selftest FAILED: no console line from HELLO.EXE')
+    with open(os.path.join(b, 'orig.ram'), 'rb') as f, open(os.path.join(b, 'orig.mem'), 'rb') as g:
+        ram, whole = f.read(), g.read()
+    if len(whole) != 0x1000000 or whole[:len(ram)] != ram:
+        raise SystemExit('selftest FAILED: -mem is not the 16 MB that begin with -ram\'s bytes')
+    print('-mem: 16 MB, beginning with -ram\'s 640 KB')
     # -rwatch: the table of two pointers is read by one CALL, a word each;
     # counter by INC and ADD (not by the fetches, not by DOS's AH=9)
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-rwatch', 'counter', '6',
@@ -478,6 +533,7 @@ def main():
     print(run([py, os.path.join(TOOLS, 'memcmp.py'), 'src/HELLO.hints',
                os.path.join(b, 'orig.ram'), os.path.join(b, 'port.ram'), '--skip', 'STACK',
                '--vram', os.path.join(b, 'orig.vram'), os.path.join(b, 'port.vram')]))
+    check_pmem(py, b)
 
     step('5. every runtime module compiles')
     mods = [f for f in sorted(os.listdir(RUNTIME)) if f.endswith('.c')

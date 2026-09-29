@@ -44,6 +44,9 @@
  *   -dumpevery DT    print the -dump regions every DT seconds as well (from
  *                    t=DT on): a time series of chosen variables
  *   -ram FILE        write memory 0-A0000h at the end
+ *   -mem FILE        write the whole 16 MB of linear memory at the end (a
+ *                    protected-mode program's image above 1 MB, as pmem.h's
+ *                    pm_write has it, for tools/memcmp.py --base)
  *   -vram FILE       write the 256 KB of video memory (planes interleaved,
  *                    byte 4*o+p = plane p, offset o) at the end
  *   -wav FILE        what the Sound Blaster played
@@ -309,7 +312,7 @@ static void put_files(void){
 /* ---------------------------------------------------------------- main */
 int main(int argc, char **argv){
     const char *game = NULL, *state = "build/run/state";
-    const char *ram_file = NULL, *vram_file = NULL, *wav_file = NULL, *cue = NULL, *cdwav_file = NULL;
+    const char *ram_file = NULL, *mem_file = NULL, *vram_file = NULL, *wav_file = NULL, *cue = NULL, *cdwav_file = NULL;
     double until = 30.0;
     char prog[260] = "", tail[128] = "";
     const char *stop = "until";
@@ -390,6 +393,7 @@ int main(int argc, char **argv){
         else if(!strcmp(a,"-dumpevery")){ NEED(1); dump_every = atof(argv[++i]);
             dump_next = dump_every; }
         else if(!strcmp(a,"-ram")){ NEED(1); ram_file = argv[++i]; }
+        else if(!strcmp(a,"-mem")){ NEED(1); mem_file = argv[++i]; }
         else if(!strcmp(a,"-vram")){ NEED(1); vram_file = argv[++i]; }
         else if(!strcmp(a,"-wav")){ NEED(1); wav_file = argv[++i]; }
         else if(!strcmp(a,"-dos")) dos_log = 1;
@@ -590,6 +594,7 @@ int main(int argc, char **argv){
     printf("hash ram %016llx vram %016llx\n",
            (unsigned long long)fnv(ram, 0xA0000), (unsigned long long)fnv(vga_vram, sizeof(vga_vram)));
     if(ram_file) write_file(ram_file, ram, 0xA0000);
+    if(mem_file) write_file(mem_file, ram, RAM_SIZE);
     if(vram_file) write_file(vram_file, vga_vram, sizeof(vga_vram));
     if(xtrace_fp) fclose(xtrace_fp);
     sound_wav_close();

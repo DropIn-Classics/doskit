@@ -3,7 +3,7 @@
 (tools/run), both stopped at the same point, by the names of the hints.
 
     memcmp.py HINTS RAM_A RAM_B [--vram VRAM_A VRAM_B [--region LO HI NAME]...]
-              [--skip SEG]... [--load SEG] [--max N]
+              [--skip SEG]... [--load SEG | --base LINEAR] [--max N]
 
 RAM_A/RAM_B: memory 0-A0000h (dosrun -ram FILE, and the port's own dump
 of rmem.h's memory).  The program's segments are compared (CODE's frame
@@ -18,7 +18,7 @@ import argparse, bisect, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from disasm import Hints
+from disasm import Hints, PmaxProgram, program_path
 
 
 def runs(a, b, base, length):
@@ -46,17 +46,25 @@ def main():
     ap.add_argument('--skip', action='append', default=[], metavar='SEG',
                     help='a segment not compared (the stack, say)')
     ap.add_argument('--load', default='0077')
+    ap.add_argument('--base', help='a pMAX image\'s linear address (hex)')
     ap.add_argument('--max', type=int, default=60)
     args = ap.parse_args()
     h = Hints(args.hints)
     a, b = open(args.ram_a, 'rb').read(), open(args.ram_b, 'rb').read()
     load = int(args.load, 16)
     segs = h.segs
+    descs = None
+    if h.kind == 'pmax':
+        if args.base is None:
+            raise SystemExit('memcmp.py: a pMAX image wants --base')
+        descs = PmaxProgram(program_path(h.exe)).descs
     total = 0
     for k, s in enumerate(segs):
         if s.name in args.skip:
             continue
-        if s.size is not None:
+        if descs is not None:
+            dbase, size = descs[s.frame]
+        elif s.size is not None:
             size = s.size
         elif k + 1 < len(segs):
             size = (segs[k + 1].frame - s.frame) * 16
@@ -64,7 +72,8 @@ def main():
             size = 0x10000
         names = sorted((off, n) for (sg, off), n in h.names.items() if sg == s.name)
         offs = [o for o, _ in names]
-        base = (load + s.frame) * 16
+        base = int(args.base, 16) + dbase if descs is not None else (load + s.frame) * 16
+        width = 4 if size <= 0x10000 else len('%X' % (size - 1))
         rs = runs(a, b, base, min(size, len(a) - base))
         n = sum(e - st for st, e in rs)
         total += n
@@ -74,7 +83,7 @@ def main():
             where = f'{names[i][1]}+{st - offs[i]:X}' if i >= 0 else '-'
             sa = a[base + st:base + min(e, st + 8)].hex(' ')
             sb = b[base + st:base + min(e, st + 8)].hex(' ')
-            print(f'   {s.name}:{st:04X}..{e - 1:04X} {where:28} {sa:24} | {sb}')
+            print(f'   {s.name}:{st:0{width}X}..{e - 1:0{width}X} {where:28} {sa:24} | {sb}')
         if len(rs) > args.max:
             print(f'   ... {len(rs) - args.max} more')
     if args.vram:

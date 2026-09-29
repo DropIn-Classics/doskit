@@ -52,7 +52,8 @@ docs/NEW-PROJECT.md how to start a new game.
     keyboard, BIOS, DMA and Sound Blaster 16, MSCDEX with CD audio to a
     WAV file, a small DOS over the game's files with a writable layer); `run.py` its front end, which takes
     addresses by their names in the hints. `memcmp.py` compares a port's
-    memory with the original's.
+    memory with the original's (`-ram`, or `-mem` and `--base` for a
+    protected-mode image).
   - `isox.py`: unpacks a CD image (ISO, or raw 2352-byte sectors as GOG's
     game.gog); `flifiles.py`: reads and checks Autodesk FLI animations.
   - `new_project.py`: a new port's repository from `template/`.
@@ -64,7 +65,9 @@ docs/NEW-PROJECT.md how to start a new game.
     `plat_win32.c` (Windows SDK only) and `plat_null.c` (headless, for
     tests and scripted runs); `sdl2-flags.sh` finds SDL2.
   - `rmem.h`: the program's memory as under DOS (MZ loader with a
-    SHA-256 check, DOS memory blocks); `vga.h`: a VGA as the programs
+    SHA-256 check, DOS memory blocks); `pmem.h`: a protected-mode
+    program's 16 MB of linear memory (pMAX loader with a SHA-256 check,
+    the selectors the extender gives); `vga.h`: a VGA as the programs
     program it (ports, planes, Mode X, mode 12h/13h, the picture scanned
     out); `frame.h`: pacing at the mode's refresh, keys to the program's
     INT 9 handler, a tick callback, a key recorder.

@@ -16,6 +16,11 @@ KEY=HINTS pair each; the names are matched by name).  For each program:
     second, ...) for every `name` and named `code` of any of the hints,
     0xFFFF where a program has no such name.
 
+For a pMAX image (runtime/pmem.h) KEY_<SEG> is the segment's descriptor
+number and the addresses are 32-bit offsets in it; a program without a
+name has 0xFFFFFFFF there (outside an int: a port with several programs
+keeps these in uint32_t, not an enum).
+
 Only addresses and a hash go into the header, no bytes of the game.  The
 header's first line records the arguments, so that check.py finds it and
 runs this again with --check (exit status 1 when it is out of date).
@@ -56,6 +61,7 @@ def generate(args, prefix, progs, quiet=False):
             if s.name not in seg_order:
                 seg_order.append(s.name)
     # name -> address per program; a name keeps one segment in all
+    none = 0xFFFFFFFF if any(h.kind == 'pmax' for h in hs) else 0xFFFF
     names, seg_of = {}, {}
     for i, h in enumerate(hs):
         found = [(seg, off, name) for (seg, off), name in h.names.items()]
@@ -73,9 +79,9 @@ def generate(args, prefix, progs, quiet=False):
     out.append(f'/* X(SEG, name, {keys}), in the order of the first program\'s addresses */')
     out.append(f'#define {prefix}_NAMES(X) \\')
     order = sorted(names, key=lambda n: (seg_order.index(seg_of[n]),
-                                         [a if a is not None else 0x10000 for a in names[n]], n))
+                                         [a if a is not None else none + 1 for a in names[n]], n))
     for n in order:
-        a = ', '.join('0x%04X' % v if v is not None else '0xFFFF' for v in names[n])
+        a = ', '.join('0x%04X' % (v if v is not None else none) for v in names[n])
         out.append(f'    X({seg_of[n]}, {n}, {a}) \\')
     out += ['', '#endif', '']
     return '\n'.join(out)

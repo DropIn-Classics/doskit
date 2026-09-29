@@ -194,6 +194,16 @@ translated can stop the program with its name. Video goes through
 through `frame.c`. Both are stepping stones: once everything is C, data
 moves into structures and pictures into bitmaps, one at a time.
 
+A protected-mode program (a pMAX image) goes into `pmem.h`'s 16 MB of
+linear memory instead: `pm_load` puts the image where the extender put
+it in dosrun and gives each descriptor's selector relocations the
+selector the extender gave (both found once in a run: `-break` at the
+image's entry, `-mem`, the image's bytes searched for), and the C reads
+by 32-bit offsets at `pm_ds` (`rb`/`rw`/`rd`...) or by linear address
+(`lrb`...). The extender's own tables and heap are not modelled; compare
+with `-mem A` in dosrun, `pm_write` in the port and `memcmp.py ... --base
+LINEAR`.
+
 **Compare.** Stop the original in dosrun at a routine (`-break
 name#N -ram A -vram AV`) and the port at the same pass (its own counter;
 `rm_write`, `vga_write_planes`), then `tools/memcmp.py HINTS A B --vram
@@ -258,7 +268,9 @@ linked by Microsoft LINK, 186/386 instructions in 16-bit code. Not tried:
   byte), not DOS/4GW's LE/LX or other extenders' formats. The runner
   emulates the 386's protected mode (tests/pmode: the BIOS's way in, a
   fault, an interrupt, ring 3, a call gate, V86 mode) for an extender
-  that switches by itself; no real extender run through yet. A 32-bit instruction with a 16-bit address and no
+  that switches by itself; no real extender run through yet. The port's
+  side is `pmem.h` (tests/flat/port.c, compared with memory made by the
+  test, not with a run: dosrun does not load a pMAX image by itself). A 32-bit instruction with a 16-bit address and no
   register (67h, `[0027h]`) has no source form and stays DB;
 - other linkers' header layouts (`build.py`'s write_mz is Microsoft
   LINK's).
