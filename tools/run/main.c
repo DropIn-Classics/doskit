@@ -52,6 +52,7 @@
  *   -cd              print the CD's tracks and every MSCDEX call and request
  *   -intwatch NN     print every INT NN call (hex)
  *   -prof            the busiest CS:IP at the end
+ *   -vgastate        the VGA's registers, DAC and what the CRTC shows, at the end
  *   -v               the devices' and DOS's trace on stderr
  */
 #include "dosrun.h"
@@ -300,7 +301,7 @@ int main(int argc, char **argv){
     char prog[260] = "", tail[128] = "";
     const char *stop = "until";
     uint16_t load;
-    int i, r, loadfix = 0;
+    int i, r, loadfix = 0, vga_state = 0;
     clock_t c0;
 
     for(i=1;i<argc;i++){
@@ -380,6 +381,7 @@ int main(int argc, char **argv){
         else if(!strcmp(a,"-loadfix")) loadfix = 1;
         else if(!strcmp(a,"-intwatch")){ NEED(1); int_watch = (int)strtol(argv[++i], NULL, 16); }
         else if(!strcmp(a,"-prof")) prof_on = 1;
+        else if(!strcmp(a,"-vgastate")) vga_state = 1;
         else if(!strcmp(a,"-v")) trace_level = 1;
         else if(a[0]=='-') die("unknown option %s", a);
         else snprintf(prog, sizeof(prog), "%s", a);
@@ -552,6 +554,7 @@ int main(int argc, char **argv){
     print_dumps();
     memwatch_report();
     prof_report();
+    if(vga_state){ vga_dump(); vga_state_dump(); }
     printf("hash ram %016llx vram %016llx\n",
            (unsigned long long)fnv(ram, 0xA0000), (unsigned long long)fnv(vga_vram, sizeof(vga_vram)));
     if(ram_file) write_file(ram_file, ram, 0xA0000);

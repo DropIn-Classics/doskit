@@ -136,6 +136,7 @@ void    vga_timing(double*,int*,int*,int*,int*,double*);
 void    vga_timing_cached(double*,double*,int*,int*,int*,int*,double*);
 void    vga_font_init(void);
 void    vga_state_dump(void);
+void    vga_dump(void);
 extern uint8_t vga_vram[256*1024];
 extern uint8_t vga_dac[256][3];
 extern int vga_dirty;
