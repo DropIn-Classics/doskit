@@ -216,10 +216,12 @@ callbacks: modplay_jump, modplay_set_jump_hook); effects as notes put
 into a channel (modplay_note). Other formats need their own player.
 
 **The platform.** `platform.h`: a window showing an indexed picture in
-the 4:3 of a VGA screen (Alt+Enter full screen; full screen on a Steam
+the 4:3 of a VGA screen (Alt+Enter full screen; Print Screen writes the
+picture shown as screenshot_NNNN.png, `shot.h`; full screen on a Steam
 Deck), PC scan codes, a monotonic clock, an audio callback, the mouse.
 `plat_null.c` runs headless on a virtual clock for tests
-(`DK_FRAMES`, `DK_KEYS`, `DK_MOUSE`, `DK_DUMP`). Controllers become keys
+(`DK_FRAMES`, `DK_KEYS`, `DK_MOUSE`, `DK_DUMP`, `DK_SHOTS` for PNG
+screenshots by picture number). Controllers become keys
 (`pad.h`, a table per situation). `textmode.h` draws an 80x25 screen for
 a setup program in the style of DOS's. `cdimage.h` finds the GOG
 release and unpacks it on the first start (`sys_find_game` then finds

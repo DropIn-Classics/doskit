@@ -50,7 +50,10 @@ In build/selftest (a project as a game's would be, see kit.py):
   4. the C runtime: tests/hello/port.c (HELLO in C over rmem.h and vga.h,
      on plat_null.c) built with cc, run on the same program; its memory
      compared with the runner's by memcmp.py (CODE, DATA and video memory;
-     the stack is not the same and not compared);
+     the stack is not the same and not compared); its picture as a PNG
+     (shot.c, DK_SHOTS) read back and compared with its PPM (DK_DUMP);
+     tests/shot/shottest.c's PNGs (noise, long runs, far repeats) read
+     back and compared with the pixels it wrote;
   5. every runtime module compiled with warnings as errors (plat_sdl.c
      only when runtime/sdl2-flags.sh finds SDL2; plat_win32.c not here);
   6. new_project.py: a project made from template/ in build/selftest-new
@@ -60,7 +63,7 @@ In build/selftest (a project as a game's would be, see kit.py):
 Prints `selftest ok` at the end, exit status 0 then.  Needs cc (clang
 or gcc); on Windows it is not written for MSVC yet.
 """
-import os, re, shutil, subprocess, sys
+import os, re, shutil, struct, subprocess, sys, zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KIT = os.path.normpath(os.path.join(HERE, '..'))
@@ -87,6 +90,38 @@ def run(cmd, **kw):
         print(out)
         raise SystemExit(f'selftest FAILED: {" ".join(os.path.basename(c) for c in cmd[:2])}')
     return out
+
+
+def read_png(path):
+    """width, height and the RGB bytes of an 8-bit indexed PNG (shot.c's
+    kind: filter 0 on every row)"""
+    data = open(path, 'rb').read()
+    if data[:8] != b'\x89PNG\r\n\x1a\n':
+        raise SystemExit(f'selftest FAILED: {path} is not a PNG')
+    pos, idat, plte, w = 8, b'', b'', 0
+    while pos < len(data):
+        n, kind = struct.unpack('>I4s', data[pos:pos + 8])
+        body = data[pos + 8:pos + 8 + n]
+        if zlib.crc32(kind + body) != struct.unpack('>I', data[pos + 8 + n:pos + 12 + n])[0]:
+            raise SystemExit(f'selftest FAILED: {path}: the CRC of {kind}')
+        if kind == b'IHDR':
+            w, h, depth, color = struct.unpack('>IIBB', body[:10])
+            if (depth, color) != (8, 3):
+                raise SystemExit(f'selftest FAILED: {path} is not 8-bit indexed')
+        elif kind == b'PLTE':
+            plte = body
+        elif kind == b'IDAT':
+            idat += body
+        pos += 12 + n
+    raw = zlib.decompress(idat)
+    rgb = bytearray()
+    for y in range(h):
+        row = raw[y * (w + 1):(y + 1) * (w + 1)]
+        if row[0] != 0:
+            raise SystemExit(f'selftest FAILED: {path}: filter {row[0]}')
+        for i in row[1:]:
+            rgb += plte[3 * i:3 * i + 3]
+    return w, h, bytes(rgb)
 
 
 def make_exe(name='HELLO'):
@@ -408,16 +443,37 @@ def main():
     step('4. the C port over the runtime, compared (memcmp.py)')
     exe = os.path.join(b, 'port')
     srcs = [os.path.join(HERE, 'hello', 'port.c')] + [
-        os.path.join(RUNTIME, f) for f in ('rmem.c', 'vga.c', 'sys.c', 'sha256.c', 'plat_null.c')]
+        os.path.join(RUNTIME, f) for f in ('rmem.c', 'vga.c', 'sys.c', 'sha256.c', 'shot.c',
+                                           'plat_null.c')]
     run([CC] + CFLAGS + ['-I', RUNTIME, '-I', os.path.join(PROJ, 'port'), '-o', exe] + srcs)
     out = subprocess.run(
         [exe, os.path.join(PROJ, 'game'), os.path.join(b, 'port.ram'), os.path.join(b, 'port.vram')],
         cwd=PROJ, capture_output=True, text=True,
-        env=dict(os.environ, DK_DUMP=os.path.join(b, 'port.ppm')))
+        env=dict(os.environ, DK_DUMP=os.path.join(b, 'port.ppm'),
+                 DK_SHOTS='0:' + os.path.join(b, 'port.png')))
     print(out.stdout.strip())
     if out.returncode or 'con: hello from doskit' not in out.stdout:
         print(out.stderr)
         raise SystemExit('selftest FAILED: the port')
+    w, h, rgb = read_png(os.path.join(b, 'port.png'))
+    ppm = open(os.path.join(b, 'port.ppm'), 'rb').read()
+    if ppm != b'P6\n%d %d\n255\n' % (w, h) + rgb:
+        raise SystemExit('selftest FAILED: port.png is not the picture port.ppm holds')
+    print(f'port.png: {w}x{h}, {os.path.getsize(os.path.join(b, "port.png"))} bytes, as port.ppm')
+    shots = os.path.join(b, 'shots')
+    os.makedirs(shots, exist_ok=True)
+    exe = os.path.join(b, 'shottest')
+    run([CC] + CFLAGS + ['-I', RUNTIME, '-o', exe, os.path.join(HERE, 'shot', 'shottest.c'),
+                         os.path.join(RUNTIME, 'shot.c'), os.path.join(RUNTIME, 'sys.c')])
+    run([exe, shots])
+    for name in ('noise', 'runs', 'far', 'pattern', 'one'):
+        w, h, rgb = read_png(os.path.join(shots, name + '.png'))
+        pix = open(os.path.join(shots, name + '.bin'), 'rb').read()
+        pal = open(os.path.join(shots, name + '.pal'), 'rb').read()
+        if len(pix) != w * h or rgb != b''.join(pal[3 * i:3 * i + 3] for i in pix):
+            raise SystemExit(f'selftest FAILED: shot.c\'s {name}.png')
+        print(f'shot.c {name}.png: {w}x{h}, {os.path.getsize(os.path.join(shots, name + ".png"))}'
+              f' bytes for {w * h} pixels')
     print(run([py, os.path.join(TOOLS, 'memcmp.py'), 'src/HELLO.hints',
                os.path.join(b, 'orig.ram'), os.path.join(b, 'port.ram'), '--skip', 'STACK',
                '--vram', os.path.join(b, 'orig.vram'), os.path.join(b, 'port.vram')]))

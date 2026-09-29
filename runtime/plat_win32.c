@@ -1,6 +1,7 @@
 /* plat_win32.c - platform.h on Windows: a GDI window, the keyboard's scan
  * codes from WM_KEYDOWN/UP, game controllers through XInput (pad.h),
- * QueryPerformanceCounter, waveOut. */
+ * QueryPerformanceCounter, waveOut.  Print Screen writes a screenshot
+ * (shot.h). */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <mmsystem.h>
@@ -10,6 +11,7 @@
 #include <string.h>
 #include "pad.h"
 #include "platform.h"
+#include "shot.h"
 
 /* the window's title, also that of plat_message's box */
 static char app_title[128] = "";
@@ -346,6 +348,11 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_SYSKEYUP: {
         int code = (int)((lp >> 16) & 0xFF), ext = (int)((lp >> 24) & 1);
         int up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+        if (wp == VK_SNAPSHOT) {        /* Windows sends only its release */
+            if (up)
+                shot_save(NULL, NULL, 0);
+            return 0;
+        }
         if (code)
             push_key(code, ext, up);
         return 0;                       /* no menu on Alt or F10 */
@@ -448,6 +455,7 @@ void plat_present(const uint8_t *src, int width, int height, const uint32_t pale
         bmi.colors[i].rgbBlue = (BYTE)palette[i];
         bmi.colors[i].rgbReserved = 0;
     }
+    shot_keep(src, width, height, palette);
     for (y = 0; y < height; y++)
         memcpy(pixels + (size_t)y * (size_t)stride, src + (size_t)y * (size_t)width, (size_t)width);
     dc = GetDC(window);
