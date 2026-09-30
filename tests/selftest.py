@@ -106,7 +106,8 @@ In build/selftest (a project as a game's would be, see kit.py):
      project of it (GOG's ID from it, its files in game/); the runtime's
      inno.c (tests/inno/innotest.c) unpacks the same setups alike,
      refuses one without the marker before writing anything, takes the
-     CD image out of one that holds an image and unpacks that, and
+     CD image (Mode 2) out of one that holds an image beside a partial
+     installation with the marker and unpacks the image, and
      catches a changed byte, leaving nothing behind.
 
 Prints `selftest ok` at the end, exit status 0 then.  Needs cc (clang
@@ -469,11 +470,14 @@ def check_inno(b):
     rc, said = c_unpack(setup, out, 'NOPE/NOPE.EXE')
     if not rc or 'not the game' not in said or os.path.exists(out) or os.path.exists(out + '.part'):
         raise SystemExit(f'selftest FAILED: inno.c took a setup without the marker: {said}')
-    # a setup holding the game's CD image, not its files: the image unpacked
+    # a setup holding the game's CD image (Mode 2) beside a partial
+    # installation that has the marker too, as GOG installs some CD games:
+    # the image unpacked, not the partial installation
     image = os.path.join(d, 'image')
-    cd_image({'HELLO/HELLO.EXE': b'MZ' + bytes(100), 'HELLO/README.TXT': b'hello\r\n'}, image)
+    cd_image({'HELLO/HELLO.EXE': b'MZ' + bytes(100), 'HELLO/README.TXT': b'hello\r\n'}, image, 2)
     setup = os.path.join(d, 'setup_c_image.exe')
-    mkinno.write(setup, 0, {'CD/game.gog': open(image, 'rb').read()})
+    mkinno.write(setup, 0, {'CD/game.gog': open(image, 'rb').read(),
+                            'HELLO/HELLO.EXE': b'the partial installation'})
     out = os.path.join(d, 'c_image')
     rc, said = c_unpack(setup, out, 'HELLO/HELLO.EXE')
     if (rc or tree(out) != {'HELLO/HELLO.EXE': b'MZ' + bytes(100), 'HELLO/README.TXT': b'hello\r\n'}
@@ -598,10 +602,11 @@ def check_enc32():
     return len(want)
 
 
-def cd_image(files, path):
-    """a raw CD image (2352-byte Mode 1 sectors, as GOG's game.gog) with an
-    ISO 9660 file system holding `files` ({'DIR/NAME.EXT': bytes}, one
-    folder deep), as much of it as isox.py and cdimage.c read"""
+def cd_image(files, path, mode=1):
+    """a raw CD image (2352-byte Mode 1 sectors, as GOG's game.gog, or
+    Mode 2 Form 1 ones with mode=2) with an ISO 9660 file system holding
+    `files` ({'DIR/NAME.EXT': bytes}, one folder deep), as much of it as
+    isox.py and cdimage.c read"""
     def rec(name, lba, size, is_dir):
         r = struct.pack('<BBIIII7sBBBHHB', 0, 0, lba, 0, size, 0, bytes(7),
                         2 if is_dir else 0, 0, 0, 1, 1, len(name)) + name
@@ -634,8 +639,11 @@ def cd_image(files, path):
     sectors[17] = b'\xffCD001\1'.ljust(2048, b'\0')
     with open(path, 'wb') as f:
         for n in range(lba):
-            f.write(b'\0' + b'\xff' * 10 + b'\0' + bytes(3) + b'\1' +
-                    sectors.get(n, bytes(2048)) + bytes(288))
+            sync = b'\0' + b'\xff' * 10 + b'\0' + bytes(3)
+            if mode == 1:
+                f.write(sync + b'\1' + sectors.get(n, bytes(2048)) + bytes(288))
+            else:                           # its subheader, the data, EDC/ECC
+                f.write(sync + b'\2' + bytes(8) + sectors.get(n, bytes(2048)) + bytes(280))
 
 
 def main():

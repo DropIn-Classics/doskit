@@ -179,6 +179,13 @@ static void hash_update(Hash *h, const uint8_t *p, size_t n)
         return;
     }
     h->b.len += n;
+    while (!h->b.n && n >= 64) {               /* whole blocks straight from p */
+        if (h->kind == HASH_MD5)
+            md5_block(h->b.h, p);
+        else
+            sha1_block(h->b.h, p);
+        p += 64, n -= 64;
+    }
     while (n) {
         size_t k = 64 - (size_t)h->b.n < n ? 64 - (size_t)h->b.n : n;
         memcpy(h->b.buf + h->b.n, p, k);
@@ -232,9 +239,14 @@ typedef struct {
     size_t outn, outat;
 } Inflate;
 
+#define FAST_BITS 10
+
 typedef struct {
     short count[16];            /* codes of each length */
     short symbol[320];          /* the symbols, by code */
+    /* the codes of up to FAST_BITS bits by their next bits (as they come,
+     * lowest first): length << 9 | symbol, 0 for a longer code */
+    uint16_t fast[1 << FAST_BITS];
 } Huffman;
 
 static int bits_of(Inflate *z, int need)
@@ -274,13 +286,39 @@ static int huff_build(Huffman *h, const uint8_t *len, int n)
     for (i = 0; i < n; i++)
         if (len[i])
             h->symbol[offs[len[i]]++] = (short)i;
+    memset(h->fast, 0, sizeof h->fast);
+    {
+        int code = 0, index = 0, l, k;
+        for (l = 1; l <= FAST_BITS; l++) {
+            for (k = 0; k < h->count[l]; k++) {
+                int rev = 0, b, j;
+                for (b = 0; b < l; b++)             /* codes are sent from their top bit */
+                    rev |= ((code + k) >> b & 1) << (l - 1 - b);
+                for (j = rev; j < 1 << FAST_BITS; j += 1 << l)
+                    h->fast[j] = (uint16_t)(l << 9 | h->symbol[index + k]);
+            }
+            index += h->count[l];
+            code = (code + h->count[l]) << 1;
+        }
+    }
     return 0;
 }
 
 /* a symbol through `h`, bit by bit (codes are sent from their top bit) */
 static int huff_decode(Inflate *z, const Huffman *h)
 {
-    int code = 0, first = 0, index = 0, len, bit;
+    int code = 0, first = 0, index = 0, len, bit, e;
+
+    while (z->nbits < FAST_BITS && z->at < z->n) {
+        z->bits |= (uint32_t)z->in[z->at++] << z->nbits;
+        z->nbits += 8;
+    }
+    e = h->fast[z->bits & ((1u << FAST_BITS) - 1)];
+    if (e && e >> 9 <= z->nbits) {             /* a short code, in one step */
+        z->bits >>= e >> 9;
+        z->nbits -= e >> 9;
+        return e & 511;
+    }
     for (len = 1; len < 16; len++) {
         if ((bit = bits_of(z, 1)) < 0)
             return -1;
@@ -1697,18 +1735,89 @@ static int image_file(const Setup *s)
     return best;
 }
 
-/* 1 if the file holds an ISO 9660 file system (2048- or 2352-byte sectors) */
+/* 1 if the file holds an ISO 9660 file system (2048-byte sectors, or raw
+ * 2352-byte ones in Mode 1 or Mode 2 Form 1, as cdimage.c reads them) */
 static int is_cd_image(const char *path)
 {
-    static const long at[2] = {16L * 2048 + 1, 16L * 2352 + 16 + 1};
+    static const long at[3] = {16L * 2048 + 1, 16L * 2352 + 16 + 1, 16L * 2352 + 24 + 1};
     uint8_t id[5];
     FILE *f = fopen(path, "rb");
     int i, r = 0;
 
-    for (i = 0; f && !r && i < 2; i++)
+    for (i = 0; f && !r && i < 3; i++)
         r = fseek(f, at[i], SEEK_SET) == 0 && fread(id, 1, 5, f) == 5 && !memcmp(id, "CD001", 5);
     if (f)
         fclose(f);
+    return r;
+}
+
+/* progress passed on, a stop remembered: an unpacking of the image the
+ * player stopped does not go on with the setup's files */
+typedef struct {
+    int (*fn)(void *ctx, const char *file, long done, long total);
+    void *ctx;
+    int stopped;
+} Pass;
+
+static int pass_on(void *ctx, const char *file, long done, long total)
+{
+    Pass *p = ctx;
+    if (p->fn && p->fn(p->ctx, file, done, total)) {
+        p->stopped = 1;
+        return 1;
+    }
+    return 0;
+}
+
+/* the wanted files (only file `only`, if >= 0) into the folder `into`,
+ * made anew */
+static int unpack_into(Setup *s, const char *into, int only, Pass *pass)
+{
+    Out o;
+    int i, r, *keep = malloc(sizeof *keep * (size_t)(s->nfiles ? s->nfiles : 1));
+
+    if (!keep)
+        return fail(s, "Not enough memory to unpack the installer.");
+    memset(&o, 0, sizeof o);
+    o.s = s, o.dir = into, o.progress = pass_on, o.ctx = pass;
+    for (i = 0; i < s->nfiles; i++) {
+        keep[i] = s->files[i].wanted;
+        s->files[i].wanted = only >= 0 ? i == only : keep[i];
+        s->files[i].done = 0;
+        if (s->files[i].wanted)
+            o.total += s->files[i].size;
+    }
+    if (sys_is_dir(into))
+        remove_tree(into);                      /* left by an unpacking that was stopped */
+    if (sys_mkdir(into) != 0)
+        r = fail(s, "The folder for the game's files cannot be made.");
+    else
+        r = unpack_files(&o);
+    for (i = 0; i < s->nfiles; i++)
+        s->files[i].wanted = keep[i];
+    free(keep);
+    return r;
+}
+
+/* the setup's CD image taken out into `dir`.setup and unpacked into dir
+ * (cd_unpack, which checks must_have on the CD) */
+static int from_image(Setup *s, const char *dir, const char *must_have, int image, Pass *pass)
+{
+    char tmp[SYS_PATH], path[SYS_PATH];
+    Out o;
+    int r;
+
+    snprintf(tmp, sizeof tmp, "%s.setup", dir);
+    memset(&o, 0, sizeof o);
+    o.s = s, o.dir = tmp;
+    r = unpack_into(s, tmp, image, pass);
+    if (r == 0 && out_path(&o, s->files[image].path, path, sizeof path) != 0)
+        r = -1;
+    if (r == 0 && !is_cd_image(path))
+        r = fail(s, "The installer holds no CD image.");
+    if (r == 0)
+        r = cd_unpack(path, dir, must_have, pass_on, pass, s->err, s->n);
+    remove_tree(tmp);
     return r;
 }
 
@@ -1717,13 +1826,14 @@ int inno_unpack(const char *setup, const char *dir, const char *must_have,
                 char *err, size_t n)
 {
     Setup s;
-    Out o;
+    Pass pass;
     char part[SYS_PATH];
-    int r, i, image = -1;
+    int r, i, image;
 
     memset(&s, 0, sizeof s);
     s.err = err, s.n = n;
     err[0] = 0;
+    pass.fn = progress, pass.ctx = ctx, pass.stopped = 0;
     if (sys_is_dir(dir) || sys_is_file(dir))
         return fail(&s, "The folder for the game's files is there already.");
     if (load_setup(&s, setup) != 0)
@@ -1733,39 +1843,26 @@ int inno_unpack(const char *setup, const char *dir, const char *must_have,
             free_setup(&s);
             return fail(&s, "The installer names a file outside the game's folder.");
         }
-    if (must_have && *must_have && !has_path(&s, must_have)) {
-        if ((image = image_file(&s)) < 0) {
+    /* a CD image in it first, as gog_find prefers the image of an
+     * installed release: GOG installs some CD games partly, the image
+     * beside, and the marker may be among both */
+    if ((image = image_file(&s)) >= 0) {
+        r = from_image(&s, dir, must_have, image, &pass);
+        if (r == 0 || pass.stopped) {
             free_setup(&s);
-            return fail(&s, "The installer is not the game's (a file it must have is missing).");
+            return r;
         }
-        for (i = 0; i < s.nfiles; i++)          /* the image alone, then its files */
-            s.files[i].wanted = i == image;
+        err[0] = 0;
     }
-    memset(&o, 0, sizeof o);
-    o.s = &s, o.progress = progress, o.ctx = ctx;
-    for (i = 0; i < s.nfiles; i++)
-        if (s.files[i].wanted)
-            o.total += s.files[i].size;
-    snprintf(part, sizeof part, "%s.%s", dir, image < 0 ? "part" : "setup");
-    if (sys_is_dir(part))
-        remove_tree(part);                      /* left by an unpacking that was stopped */
-    o.dir = part;
-    if (sys_mkdir(part) != 0)
-        r = fail(&s, "The folder for the game's files cannot be made.");
-    else
-        r = unpack_files(&o);
-    if (r == 0 && image < 0 && sys_rename(part, dir) != 0)
+    if (must_have && *must_have && !has_path(&s, must_have)) {
+        free_setup(&s);
+        return fail(&s, "The installer is not the game's (a file it must have is missing).");
+    }
+    snprintf(part, sizeof part, "%s.part", dir);
+    r = unpack_into(&s, part, -1, &pass);
+    if (r == 0 && sys_rename(part, dir) != 0)
         r = fail(&s, "The unpacked files could not be moved to their folder.");
-    if (r == 0 && image >= 0) {
-        char path[SYS_PATH];
-        if (out_path(&o, s.files[image].path, path, sizeof path) != 0)
-            r = -1;
-        else if (!is_cd_image(path))
-            r = fail(&s, "The installer is not the game's (a file it must have is missing).");
-        else
-            r = cd_unpack(path, dir, must_have, progress, ctx, err, n);
-    }
-    if (r != 0 || image >= 0)
+    if (r != 0)
         remove_tree(part);
     free_setup(&s);
     return r;
