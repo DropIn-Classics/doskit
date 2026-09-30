@@ -1,13 +1,14 @@
 /* main.c - {{NAME}}: a native compatibility implementation requiring an
  * installed copy of the original game.
  *
- *     {{SLUG}} [-game DIR | -gog FILE]
+ *     {{SLUG}} [-game DIR | -gog FILE|FOLDER]
  *
  * DIR is the game's unpacked files: -game, else ${{ENV}}, else the first
  * folder `game` holding {{MARKER}} beside the program, in the current
  * directory or in the data folder (sys_find_game).  When there is none,
  * the installed GOG release's image is unpacked into the data folder's
- * `game` (cdimage.h; -gog names the image instead of looking for it).
+ * `game`, or, installed as a folder, that folder copied there (cdimage.h;
+ * -gog names the image or the folder instead of looking for it).
  *
  * Nothing is ported yet: the program shows where it found the game and
  * waits for Esc.
@@ -41,26 +42,35 @@ static void show(void)
     plat_present(pixels, TM_WIDTH, TM_HEIGHT, palette);
 }
 
-/* the game's files: found, or unpacked from the GOG image; 1 if there */
+/* the game's files: found, or from the GOG release (its CD image
+ * unpacked, or its installed folder copied); 1 if there */
 static int get_game(const char *given, const char *gog, char *out, size_t n)
 {
-    char image[SYS_PATH], data[SYS_PATH], err[256];
+    char from[SYS_PATH], data[SYS_PATH], err[256];
+    int folder, r;
 
     if (sys_find_game(given, "{{ENV}}", "{{MARKER}}", out, n))
         return 1;
     if (given)
         return 0;
     if (gog)
-        snprintf(image, sizeof image, "%s", gog);
-    else if (!gog_find(&release, image, sizeof image))
+        snprintf(from, sizeof from, "%s", gog);
+    else if (!gog_find(&release, from, sizeof from) &&
+             !gog_find_folder(&release, from, sizeof from))
         return 0;
+    folder = sys_is_dir(from);
     sys_data_dir(data, sizeof data);
     sys_join(out, n, data, "game");
     tm_clear(' ', TM_ATTR(TM_LIGHTGREY, TM_BLUE));
-    tm_text(2, 2, "Unpacking the game's files from", TM_ATTR(TM_WHITE, TM_BLUE));
-    tm_text(2, 3, image, TM_ATTR(TM_YELLOW, TM_BLUE));
+    tm_text(2, 2, folder ? "Copying the game's files from" : "Unpacking the game's files from",
+            TM_ATTR(TM_WHITE, TM_BLUE));
+    tm_text(2, 3, from, TM_ATTR(TM_YELLOW, TM_BLUE));
     show();
-    if (cd_unpack(image, out, "{{MARKER}}", NULL, NULL, err, sizeof err) != 0) {
+    if (folder)
+        r = gog_copy(from, out, "{{MARKER}}", NULL, NULL, err, sizeof err);
+    else
+        r = cd_unpack(from, out, "{{MARKER}}", NULL, NULL, err, sizeof err);
+    if (r != 0) {
         plat_message(err);
         return 0;
     }
@@ -79,7 +89,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-gog") && i + 1 < argc)
             gog = argv[++i];
         else {
-            fprintf(stderr, "usage: {{SLUG}} [-game DIR | -gog FILE]\n");
+            fprintf(stderr, "usage: {{SLUG}} [-game DIR | -gog FILE|FOLDER]\n");
             return 2;
         }
     }

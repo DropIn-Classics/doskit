@@ -31,84 +31,131 @@ static int take_in(const char *dir, const char *name, const char *must_have, cha
     return take(path, must_have, out, n);
 }
 
-#ifdef _WIN32
-/* GOG's installers keep a key per game under GOG.com\Games, named by
- * its product ID, with the folder in its value "path" (so on a Windows
- * installation of one game, the name written "PATH"; the registry
- * ignores case) */
-static int from_registry(const char *games, const GogRelease *rel, const char *image,
-                         const char *must_have, char *out, size_t n)
+/* calls fn for each folder the game may be installed in, until it
+ * returns 1; 1 then */
+static int each_install_dir(const GogRelease *rel, int (*fn)(const char *dir, void *ctx),
+                            void *ctx)
 {
+    char path[SYS_PATH];
+#ifdef _WIN32
+    /* GOG's installers keep a key per game under GOG.com\Games, named by
+     * its product ID, with the folder in its value "path" (so on a
+     * Windows installation of one game, the name written "PATH"; the
+     * registry ignores case) */
+    static const char *const keys[] = {
+        "SOFTWARE\\WOW6432Node\\GOG.com\\Games", "SOFTWARE\\GOG.com\\Games",
+    };
     char key[256], dir[MAX_PATH];
-    DWORD size = sizeof dir;
+    const char *pf = getenv("ProgramFiles(x86)");
+    char drive;
+    size_t i;
 
-    snprintf(key, sizeof key, "%s\\%s", games, rel->gog_id);
-    if (RegGetValueA(HKEY_LOCAL_MACHINE, key, "path", RRF_RT_REG_SZ, NULL, dir, &size) !=
-        ERROR_SUCCESS)
-        return 0;
-    return take_in(dir, image, must_have, out, n);
-}
+    for (i = 0; rel->gog_id && *rel->gog_id && i < sizeof keys / sizeof keys[0]; i++) {
+        DWORD size = sizeof dir;
+        snprintf(key, sizeof key, "%s\\%s", keys[i], rel->gog_id);
+        if (RegGetValueA(HKEY_LOCAL_MACHINE, key, "path", RRF_RT_REG_SZ, NULL, dir, &size) ==
+                ERROR_SUCCESS && fn(dir, ctx))
+            return 1;
+    }
+    /* the installer's default folder, on any drive; GOG Galaxy's */
+    for (drive = 'C'; drive <= 'Z'; drive++) {
+        snprintf(path, sizeof path, "%c:\\GOG Games\\%s", drive, rel->folder);
+        if (fn(path, ctx))
+            return 1;
+    }
+    snprintf(path, sizeof path, "%s\\GOG Galaxy\\Games\\%s",
+             pf ? pf : "C:\\Program Files (x86)", rel->folder);
+    return fn(path, ctx);
+#else
+    /* On a Mac the release is an application; elsewhere (the Windows
+     * release under Wine, Heroic, Lutris) guesses at the usual folders,
+     * not checked */
+    static const char *const home_dirs[] = {
+        "GOG Games", "Games/Heroic", ".wine/drive_c/GOG Games",
+    };
+    char home[SYS_PATH], dir[SYS_PATH];
+    size_t i;
+
+    snprintf(path, sizeof path, "/Applications/%s.app", rel->folder);
+    if (fn(path, ctx))
+        return 1;
+    sys_home_dir(home, sizeof home);
+    sys_join(dir, sizeof dir, home, "Applications");
+    snprintf(path, sizeof path, "%s/%s.app", dir, rel->folder);
+    if (fn(path, ctx))
+        return 1;
+    for (i = 0; i < sizeof home_dirs / sizeof home_dirs[0]; i++) {
+        sys_join(dir, sizeof dir, home, home_dirs[i]);
+        sys_join(path, sizeof path, dir, rel->folder);
+        if (fn(path, ctx))
+            return 1;
+    }
+    return 0;
 #endif
+}
+
+typedef struct {
+    const char *image, *must_have;
+    char *out;
+    size_t n;
+} Search;
+
+static int image_in(const char *dir, void *ctx)
+{
+    Search *s = (Search *)ctx;
+    return take_in(dir, s->image, s->must_have, s->out, s->n);
+}
+
+static int folder_with(const char *dir, void *ctx)
+{
+    Search *s = (Search *)ctx;
+    if (!sys_has_marker(dir, s->must_have))
+        return 0;
+    snprintf(s->out, s->n, "%s", dir);
+    return 1;
+}
 
 int gog_find(const GogRelease *rel, char *out, size_t n)
 {
-    char dir[SYS_PATH], path[SYS_PATH];
-    const char *image = rel->image && *rel->image ? rel->image : "game.gog";
-    const char *must = rel->must_have && *rel->must_have ? rel->must_have : NULL;
+    char dir[SYS_PATH];
+    Search s;
 
+    s.image = rel->image && *rel->image ? rel->image : "game.gog";
+    s.must_have = rel->must_have && *rel->must_have ? rel->must_have : NULL;
+    s.out = out;
+    s.n = n;
     sys_exe_dir(dir, sizeof dir);
-    if (take_in(dir, image, must, out, n) || take(image, must, out, n))
+    if (take_in(dir, s.image, s.must_have, out, n) || take(s.image, s.must_have, out, n))
         return 1;
-#ifdef _WIN32
-    {
-        char drive;
-        const char *pf = getenv("ProgramFiles(x86)");
+#ifndef _WIN32
+    if (rel->mac_bundle && *rel->mac_bundle) {
+        /* on a Mac the release is an application, the image inside */
+        char home[SYS_PATH], path[SYS_PATH];
 
-        if (rel->gog_id && *rel->gog_id &&
-            (from_registry("SOFTWARE\\WOW6432Node\\GOG.com\\Games", rel, image, must, out, n) ||
-             from_registry("SOFTWARE\\GOG.com\\Games", rel, image, must, out, n)))
+        snprintf(path, sizeof path, "/Applications/%s", rel->mac_bundle);
+        if (take(path, s.must_have, out, n))
             return 1;
-        /* the installer's default folder, on any drive; GOG Galaxy's */
-        for (drive = 'C'; drive <= 'Z'; drive++) {
-            snprintf(path, sizeof path, "%c:\\GOG Games\\%s", drive, rel->folder);
-            if (take_in(path, image, must, out, n))
-                return 1;
-        }
-        snprintf(path, sizeof path, "%s\\GOG Galaxy\\Games\\%s",
-                 pf ? pf : "C:\\Program Files (x86)", rel->folder);
-        if (take_in(path, image, must, out, n))
-            return 1;
-    }
-#else
-    {
-        /* Elsewhere (the Windows release under Wine, Heroic, Lutris):
-         * guesses at the usual folders, not checked */
-        static const char *const home_dirs[] = {
-            "GOG Games", "Games/Heroic", ".wine/drive_c/GOG Games",
-        };
-        char home[SYS_PATH];
-        size_t i;
-
         sys_home_dir(home, sizeof home);
-        if (rel->mac_bundle && *rel->mac_bundle) {
-            /* on a Mac the release is an application, the image inside */
-            snprintf(path, sizeof path, "/Applications/%s", rel->mac_bundle);
-            if (take(path, must, out, n))
-                return 1;
-            sys_join(dir, sizeof dir, home, "Applications");
-            sys_join(path, sizeof path, dir, rel->mac_bundle);
-            if (take(path, must, out, n))
-                return 1;
-        }
-        for (i = 0; i < sizeof home_dirs / sizeof home_dirs[0]; i++) {
-            sys_join(dir, sizeof dir, home, home_dirs[i]);
-            sys_join(dir, sizeof dir, dir, rel->folder);
-            if (take_in(dir, image, must, out, n))
-                return 1;
-        }
+        sys_join(dir, sizeof dir, home, "Applications");
+        sys_join(path, sizeof path, dir, rel->mac_bundle);
+        if (take(path, s.must_have, out, n))
+            return 1;
     }
 #endif
-    return 0;
+    return each_install_dir(rel, image_in, &s);
+}
+
+int gog_find_folder(const GogRelease *rel, char *out, size_t n)
+{
+    Search s;
+
+    if (!rel->must_have || !*rel->must_have)
+        return 0;
+    s.image = NULL;
+    s.must_have = rel->must_have;
+    s.out = out;
+    s.n = n;
+    return each_install_dir(rel, folder_with, &s);
 }
 
 /* ---- the image */
@@ -354,4 +401,149 @@ int cd_unpack(const char *image, const char *dir, const char *must_have,
     }
     fclose(u.f);
     return r;
+}
+
+/* ---- an installed folder */
+
+typedef struct {
+    const char *src, *dst;      /* the folders being walked */
+    long total, done;           /* bytes */
+    int writing, depth, r;
+    int (*progress)(void *ctx, const char *file, long done, long total);
+    void *ctx;
+    char *err;
+    size_t n;
+} Copy;
+
+static void copy_fail(Copy *c, const char *what)
+{
+    if (c->r == 0)
+        snprintf(c->err, c->n, "%s", what);
+    c->r = -1;
+}
+
+static long file_size(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    long k = -1;
+
+    if (f && fseek(f, 0, SEEK_END) == 0)
+        k = ftell(f);
+    if (f)
+        fclose(f);
+    return k;
+}
+
+static void copy_bytes(Copy *c, const char *from, const char *to)
+{
+    static uint8_t buf[65536];
+    FILE *in = fopen(from, "rb"), *out = in ? fopen(to, "wb") : NULL;
+    size_t k;
+
+    if (!in || !out) {
+        copy_fail(c, in ? "A file could not be written." : "A file of the installation cannot be read.");
+    } else {
+        while ((k = fread(buf, 1, sizeof buf, in)) > 0) {
+            if (fwrite(buf, 1, k, out) != k) {
+                copy_fail(c, "A file could not be written.");
+                break;
+            }
+            c->done += (long)k;
+        }
+        if (ferror(in))
+            copy_fail(c, "A file of the installation cannot be read.");
+    }
+    if (in)
+        fclose(in);
+    if (out && fclose(out) != 0)
+        copy_fail(c, "A file could not be written.");
+}
+
+static void copy_entry(void *ctx, const char *name, int is_dir);
+
+/* each entry of `src` counted, or copied into `dst` */
+static void copy_dir(Copy *c, const char *src, const char *dst)
+{
+    const char *old_src = c->src, *old_dst = c->dst;
+
+    if (c->depth >= 32) {                       /* links to folders may loop */
+        copy_fail(c, "The installation's folders are nested too deep.");
+        return;
+    }
+    c->src = src;
+    c->dst = dst;
+    c->depth++;
+    if (sys_list_dir(src, copy_entry, c) != 0)
+        copy_fail(c, "A folder of the installation cannot be read.");
+    c->depth--;
+    c->src = old_src;
+    c->dst = old_dst;
+}
+
+static void copy_entry(void *ctx, const char *name, int is_dir)
+{
+    Copy *c = (Copy *)ctx;
+    char from[SYS_PATH], to[SYS_PATH];
+
+    if (c->r)
+        return;
+    sys_join(from, sizeof from, c->src, name);
+    if (c->writing)
+        sys_join(to, sizeof to, c->dst, name);
+    if (is_dir) {
+        if (c->writing && sys_mkdir(to) != 0)
+            copy_fail(c, "A folder could not be made.");
+        else
+            copy_dir(c, from, to);
+    } else if (!c->writing) {
+        long k = file_size(from);
+        if (k > 0)
+            c->total += k;
+    } else {
+        copy_bytes(c, from, to);
+        if (c->r == 0 && c->progress && c->progress(c->ctx, name, c->done, c->total))
+            copy_fail(c, "Stopped.");
+    }
+}
+
+int gog_copy(const char *folder, const char *dir, const char *must_have,
+             int (*progress)(void *ctx, const char *file, long done, long total), void *ctx,
+             char *err, size_t n)
+{
+    Copy c;
+    char part[SYS_PATH];
+
+    memset(&c, 0, sizeof c);
+    c.progress = progress;
+    c.ctx = ctx;
+    c.err = err;
+    c.n = n;
+    if (sys_is_dir(dir) || sys_is_file(dir)) {
+        copy_fail(&c, "The folder for the game's files is there already.");
+        return -1;
+    }
+    if (!sys_is_dir(folder)) {
+        copy_fail(&c, "The installed game's folder is not there.");
+        return -1;
+    }
+    if (must_have && *must_have && !sys_has_marker(folder, must_have)) {
+        copy_fail(&c, "The folder is not the game's installation (a file it must have is missing).");
+        return -1;
+    }
+    copy_dir(&c, folder, NULL);
+    if (c.r)
+        return -1;
+    snprintf(part, sizeof part, "%s.part", dir);
+    if (sys_is_dir(part))
+        remove_tree(part);                      /* left by a copy that was stopped */
+    c.writing = 1;
+    if (sys_mkdir(part) != 0)
+        copy_fail(&c, "The folder for the game's files cannot be made.");
+    else
+        copy_dir(&c, folder, part);
+    if (c.r == 0 && sys_rename(part, dir) != 0)
+        copy_fail(&c, "The copied files could not be moved to their folder.");
+    if (c.r != 0)
+        remove_tree(part);
+    return c.r;
 }

@@ -238,7 +238,8 @@ Deck), PC scan codes, a monotonic clock, an audio callback, the mouse.
 screenshots by picture number). Controllers become keys
 (`pad.h`, a table per situation). `textmode.h` draws an 80x25 screen for
 a setup program in the style of DOS's. `cdimage.h` finds the GOG
-release and unpacks it on the first start (`sys_find_game` then finds
+release and on the first start unpacks its CD image or, for a game
+installed as a folder, copies that folder (`sys_find_game` then finds
 it in the data folder).
 
 **Modernising.** Once equal: a launcher (setup screen: options, sound,

@@ -78,7 +78,7 @@ docs/NEW-PROJECT.md how to start a new game.
     headphone mode), `fli.h` (FLI animations), `textmode.h` (an 80x25
     text screen, for a DOS-setup-like launcher), `pad.h` (controller
     buttons to keys), `cdimage.h` (a GOG release found and its image
-    unpacked), `sys.h` (files, folders, the data folder), `sha256.h`,
+    unpacked, or its installed folder copied), `sys.h` (files, folders, the data folder), `sha256.h`,
     `shot.h` (screenshots as PNG: Print Screen, `DK_SHOTS` headless).
 - `template/`: the start of a new port's repository (rules, hook, build
   scripts, a C skeleton, `.claude/agents/` for Claude Code subagents such

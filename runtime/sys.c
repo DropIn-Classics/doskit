@@ -419,7 +419,7 @@ int sys_steam_deck(void)
 }
 
 /* dir holds `marker`, each part of it found ignoring case */
-static int has_marker(const char *dir, const char *marker)
+int sys_has_marker(const char *dir, const char *marker)
 {
     char path[SYS_PATH], part[SYS_PATH], next[SYS_PATH];
     const char *p = marker;
@@ -455,12 +455,12 @@ int sys_find_game(const char *given, const char *env, const char *marker, char *
     }
     sys_exe_dir(dir, sizeof dir);
     sys_join(out, n, dir, "game");
-    if (has_marker(out, marker))
+    if (sys_has_marker(out, marker))
         return 1;
     snprintf(out, n, "game");
-    if (has_marker(out, marker))
+    if (sys_has_marker(out, marker))
         return 1;
     sys_data_dir(dir, sizeof dir);
     sys_join(out, n, dir, "game");
-    return has_marker(out, marker);
+    return sys_has_marker(out, marker);
 }

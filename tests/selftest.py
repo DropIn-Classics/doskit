@@ -73,7 +73,10 @@ In build/selftest (a project as a game's would be, see kit.py):
      files, cd_image below, named by a cue sheet): its name, ID, folder
      name, image path and marker in its port/src/main.c, the image
      unpacked into its game/ as it was; one installed as a folder (no
-     image) copied into game/, its program taken for the marker.
+     image) copied into game/, its program taken for the marker; the
+     template's port started with -gog on that folder (copied into its
+     data folder), on the image (unpacked there) and on a folder without
+     the marker (refused).
 
 Prints `selftest ok` at the end, exit status 0 then.  Needs cc (clang
 or gcc); on Windows it is not written for MSVC yet.
@@ -703,6 +706,26 @@ def main():
         print(r.stdout + r.stderr)
         raise SystemExit('selftest FAILED: a game installed as a folder not copied into game/')
     print('ok   one installed as a folder: copied into game/, its program the marker')
+
+    # the template's port on a player's first start: -gog with the folder,
+    # with the image, with a folder not the game's, into a data folder of its own
+    exe = os.path.join(new, 'port', 'build', 'testgame-headless')
+    for what, src, ok in (('folder', folder_game, True),
+                          ('image', os.path.join(installed, 'CD', 'HELLO.DAT'), True),
+                          ('other folder', os.path.join(gog, 'Hello Game', 'CD'), False)):
+        data = os.path.join(KIT, 'build', 'selftest-data')
+        if os.path.isdir(data):
+            shutil.rmtree(data)
+        os.makedirs(data)
+        r = subprocess.run([exe, '-gog', src], cwd=data, capture_output=True, text=True,
+                           env=dict(os.environ, DK_FRAMES='3', DK_DATA_DIR=data))
+        got = os.path.join(data, 'game', 'HELLO', 'HELLO.EXE')
+        there = os.path.isfile(got) and open(got, 'rb').read() == hello
+        if (r.returncode == 0) != ok or there != ok or os.path.isdir(os.path.join(data, 'game.part')):
+            print(r.stdout + r.stderr)
+            raise SystemExit(f'selftest FAILED: the template\'s port with -gog (the {what})')
+    print('ok   the template\'s port: the installed folder copied, the image unpacked, '
+          'another folder refused')
 
     for agent in ('doskit-collector', 'git-committer'):
         p = os.path.join(new, '.claude', 'agents', f'{agent}.md')

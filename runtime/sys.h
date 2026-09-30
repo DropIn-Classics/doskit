@@ -51,6 +51,10 @@ uint8_t *sys_load(const char *path, size_t *size);
 
 int sys_stricmp(const char *a, const char *b);
 
+/* 1 if the folder `dir` holds `marker`, a folder or file below it
+ * ("GAME", "GAME/GAME.EXE"; either separator), case ignored */
+int sys_has_marker(const char *dir, const char *marker);
+
 /* The game's unpacked files: `given` (a -game option; NULL: none), else
  * $`env` (NULL: none), else the first folder `game` holding the folder or
  * file `marker` (as on the CD: "GAME", "GAME/GAME.EXE" also works) beside
