@@ -57,7 +57,9 @@ docs/NEW-PROJECT.md how to start a new game.
     protected-mode image).
   - `isox.py`: unpacks a CD image (ISO, or raw 2352-byte sectors as GOG's
     game.gog); `flifiles.py`: reads and checks Autodesk FLI animations.
-  - `new_project.py`: a new port's repository from `template/`.
+  - `new_project.py`: a new port's repository from `template/`, for a
+    game chosen from those installed from GOG (`goglist.py` lists them:
+    name, product ID, folder, CD image).
 - `third_party/`: code taken unchanged from elsewhere, each with a
   README saying from where and under which licence: `stb_vorbis` (Ogg
   Vorbis decoding, public domain or MIT).
@@ -89,7 +91,8 @@ docs/NEW-PROJECT.md how to start a new game.
 ## Use
 
     python3 tests/selftest.py            # the kit checks itself
-    python3 tools/new_project.py ~/mygame "My Game" mygame
+    python3 tools/new_project.py ~/mygame                    # choose an installed GOG game
+    python3 tools/new_project.py ~/mygame "My Game" mygame   # or name it
 
 On Windows `python` for `python3`; the runner builds with MSVC
 (`tools/run/build.bat`) or cc (`build.sh`). `pip install capstone`.

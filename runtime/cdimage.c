@@ -33,8 +33,9 @@ static int take_in(const char *dir, const char *name, const char *must_have, cha
 
 #ifdef _WIN32
 /* GOG's installers keep a key per game under GOG.com\Games, named by
- * its product ID, with the folder in its value "path" (not checked on a
- * Windows installation) */
+ * its product ID, with the folder in its value "path" (so on a Windows
+ * installation of one game, the name written "PATH"; the registry
+ * ignores case) */
 static int from_registry(const char *games, const GogRelease *rel, const char *image,
                          const char *must_have, char *out, size_t n)
 {
@@ -52,7 +53,7 @@ static int from_registry(const char *games, const GogRelease *rel, const char *i
 int gog_find(const GogRelease *rel, char *out, size_t n)
 {
     char dir[SYS_PATH], path[SYS_PATH];
-    const char *image = rel->image ? rel->image : "game.gog";
+    const char *image = rel->image && *rel->image ? rel->image : "game.gog";
     const char *must = rel->must_have && *rel->must_have ? rel->must_have : NULL;
 
     sys_exe_dir(dir, sizeof dir);
@@ -63,7 +64,7 @@ int gog_find(const GogRelease *rel, char *out, size_t n)
         char drive;
         const char *pf = getenv("ProgramFiles(x86)");
 
-        if (rel->gog_id &&
+        if (rel->gog_id && *rel->gog_id &&
             (from_registry("SOFTWARE\\WOW6432Node\\GOG.com\\Games", rel, image, must, out, n) ||
              from_registry("SOFTWARE\\GOG.com\\Games", rel, image, must, out, n)))
             return 1;
@@ -89,7 +90,7 @@ int gog_find(const GogRelease *rel, char *out, size_t n)
         size_t i;
 
         sys_home_dir(home, sizeof home);
-        if (rel->mac_bundle) {
+        if (rel->mac_bundle && *rel->mac_bundle) {
             /* on a Mac the release is an application, the image inside */
             snprintf(path, sizeof path, "/Applications/%s", rel->mac_bundle);
             if (take(path, must, out, n))

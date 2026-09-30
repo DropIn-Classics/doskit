@@ -20,11 +20,16 @@
 #include "textmode.h"
 
 static const GogRelease release = {
-    "{{NAME}}",                 /* GOG's folder name: check on an installation */
-    NULL,                       /* game.gog */
-    NULL,                       /* the Mac release's path in /Applications: not known yet */
-    NULL,                       /* GOG's product ID (goggame-ID.info): not known yet */
-    "{{MARKER}}",               /* on the CD: images of other games are passed over */
+    /* GOG's folder name */
+    "{{GOG_FOLDER}}",
+    /* the CD image's path in that folder ("": game.gog) */
+    "{{GOG_IMAGE}}",
+    /* the Mac release's image, its path in /Applications ("": none) */
+    "{{MAC_BUNDLE}}",
+    /* GOG's product ID, the number in goggame-ID.info ("": not known) */
+    "{{GOG_ID}}",
+    /* on the CD: images of other games are passed over */
+    "{{MARKER}}",
 };
 
 static uint8_t pixels[TM_WIDTH * TM_HEIGHT];

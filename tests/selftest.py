@@ -67,7 +67,12 @@ In build/selftest (a project as a game's would be, see kit.py):
      only when runtime/sdl2-flags.sh finds SDL2; plat_win32.c not here);
   6. new_project.py: a project made from template/ in build/selftest-new
      (the kit linked in as doskit/), its port built with its build.sh and
-     run headless on HELLO's files; its check.py says all ok.
+     run headless on HELLO's files; its check.py says all ok.  Then one
+     chosen from the installed GOG games (DOSKIT_GOG_DIRS naming a folder
+     made here: a game's goggame-ID.info and a raw CD image with HELLO's
+     files, cd_image below, named by a cue sheet): its name, ID, folder
+     name, image path and marker in its port/src/main.c, the image
+     unpacked into its game/ as it was.
 
 Prints `selftest ok` at the end, exit status 0 then.  Needs cc (clang
 or gcc); on Windows it is not written for MSVC yet.
@@ -352,6 +357,46 @@ def check_enc32():
     return len(want)
 
 
+def cd_image(files, path):
+    """a raw CD image (2352-byte Mode 1 sectors, as GOG's game.gog) with an
+    ISO 9660 file system holding `files` ({'DIR/NAME.EXT': bytes}, one
+    folder deep), as much of it as isox.py and cdimage.c read"""
+    def rec(name, lba, size, is_dir):
+        r = struct.pack('<BBIIII7sBBBHHB', 0, 0, lba, 0, size, 0, bytes(7),
+                        2 if is_dir else 0, 0, 0, 1, 1, len(name)) + name
+        r += b'\0' * (len(r) & 1)
+        return bytes([len(r)]) + r[1:]
+
+    def directory(lba, parent, entries):
+        data = rec(b'\0', lba, 2048, True) + rec(b'\1', parent, 2048, True) + b''.join(entries)
+        return data.ljust(2048, b'\0')
+
+    dirs = sorted({f.split('/')[0] for f in files})
+    sectors = {}
+    lba = 19 + len(dirs)            # 16 the PVD, 17 the terminator, 18 the root, the folders
+    root_entries = []
+    for i, d in enumerate(dirs):
+        entries = []
+        for f in sorted(x for x in files if x.split('/')[0] == d):
+            data = files[f]
+            entries.append(rec(f.split('/')[1].encode() + b';1', lba, len(data), False))
+            for k in range(0, max(len(data), 1), 2048):
+                sectors[lba] = data[k:k + 2048].ljust(2048, b'\0')
+                lba += 1
+        sectors[19 + i] = directory(19 + i, 18, entries)
+        root_entries.append(rec(d.encode(), 19 + i, 2048, True))
+    sectors[18] = directory(18, 18, root_entries)
+    pvd = bytearray(2048)
+    pvd[0:7] = b'\1CD001\1'
+    pvd[156:156 + 34] = rec(b'\0', 18, 2048, True)
+    sectors[16] = bytes(pvd)
+    sectors[17] = b'\xffCD001\1'.ljust(2048, b'\0')
+    with open(path, 'wb') as f:
+        for n in range(lba):
+            f.write(b'\0' + b'\xff' * 10 + b'\0' + bytes(3) + b'\1' +
+                    sectors.get(n, bytes(2048)) + bytes(288))
+
+
 def main():
     if os.path.isdir(PROJ):
         shutil.rmtree(PROJ)
@@ -579,7 +624,9 @@ def main():
     if os.path.isdir(new):
         shutil.rmtree(new)
     run([py, os.path.join(TOOLS, 'new_project.py'), new, 'Test Game', 'testgame',
-         '--marker', 'HELLO/HELLO.EXE', '--no-submodule'])
+         '--marker', 'HELLO/HELLO.EXE', '--gog-id', '1234567890', '--no-submodule'])
+    if '"1234567890",' not in open(os.path.join(new, 'port', 'src', 'main.c')).read():
+        raise SystemExit('selftest FAILED: --gog-id not filled into port/src/main.c')
     os.symlink(KIT, os.path.join(new, 'doskit'))
     shutil.copytree(os.path.join(PROJ, 'game'), os.path.join(new, 'game'))
     r = subprocess.run(['sh', os.path.join(new, 'port', 'build.sh')], capture_output=True, text=True)
@@ -597,6 +644,43 @@ def main():
     print(out.stdout.strip())
     if out.returncode:
         raise SystemExit('selftest FAILED: check.py in the new project')
+
+    gog = os.path.join(KIT, 'build', 'selftest-gog')
+    if os.path.isdir(gog):
+        shutil.rmtree(gog)
+    installed = os.path.join(gog, 'Hello Game')
+    os.makedirs(installed)
+    with open(os.path.join(installed, 'goggame-1234567890.info'), 'w') as f:
+        f.write('{"gameId": "1234567890", "rootGameId": "1234567890", "name": "Hello Game"}')
+    with open(os.path.join(installed, 'goggame-1234567891.info'), 'w') as f:
+        f.write('{"gameId": "1234567891", "rootGameId": "1234567890", "name": "An add-on"}')
+    hello = open(os.path.join(PROJ, 'game', 'HELLO', 'HELLO.EXE'), 'rb').read()
+    # not game.gog: an image by another name, in a folder, its cue sheet naming it
+    os.makedirs(os.path.join(installed, 'CD'))
+    cd_image({'HELLO/HELLO.EXE': hello, 'HELLO/README.TXT': b'hello\r\n' * 500},
+             os.path.join(installed, 'CD', 'HELLO.DAT'))
+    with open(os.path.join(installed, 'CD', 'HELLO.CUE'), 'w') as f:
+        f.write('FILE "HELLO.DAT" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n')
+    chosen = os.path.join(KIT, 'build', 'selftest-chosen')
+    if os.path.isdir(chosen):
+        shutil.rmtree(chosen)
+    # the game (the add-on left out), the slug, the CD's first program, unpacked
+    r = subprocess.run([py, os.path.join(TOOLS, 'new_project.py'), chosen, '--no-submodule'],
+                       input='1\nhello\n1\ny\n', capture_output=True, text=True,
+                       env=dict(os.environ, DOSKIT_GOG_DIRS=gog))
+    print(r.stdout.strip().splitlines()[0])
+    if r.returncode or 'An add-on' in r.stdout:
+        print(r.stdout + r.stderr)
+        raise SystemExit('selftest FAILED: new_project.py choosing an installed GOG game')
+    main_c = open(os.path.join(chosen, 'port', 'src', 'main.c')).read()
+    for want in ('"Hello Game",', '"1234567890",', '"HELLO/HELLO.EXE",', '"CD/HELLO.DAT",',
+                 '"",'):
+        if want not in main_c:
+            raise SystemExit(f'selftest FAILED: {want} not in the chosen project\'s main.c')
+    got = os.path.join(chosen, 'game', 'HELLO', 'HELLO.EXE')
+    if not os.path.isfile(got) or open(got, 'rb').read() != hello:
+        raise SystemExit('selftest FAILED: the chosen game\'s image not unpacked into game/')
+    print('ok   chosen from the installed GOG games: main.c filled in, game/ unpacked')
 
     for agent in ('doskit-collector', 'git-committer'):
         p = os.path.join(new, '.claude', 'agents', f'{agent}.md')

@@ -14,13 +14,13 @@
 /* where a GOG release is installed */
 typedef struct {
     const char *folder;         /* GOG's folder name: "My Game" */
-    const char *image;          /* the image's name; NULL: "game.gog" */
+    const char *image;          /* the image's path in the folder; NULL or "": "game.gog" */
     /* on a Mac, the image's path inside /Applications (the release is an
-     * app, often with a DOSBox bundle inside); NULL: no Mac release */
+     * app, often with a DOSBox bundle inside); NULL or "": no Mac release */
     const char *mac_bundle;
     /* GOG's product ID, the number in the goggame-ID.info in the installed
      * folder: on Windows the registry key GOG.com\Games\ID says where the
-     * game is; NULL: the registry is not looked at */
+     * game is; NULL or "": the registry is not looked at */
     const char *gog_id;
     /* a path on the CD, as cd_unpack's must_have: an image without it is
      * not taken (GOG ships many DOS games' CDs as game.gog); NULL: any */
