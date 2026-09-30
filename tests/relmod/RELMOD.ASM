@@ -37,6 +37,7 @@ STEP_A:
     RET
 STEP_B:
     LEA EDI, [EBX+NAMETXT]
+    MOV EDX, DS:[SMALL 14H]         ; a 16-bit address (67h): the host's cell
     RET
 
 CODE ENDS

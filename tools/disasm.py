@@ -925,6 +925,8 @@ class Formatter:
             want = self.an.mem_seg(ins, op)
             if ref[0] != self.assumed_ds and want == ref[0] and ins.seg != ref[0]:
                 raise Unformattable('label outside DS without override')
+        if self.w == 4 and 0x67 in pf and not m.base and not m.index:
+            parts_s = 'SMALL ' + parts_s    # a 16-bit address, no register (tasm.py's SMALL)
         t = f'[{parts_s}]'
         if seg:
             t = f'{seg}:{t}'

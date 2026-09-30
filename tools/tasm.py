@@ -171,7 +171,7 @@ class Val:
     """
     __slots__ = ('num', 'rel', 'segrel', 'base', 'index', 'mem', 'size', 'ovr',
                  'reg', 'vseg', 'unknown', 'dist', 'label', 'short', 'hasbr',
-                 'isoffset', 'strlen', 'fwd', 'fwdbare', 'scale')
+                 'isoffset', 'strlen', 'fwd', 'fwdbare', 'scale', 'small')
 
     def __init__(self, num=0):
         self.num = num
@@ -194,6 +194,7 @@ class Val:
         self.fwd = False
         self.fwdbare = False      # a forward name used without OFFSET/SEG
         self.scale = 1
+        self.small = False        # SMALL: a 16-bit address in a USE32 segment
 
     def copy(self):
         v = Val()
@@ -347,6 +348,12 @@ class ExprParser:
         if pv in ('SIZE', 'LENGTH', 'TYPE', 'WIDTH', 'MASK'):
             self.take()
             return self.sizeop(pv)
+        if pv == 'SMALL':
+            # TASM's address-size operator: [SMALL 14H] a 16-bit address (67h)
+            self.take()
+            v = self.p_unary().copy()
+            v.small = True
+            return v
         if pv == 'SHORT':
             self.take()
             v = self.p_unary()

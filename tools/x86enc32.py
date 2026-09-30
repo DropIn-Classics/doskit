@@ -2,7 +2,8 @@
 
 A USE32 segment has 32-bit operands and addresses by default: a word
 operation gets the operand-size prefix 66h, an address made of 16-bit
-registers the address-size prefix 67h.  Prefixes are written in the
+registers, or one written [SMALL n] (TASM's operator for a 16-bit
+address with no register), the address-size prefix 67h.  Prefixes are written in the
 order REP/LOCK, 66h, segment, 67h.
 
 Jumps are sized as a multi-pass assembler (MASM 6, TASM /m) sizes them
@@ -117,7 +118,7 @@ def is_small_imm(v, size):
 
 
 def addr16(v):
-    return v.base in REG16 or v.index in REG16
+    return v.base in REG16 or v.index in REG16 or getattr(v, 'small', False)
 
 
 def default_seg(v):
@@ -388,7 +389,12 @@ def enc_mov(e, mn, toks):
                 and m.base is None and m.index is None:
             prefixes(e, size, m)
             e.b(op + w)
-            disp32(e, m)
+            if addr16(m):
+                if m.rel is not None:
+                    e.fix.append((len(e.out), 'OFF', m.rel, m.num))
+                e.w(m.num)
+            else:
+                disp32(e, m)
             return
     alu_like(e, 0x88, d, s, size)
 
@@ -405,7 +411,7 @@ def enc_movx(e, mn, toks):
     modrm(e, s, regno(d))
 
 
-GLUE = {'PTR', 'OFFSET', 'SEG', 'BYTE', 'WORD', 'DWORD', 'SHORT', 'NEAR', 'FAR', 'MOD',
+GLUE = {'PTR', 'OFFSET', 'SEG', 'BYTE', 'WORD', 'DWORD', 'SHORT', 'SMALL', 'NEAR', 'FAR', 'MOD',
         'SHL', 'SHR', 'AND', 'OR', 'XOR', 'NOT', 'HIGH', 'LOW', 'SIZE', 'TYPE', 'LENGTH',
         'EQ', 'NE', 'LT', 'LE', 'GT', 'GE'}
 

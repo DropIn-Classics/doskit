@@ -501,7 +501,7 @@ def main():
         text = f.read()
     for want in ('DD INIT', 'DD STEP', 'DD NAMETXT+80000000H', 'DD L005E', 'DD L0064',
                  'MOV EAX,OFFSET TABLE', 'MOV ECX,20H', '[EBX*4+TABLE]', 'CMP EAX,[LIMIT]',
-                 '\tDB 0BEH\t; mov esi, 0x20\n\tDD NAMETXT\n', '[EBX+NAMETXT]'):
+                 '\tDB 0BEH\t; mov esi, 0x20\n\tDD NAMETXT\n', '[EBX+NAMETXT]', 'MOV EDX,DS:[SMALL 14H]'):
         if want not in text:
             raise SystemExit(f'selftest FAILED: RELMOD.ASM has no {want} (offrel)')
     if 'DD COUNT' in text or 'OFFSET INIT' in text:

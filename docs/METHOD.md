@@ -282,7 +282,8 @@ linked by Microsoft LINK, 186/386 instructions in 16-bit code. Not tried:
   that switches by itself; no real extender run through yet. The port's
   side is `pmem.h` (tests/flat/port.c, compared with memory made by the
   test, not with a run: dosrun does not load a pMAX image by itself). A 32-bit instruction with a 16-bit address and no
-  register (67h, `[0027h]`) has no source form and stays DB;
+  register (67h) is written with TASM's address-size operator,
+  `DS:[SMALL 27H]` (tasm.py takes it; tests/enc32, tests/relmod);
 - other linkers' header layouts (`build.py`'s write_mz is Microsoft
   LINK's).
 
