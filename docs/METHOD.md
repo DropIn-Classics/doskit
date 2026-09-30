@@ -124,7 +124,11 @@ have offsets far beyond 100h.
 engine (two episodes, a demo and the full game), analyse one,
 then `tools/xfer.py A.hints B.hints` carries its hints to the other by
 aligning the instruction streams (a code address only when the next ten
-instructions match). B.hints keeps its own lines above the carried block;
+instructions match). A program of many code segments is aligned as all
+of them in image order; the segment names map by where the matched code
+lies and by the relocated words in it, so B's segments may have other
+frames and names. B.hints needs its own exe, segment, linker,
+relocorder, asm and keeptail lines (those are not carried). B.hints keeps its own lines above the carried block;
 the block is written by xfer.py only; check.py tells when it is out of
 date.
 

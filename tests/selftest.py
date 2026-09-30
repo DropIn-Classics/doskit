@@ -35,6 +35,8 @@ In build/selftest (a project as a game's would be, see kit.py):
      FAR PTR call within its segment; routines in FOUR reached only
      through a ptr and a words hint), with no instruction as DB, and
      without its prefix= hints build.py stops and says the labels collide;
+     xfer.py carries MULTISEG's hints to MULTIS2 (its source with FOUR one
+     byte further on, ONE and FOUR renamed), which rebuilds from them;
      PROVENANCE.md (the template's) is there; the names headers symmap.py
      wrote (HELLO's, FLAT's) are up to date; FLAT without its raw hint rebuilds too (the
      line tasm.py refuses written as DB by build.py);
@@ -364,6 +366,58 @@ def make_multiseg():
     os.makedirs(os.path.join(PROJ, 'game', 'MULTISEG'))
     with open(os.path.join(PROJ, 'game', 'MULTISEG', 'MULTISEG.EXE'), 'wb') as f:
         f.write(exe)
+    return len(exe)
+
+
+def check_xfer(py):
+    """xfer.py carries MULTISEG's hints to a sibling: its source with an
+    instruction put before FOUR's first routine (all of FOUR one byte
+    further on) and ONE and FOUR renamed UNO and QUAD; the hints into code
+    segments other than CODE and the segment names in them come across
+    mapped, and the sibling rebuilds byte for byte"""
+    with open(os.path.join(HERE, 'multiseg', 'MULTISEG.ASM')) as f:
+        text = f.read()
+    text = text.replace('\tASSUME CS:FOUR\n', '\tASSUME CS:FOUR\n\tINC DX\n')
+    text = re.sub(r'\bFOUR\b', 'QUAD', re.sub(r'\bONE\b', 'UNO', text))
+    src = os.path.join(PROJ, 'build', 'MULTIS2.ASM')
+    with open(src, 'w') as f:
+        f.write(text)
+    a = tasm.Assembler(src)
+    a.imm8_alu = {'add', 'adc', 'sbb', 'sub', 'cmp', 'xor'}
+    a.xchg_ax_short = False
+    a.assemble()
+    out = tlink.link([tlink.module_from_asm(a, 'MULTIS2')])
+    exe = tlink.write_mz(out, reloc_order=list(reversed(out.relocs)), version=0x30)
+    os.makedirs(os.path.join(PROJ, 'game', 'MULTIS2'))
+    with open(os.path.join(PROJ, 'game', 'MULTIS2', 'MULTIS2.EXE'), 'wb') as f:
+        f.write(exe)
+    # the sibling's own lines: exe, segments (renamed), linker, relocorder, asm
+    own = ['exe MULTIS2/MULTIS2.EXE']
+    with open(os.path.join(HERE, 'multiseg', 'src', 'MULTISEG.hints')) as f:
+        for line in f:
+            w = line.split()
+            if w and w[0] in ('segment', 'linker', 'relocorder', 'asm'):
+                own.append(re.sub(r'\bFOUR\b', 'QUAD', re.sub(r'\bONE\b', 'UNO', line.rstrip())))
+    dst = os.path.join(PROJ, 'src', 'MULTIS2.hints')
+    with open(dst, 'w') as f:
+        f.write('\n'.join(own) + '\n')
+    run([py, os.path.join(TOOLS, 'xfer.py'), 'src/MULTISEG.hints', 'src/MULTIS2.hints'])
+    with open(dst) as f:
+        carried = f.read()
+    for want in ('ptr QUAD:001F QUAD', 'name QUAD:0028 tick', 'words DATA:0015 1 QUAD',
+                 'name QUAD:0031 tock', 'name UNO:0007 first', 'name QUAD:0005 fourth'):
+        if not re.search('^' + re.escape(want) + r'\b', carried, re.M):
+            print(carried)
+            raise SystemExit(f'selftest FAILED: xfer.py did not carry {want!r}')
+    if 'not mapped' in carried:
+        print(carried)
+        raise SystemExit('selftest FAILED: xfer.py left hints of MULTISEG not mapped')
+    out = run([py, os.path.join(TOOLS, 'build.py'), 'src/MULTIS2.hints'])
+    if 'IDENTICAL' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: MULTIS2 from the carried hints')
+    out = run([py, os.path.join(TOOLS, 'xfer.py'), 'src/MULTISEG.hints', 'src/MULTIS2.hints',
+               '--check'])
     return len(exe)
 
 
@@ -768,6 +822,8 @@ def main():
             raise SystemExit(f'selftest FAILED: MULTISEG.ASM has no {want!r} (ptr and words '
                              'hints into a code segment other than CODE)')
     print('MULTISEG: routines reached through pointers into FOUR, a segment not named CODE')
+    print(f'MULTIS2.EXE ({check_xfer(py)} bytes): MULTISEG\'s hints carried by xfer.py '
+          'into renamed and shifted code segments, IDENTICAL')
     with open(os.path.join(PROJ, 'build', 'FLAT.ASM')) as f:
         text = f.read()
     for want in ('DW L00D5-C00D6', 'DW L00DE-C00D6', 'DW L00E5-C00D6', '[EDI+C00D6]'):
