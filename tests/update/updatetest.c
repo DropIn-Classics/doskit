@@ -1,4 +1,5 @@
-/* updatetest.c - the runtime's update.c and sys_data_migrate, run by
+/* updatetest.c - the runtime's update.c, sys_data_migrate and sys_join
+ * into its folder's own buffer, run by
  * selftest.py with DK_DATA_DIR set to an empty folder:
  *
  *     updatetest fetch file:///.../latest.json    first start
@@ -64,6 +65,24 @@ static void compare_and_parse(void)
     expect(!update_open("file:///etc/passwd"), "only https:// opened");
 }
 
+/* sys_join into the folder's own buffer, as sys_data_dir does (glibc's
+ * snprintf would have left "/share" of "/home/me/.local") */
+static void joins(void)
+{
+    char path[16], sep[2] = { 0 };
+
+    snprintf(path, sizeof path, "/home/me");
+    sys_join(path, sizeof path, path, "share");
+    sep[0] = path[8];
+    expect(!strncmp(path, "/home/me", 8) && strchr("/\\", sep[0]) && !strcmp(path + 9, "share"),
+           "sys_join into its folder's buffer");
+    sys_join(path, sizeof path, path, "toolong");
+    expect(strlen(path) == sizeof path - 1 && !strncmp(path, "/home/me", 8), "cut short, ended");
+    snprintf(path, sizeof path, "/x/");
+    sys_join(path, sizeof path, path, "y");
+    expect(!strcmp(path, "/x/y"), "no second separator");
+}
+
 static void migrate(void)
 {
     char exe[SYS_PATH], data[SYS_PATH], path[SYS_PATH], sub[SYS_PATH];
@@ -99,6 +118,7 @@ int main(int argc, char **argv)
     sys_set_app("doskit test", "doskit-test");
     if (!strcmp(argv[1], "fetch")) {
         compare_and_parse();
+        joins();
         migrate();
         expect(update_consent() == -1, "not asked yet");
         update_start("v1.2", argv[2]);
