@@ -1152,6 +1152,10 @@ class Emitter:
                     except Unformattable as e:
                         text = None
                         ins.raw = True
+                if text is None and self.offset_fields(S, ins):
+                    self.db_with_offsets(S, ins)
+                    off += ins.size
+                    continue
                 if text is None:
                     b = img[S.base + off:S.base + off + ins.size]
                     text = 'DB ' + ','.join(hexnum(x) for x in b) + f'\t; {ins.ci.mnemonic} {ins.ci.op_str}'
@@ -1220,6 +1224,36 @@ class Emitter:
                 self.out(ln, (S.name, p, n))
                 p += n
             off = end
+
+    def offset_fields(self, S, ins):
+        """an instruction's offrel dwords: (offset in it, label)"""
+        an = self.an
+        if an.offs is None:
+            return []
+        a = S.base + ins.off
+        out = []
+        for what, fo in (('disp', ins.ci.disp_offset), ('imm', ins.ci.imm_offset)):
+            ref = ins.refs.get(what)
+            if isinstance(ref, tuple) and a + fo in an.offs:
+                out.append((fo, self.f.sym(ref)))
+        return sorted(out)
+
+    def db_with_offsets(self, S, ins):
+        """an instruction written as DB whose offrel dwords stay DD label,
+        so that the source keeps every offset of the list"""
+        img = self.an.p.img
+        a = S.base + ins.off
+        p = 0
+        note = f'\t; {ins.ci.mnemonic} {ins.ci.op_str}'
+        for fo, name in self.offset_fields(S, ins):
+            if fo > p:
+                self.out('\tDB ' + ','.join(hexnum(x) for x in img[a + p:a + fo]) + note,
+                         (S.name, ins.off + p, fo - p))
+                note = ''
+            self.out(f'\tDD {name}', (S.name, ins.off + fo, 4))
+            p = fo + 4
+        if p < ins.size:
+            self.out('\tDB ' + ','.join(hexnum(x) for x in img[a + p:a + ins.size]), (S.name, ins.off + p, ins.size - p))
 
     def inner_labels(self, S, off, n):
         """labels inside an item that is written as one line"""

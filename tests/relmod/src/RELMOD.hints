@@ -15,3 +15,4 @@ name       CODE:0018 TABLE
 name       CODE:0020 NAMETXT
 name       CODE:0027 INIT
 name       CODE:003C STEP
+raw        CODE:005E               ; written as DB, its offset stays DD NAMETXT
