@@ -60,13 +60,16 @@ docs/NEW-PROJECT.md how to start a new game.
   - `new_project.py`: a new port's repository from `template/`, for a
     game chosen from those installed from GOG (`goglist.py` lists them:
     name, product ID, folder, CD image).
+  - `macapp.py`: the macOS release's app around the port's program
+    (docs/RELEASE.md).
 - `third_party/`: code taken unchanged from elsewhere, each with a
   README saying from where and under which licence: `stb_vorbis` (Ogg
   Vorbis decoding, public domain or MIT).
 - `runtime/` (C99; a project compiles the files it needs):
   - `platform.h` with `plat_sdl.c` (SDL2: macOS, Linux, Steam Deck),
     `plat_win32.c` (Windows SDK only) and `plat_null.c` (headless, for
-    tests and scripted runs); `sdl2-flags.sh` finds SDL2.
+    tests and scripted runs); `sdl2-flags.sh` finds SDL2 (`SDL2_STATIC=1`:
+    its static library, for the macOS release).
   - `rmem.h`: the program's memory as under DOS (MZ loader with a
     SHA-256 check, DOS memory blocks); `pmem.h`: a protected-mode
     program's 16 MB of linear memory (pMAX loader with a SHA-256 check,
@@ -81,7 +84,8 @@ docs/NEW-PROJECT.md how to start a new game.
     unpacked, or its installed folder copied), `sys.h` (files, folders, the data folder), `sha256.h`,
     `shot.h` (screenshots as PNG: Print Screen, `DK_SHOTS` headless).
 - `template/`: the start of a new port's repository (rules, hook, build
-  scripts, a C skeleton, `.claude/agents/` for Claude Code subagents such
+  scripts, a C skeleton, the workflow that builds the releases and the
+  player's README.txt as docs/RELEASE.md says, `.claude/agents/` for Claude Code subagents such
   as `doskit-collector`, a cheaper model for repetitive stage 1/2 data
   collection).
 - `tests/`: `selftest.py`, the whole way on a program of our own

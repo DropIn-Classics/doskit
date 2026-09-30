@@ -21,6 +21,15 @@ there is a version: the environment's `PORT_VERSION`, else the tag of the
 commit built; the workflow sets it for a tag's build. Without one it
 stays undefined.
 
+## Releases
+
+`.github/workflows/build.yml` builds the packages doskit/docs/RELEASE.md
+prescribes; a pushed tag `vX.Y` makes a release of them. `dist/README.txt`
+is the players' README in each package: fill in the game's keys and
+anything the game needs before the first release.
+
+(which packages were started from a download, on which systems)
+
 ## Checked
 
 (what was compared with the original, where and how)

@@ -247,6 +247,11 @@ controller), quality of life fixes (switchable, off in comparisons),
 skipping intros, the original's bugs fixed only where they bother,
 each such change documented as a change from the original.
 
+**Releases.** Every port ships the same way on every platform, as
+docs/RELEASE.md says: one program to double click (on a Mac one app),
+nothing to install, the GOG release found by itself, a README.txt for
+players. The template's workflow builds these packages.
+
 **Wording.** A port made this way is a native compatibility
 implementation requiring an installed copy of the game: it contains only
 its own code, and the player's installed release supplies the game's

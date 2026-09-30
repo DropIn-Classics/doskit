@@ -25,6 +25,10 @@ first; this file is the rules. The method and the tools are doskit's
    `doskit/tools/xfer.py` only.
 7. A change to the kit (a tool, the runtime) goes into doskit with a
    test there, not into a copy here.
+8. A release is made as doskit/docs/RELEASE.md says, on every platform,
+   with nothing left out: the packages the workflow builds, the
+   player's port/dist/README.txt filled in for the game, each package
+   started from a download before the release is announced.
 
 ## Subagents
 
