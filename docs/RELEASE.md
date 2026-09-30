@@ -15,7 +15,11 @@ a point below.
    redistributable). The one step the platform insists on for a program
    not signed by a paid certificate (Windows' SmartScreen, macOS's
    Gatekeeper) is described in README.txt, in the platform's own words,
-   and is needed once.
+   and is needed once. So is keeping the download when a browser holds
+   back a package that few have fetched yet (Chrome: a "dangerous" or
+   "suspicious" download, as seen with a new build on Linux): on the
+   organisation's website, where players find the packages, and in
+   README.txt.
 2. **One program.** Nothing beside it that the system could block or
    the player could lose, except where a platform leaves no choice
    (Linux: `libSDL2-2.0.so.0`).

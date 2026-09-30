@@ -15,9 +15,9 @@ first time it looks for your GOG release: where GOG installed it (on
 Windows found through the registry too), the GOG app in /Applications
 or ~/Applications on a Mac, on Linux where GOG's installer (the .sh)
 put it, also in a folder of your choice, or where Heroic, Lutris,
-Minigalaxy, Bottles or Wine usually put it; beside the program. It offers to copy the
-game's files from it into its data folder, where the settings and saves
-go too:
+Minigalaxy, Bottles or Wine usually put it; beside the program. It
+offers to copy the game's files from it into its data folder, where the
+settings and saves go too:
 
     Windows  %LOCALAPPDATA%\{{NAME}}
     macOS    ~/Library/Application Support/{{NAME}}
@@ -27,6 +27,13 @@ If it is not found, copy game.gog into the data folder or beside the
 program, or name it:
 
     {{SLUG}} -gog /path/to/game.gog
+
+The download: a browser may hold back a package that few people have
+downloaded yet, as each new release is (Chrome calls it a dangerous or
+suspicious download). Open the browser's list of downloads and keep the
+file: in Chrome "Keep", or in the entry's menu "Download dangerous
+file" (or "suspicious file"). Take the package only from the port's
+release page on GitHub.
 
 Windows: {{SLUG}}.exe needs nothing else. It is not signed, so Windows
 may say it protected your PC: click "More info", then "Run anyway".
