@@ -866,8 +866,8 @@ def enc_jmp(e, mn, toks):
         else:
             e.w(rel_to(e, v, 3))
         return
-    # JMP
-    if far and v.dist == 'FAR' and kind == 'known':
+    # JMP; FAR PTR (or a FAR label) in the same segment too: EAh, as CALL
+    if v.dist == 'FAR' and kind in ('known', 'fwd'):
         shape = 'far'
     elif v.short:
         shape = 'short'

@@ -352,6 +352,12 @@ def make_multiseg():
     a.assemble()
     out = tlink.link([tlink.module_from_asm(a, 'MULTISEG')])
     exe = tlink.write_mz(out, reloc_order=list(reversed(out.relocs)), version=0x30)
+    # tick's JMP FAR PTR within FOUR (frame 7, FOUR:002B): EAh with offset
+    # and segment, not a near jump
+    img = exe[struct.unpack_from('<H', exe, 8)[0] * 16:]
+    if img[0x9B:0xA0] != bytes([0xEA, 0x26, 0, 7, 0]):
+        raise SystemExit('selftest FAILED: MULTISEG\'s JMP FAR PTR in its own segment is '
+                         + img[0x9B:0xA0].hex(' '))
     os.makedirs(os.path.join(PROJ, 'game', 'MULTISEG'))
     with open(os.path.join(PROJ, 'game', 'MULTISEG', 'MULTISEG.EXE'), 'wb') as f:
         f.write(exe)

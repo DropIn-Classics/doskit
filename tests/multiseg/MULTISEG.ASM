@@ -72,7 +72,7 @@ THREE ENDS
 ; asm line says it): AND and OR with a small constant in the word form,
 ; ADD in the byte form, XCHG AX,reg as 87h /r; an array in DATA at a small
 ; offset indexed by BX (its displacement written in full, as the linker
-; fills it in); a far call to a routine of the same segment; routines
+; fills it in); a far call and a far jump to a routine of the same segment; routines
 ; reached only through pointers into FOUR (ptr and words hints)
 FOUR SEGMENT BYTE PUBLIC 'CODE'
 	ASSUME CS:FOUR
@@ -95,7 +95,7 @@ fourth_end PROC FAR
 fourth_end ENDP
 tick	PROC FAR		; reached only through the pointer above
 	INC WORD PTR DS:[ticks]
-	RETF
+	JMP FAR PTR fourth_end	; a far jump within its segment (EAh)
 tick	ENDP
 tock	PROC NEAR		; reached only through the table in DATA
 	DEC WORD PTR DS:[ticks]

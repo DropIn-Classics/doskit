@@ -33,7 +33,7 @@ name FOUR:0004 fourth
 ptr FOUR:001E FOUR
 name FOUR:0027 tick
 words DATA:0015 1 FOUR
-name FOUR:002C tock
+name FOUR:0030 tock
 
 ; FOUR is encoded as Borland C does: AND and OR with a small constant in
 ; the word form, XCHG AX,reg as 87h /r
