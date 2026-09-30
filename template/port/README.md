@@ -20,6 +20,9 @@ Both scripts define `PORT_VERSION` (a string) for the compiler when
 there is a version: the environment's `PORT_VERSION`, else the tag of the
 commit built; the workflow sets it for a tag's build. Without one it
 stays undefined.
+`PORT_UPDATE_URL` likewise, from the environment only: where a release
+looks for newer ones (doskit/runtime/update.h); the workflow sets it to
+the latest release's `latest.json`.
 
 ## Releases
 

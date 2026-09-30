@@ -58,7 +58,11 @@ In build/selftest (a project as a game's would be, see kit.py):
      tests/shot/shottest.c's PNGs (noise, long runs, far repeats) read
      back and compared with the pixels it wrote; tests/vgamode/runtime.c
      (the runtime's vga.c in modes 0Dh and 0Eh: size, a planar pixel and
-     its colour, 70 Hz) says "vga modes ok"; tests/flat/port.c (the
+     its colour, 70 Hz) says "vga modes ok"; tests/update/updatetest.c
+     (update.c: versions, latest.json's fields, nothing before the
+     player's yes, a latest.json made here fetched by curl as file://,
+     then the kept one used the same day; sys_data_migrate) says
+     "update ok" twice, when curl is there; tests/flat/port.c (the
      start of FLAT.386 in C over pmem.h, loaded at a linear address with
      a selector per descriptor) against the memory made here from the
      image, by memcmp.py --base, which also finds a byte changed in it;
@@ -281,6 +285,33 @@ def make_raw():
     with open(os.path.join(PROJ, 'build', 'files', 'RAWDRV.DRV'), 'wb') as f:
         f.write(bytes(out.img))
     return len(out.img)
+
+
+def check_update(b):
+    """tests/update/updatetest.c in a data folder of its own: a first start
+    fetching a latest.json made here, then one the same day using the kept
+    file (a fetch would fail: the address is nowhere)"""
+    if not shutil.which('curl'):
+        print('curl not found: update.c\'s fetch not checked')
+        return
+    d = os.path.join(b, 'update')
+    if os.path.isdir(d):
+        shutil.rmtree(d)
+    os.makedirs(os.path.join(d, 'data'))
+    exe = os.path.join(d, 'updatetest')
+    run([CC] + CFLAGS + ['-I', RUNTIME, '-o', exe, os.path.join(HERE, 'update', 'updatetest.c'),
+                         os.path.join(RUNTIME, 'update.c'), os.path.join(RUNTIME, 'sys.c')])
+    with open(os.path.join(d, 'latest.json'), 'w') as f:
+        f.write('{"version": "v1.3", "page": "https://github.com/o/r/releases/tag/v1.3",\n'
+                ' "notes": "Faster.\\nFixed.", "packages": {}}\n')
+    env = dict(os.environ, DK_DATA_DIR=os.path.join(d, 'data'))
+    url = 'file://' + os.path.join(d, 'latest.json').replace(os.sep, '/')
+    for mode, where in (('fetch', url), ('kept', 'file:///nowhere/latest.json')):
+        r = subprocess.run([exe, mode, where], capture_output=True, text=True, env=env)
+        if r.returncode or 'update ok' not in r.stdout:
+            print(r.stdout + r.stderr)
+            raise SystemExit(f'selftest FAILED: update.c ({mode})')
+        print(r.stdout.strip())
 
 
 def check_pmem(py, b):
@@ -603,6 +634,7 @@ def main():
     if 'vga modes ok' not in out:
         raise SystemExit('selftest FAILED: vga.c\'s 16-colour 200-line modes: ' + out)
     print(out.strip())
+    check_update(b)
     print(run([py, os.path.join(TOOLS, 'memcmp.py'), 'src/HELLO.hints',
                os.path.join(b, 'orig.ram'), os.path.join(b, 'port.ram'), '--skip', 'STACK',
                '--vram', os.path.join(b, 'orig.vram'), os.path.join(b, 'port.vram')]))
@@ -639,8 +671,14 @@ def main():
     if r.returncode or 'warning' in r.stderr:
         print(r.stdout + r.stderr)
         raise SystemExit('selftest FAILED: the template\'s port/build.sh')
+    # a data folder of its own: never the user's
+    first = os.path.join(KIT, 'build', 'selftest-data')
+    if os.path.isdir(first):
+        shutil.rmtree(first)
+    os.makedirs(first)
     r = subprocess.run([os.path.join(new, 'port', 'build', 'testgame-headless')], cwd=new,
-                       capture_output=True, text=True, env=dict(os.environ, DK_FRAMES='3'))
+                       capture_output=True, text=True,
+                       env=dict(os.environ, DK_FRAMES='3', DK_DATA_DIR=first))
     if r.returncode:
         print(r.stdout + r.stderr)
         raise SystemExit('selftest FAILED: the template\'s port did not find the game')

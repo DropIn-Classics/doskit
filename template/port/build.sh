@@ -14,8 +14,12 @@ VERSION=${PORT_VERSION:-$(git describe --tags --exact-match 2>/dev/null || true)
 if [ -n "$VERSION" ]; then
     CFLAGS="$CFLAGS -DPORT_VERSION=\"$VERSION\""
 fi
+# where a release looks for newer ones (the workflow sets it; update.h)
+if [ -n "$PORT_UPDATE_URL" ]; then
+    CFLAGS="$CFLAGS -DPORT_UPDATE_URL=\"$PORT_UPDATE_URL\""
+fi
 GAME="src/main.c"
-RUNTIME="$RT/sys.c $RT/cdimage.c $RT/textmode.c $RT/pad.c $RT/sha256.c $RT/rmem.c $RT/vga.c $RT/frame.c $RT/modplay.c $RT/audiofx.c $RT/fli.c $RT/shot.c"
+RUNTIME="$RT/sys.c $RT/cdimage.c $RT/textmode.c $RT/pad.c $RT/sha256.c $RT/rmem.c $RT/vga.c $RT/frame.c $RT/modplay.c $RT/audiofx.c $RT/fli.c $RT/shot.c $RT/update.c"
 
 mkdir -p build
 $CC $CFLAGS -o build/{{SLUG}}-headless $GAME $RUNTIME $RT/plat_null.c -lm
