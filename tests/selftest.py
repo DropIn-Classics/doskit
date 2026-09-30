@@ -95,11 +95,17 @@ In build/selftest (a project as a game's would be, see kit.py):
      the marker (refused); without -gog, game.gog put into its data folder
      found; the template's program made into an app by macapp.py (its
      Info.plist read back; on a Mac the bundle's signature verified).
+  7. inno.py: Inno Setup installers as GOG's Windows ones are, made by
+     tests/inno/mkinno.py (the data in the .exe, and in two .bin slices
+     with a chunk across them): the files listed and unpacked as they
+     were put in (an LZMA chunk with two files, one through the CALL/JMP
+     filter; GOG Galaxy's deflated parts, English and German, their
+     dependency left out); a byte changed in the data is caught.
 
 Prints `selftest ok` at the end, exit status 0 then.  Needs cc (clang
 or gcc); on Windows it is not written for MSVC yet.
 """
-import os, re, shutil, struct, subprocess, sys, zlib
+import lzma, os, re, shutil, struct, subprocess, sys, zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KIT = os.path.normpath(os.path.join(HERE, '..'))
@@ -399,6 +405,39 @@ def check_gogfind(b):
             print(r.stdout + r.stderr)
             raise SystemExit(f'selftest FAILED: gog_find ({what})')
     print(f'gog_find ok ({len(cases)} installations)')
+
+
+def check_inno(b):
+    """tools/inno.py on installers tests/inno/mkinno.py makes"""
+    sys.path.insert(0, os.path.join(HERE, 'inno'))
+    import inno, mkinno
+    d = os.path.join(b, 'inno')
+    if os.path.isdir(d):
+        shutil.rmtree(d)
+    os.makedirs(d)
+    for slices in (0, 2):
+        setup = os.path.join(d, f'setup_test_{slices}.exe')
+        want = mkinno.write(setup, slices)
+        for lang in ('en-US', 'de-DE'):
+            out = os.path.join(d, f'out_{slices}_{lang}')
+            inno.Setup(setup, lang).unpack(out)
+            got = {os.path.relpath(os.path.join(r, f), out).replace(os.sep, '/'):
+                   open(os.path.join(r, f), 'rb').read() for r, _, fs in os.walk(out) for f in fs}
+            if got != want[lang]:
+                raise SystemExit(f'selftest FAILED: inno.py ({slices} slices, {lang}): '
+                                 f'{sorted(k for k in set(got) | set(want[lang]) if got.get(k) != want[lang].get(k))}')
+    # a byte of README.TXT's chunk changed: its checksum (or LZMA) says so
+    setup = os.path.join(d, 'setup_test_0.exe')
+    data = bytearray(open(setup, 'rb').read())
+    data[0x440 + 40] ^= 0x55
+    open(setup, 'wb').write(data)
+    try:
+        inno.Setup(setup).unpack(os.path.join(d, 'bad'))
+    except (inno.InnoError, lzma.LZMAError):
+        pass
+    else:
+        raise SystemExit('selftest FAILED: inno.py took a changed byte')
+    print('inno ok (in the .exe and in slices, two languages, a changed byte caught)')
 
 
 def check_pmem(py, b):
@@ -954,6 +993,8 @@ def main():
         if agent not in open(os.path.join(new, 'AGENTS.md')).read():
             raise SystemExit(f'selftest FAILED: AGENTS.md does not mention {agent}')
 
+    step('7. Inno Setup installers (inno.py)')
+    check_inno(b)
     print('selftest ok')
 
 

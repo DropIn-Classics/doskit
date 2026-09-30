@@ -21,7 +21,10 @@ The tools find the project from the current folder and the game in
 
 `tools/isox.py IMAGE` unpacks a CD image (a plain ISO or raw 2352-byte
 sectors; GOG's `game.gog` is one) into `game/`. A game on floppies or
-installed from a GOG DOSBox folder is copied as it is. Look at what is
+installed from a GOG DOSBox folder is copied as it is. A game GOG sells
+for Windows only comes as its installer: `tools/inno.py SETUP.exe -x
+game` unpacks what it would install (on any system, without running
+it; the image or the files are then in `game/`). Look at what is
 there: which programs (`.EXE`, `.COM`, drivers), how they call each
 other (batch files, EXEC), which files are data. Write it into
 HANDOFF.md as a table.

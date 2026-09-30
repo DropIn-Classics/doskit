@@ -57,7 +57,9 @@ docs/NEW-PROJECT.md how to start a new game.
     memory with the original's (`-ram`, or `-mem` and `--base` for a
     protected-mode image).
   - `isox.py`: unpacks a CD image (ISO, or raw 2352-byte sectors as GOG's
-    game.gog); `flifiles.py`: reads and checks Autodesk FLI animations.
+    game.gog); `inno.py`: lists and unpacks an Inno Setup installer (GOG's
+    Windows setup_*.exe, with its .bin files; GOG Galaxy's parts put back
+    together); `flifiles.py`: reads and checks Autodesk FLI animations.
   - `new_project.py`: a new port's repository from `template/`, for a
     game chosen from those installed from GOG (`goglist.py` lists them:
     name, product ID, folder, CD image).
