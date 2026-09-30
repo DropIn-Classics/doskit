@@ -10,6 +10,10 @@
  * `game`, or, installed as a folder, that folder copied there (cdimage.h;
  * -gog names the image or the folder instead of looking for it).
  *
+ * A release build (PORT_VERSION and PORT_UPDATE_URL defined) asks once
+ * whether it may look for newer releases and shows one it found
+ * (update.h, docs/RELEASE.md point 7).
+ *
  * Nothing is ported yet: the program shows where it found the game and
  * waits for Esc.
  */
@@ -19,6 +23,14 @@
 #include "platform.h"
 #include "sys.h"
 #include "textmode.h"
+#include "update.h"
+
+#ifndef PORT_VERSION
+#define PORT_VERSION ""
+#endif
+#ifndef PORT_UPDATE_URL
+#define PORT_UPDATE_URL ""
+#endif
 
 static const GogRelease release = {
     /* GOG's folder name */
@@ -33,8 +45,45 @@ static const GogRelease release = {
     "{{MARKER}}",
 };
 
+/* what earlier versions wrote beside the program (sys_data_migrate) */
+static const char *const old_files[] = { "game", NULL };
+
 static uint8_t pixels[TM_WIDTH * TM_HEIGHT];
 static uint32_t palette[256];
+
+/* the lines about newer releases, from row y: the question, once, or
+ * the setting and a release found; key the scancode read (-1 none) */
+static void updates(int y, int key)
+{
+    const int attr = TM_ATTR(TM_LIGHTGREY, TM_BLUE), hi = TM_ATTR(TM_YELLOW, TM_BLUE);
+    char line[80];
+    UpdateInfo u;
+    int consent = update_consent();
+
+    if (!*PORT_VERSION || !*PORT_UPDATE_URL)
+        return;
+    if (consent < 0) {
+        if (key == 0x15 || key == 0x31)                 /* Y, N */
+            update_set_consent(key == 0x15);
+        tm_text(3, y, "Look for new versions of this port on GitHub, once a day?  Y / N", hi);
+        return;
+    }
+    if (key == 0x3C)                                    /* F2 */
+        update_set_consent(!consent);
+    update_start(PORT_VERSION, PORT_UPDATE_URL);
+    snprintf(line, sizeof line, "F2: look for new versions: %s", update_consent() ? "on" : "off");
+    tm_text(3, y, line, attr);
+    if (update_poll(&u)) {
+        if (key == 0x16)                                /* U */
+            update_open(u.page);
+        snprintf(line, sizeof line, "%s is out (this is %s).  U opens its page.", u.version,
+                 PORT_VERSION);
+        tm_text(3, y + 1, line, hi);
+        snprintf(line, sizeof line, "%.74s", u.notes);
+        line[strcspn(line, "\n")] = 0;                /* the notes' first line */
+        tm_text(3, y + 2, line, attr);
+    }
+}
 
 static void show(void)
 {
@@ -94,6 +143,7 @@ int main(int argc, char **argv)
         }
     }
     sys_set_app("{{NAME}}", "{{SLUG}}");
+    sys_data_migrate(old_files);
     if (!plat_init("{{NAME}}"))
         return 1;
     if (!get_game(given, gog, game, sizeof game)) {
@@ -109,12 +159,14 @@ int main(int argc, char **argv)
     tm_text(3, 4, game, TM_ATTR(TM_WHITE, TM_BLUE));
     tm_text(3, 8, "Nothing is ported yet.  Esc ends the program.", TM_ATTR(TM_LIGHTGREY, TM_BLUE));
     while (plat_pump()) {
-        int b, esc = 0;
+        int b, key = -1;
         while ((b = plat_read_scancode()) >= 0)
-            if (b == 0x01)
-                esc = 1;
-        if (esc)
+            if (!(b & 0x80))
+                key = b;
+        if (key == 0x01)
             break;
+        tm_fill(0, 10, TM_WIDTH, 3, ' ', TM_ATTR(TM_LIGHTGREY, TM_BLUE));
+        updates(10, key);
         show();
         plat_sleep_ms(15);
     }

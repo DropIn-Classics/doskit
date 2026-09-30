@@ -83,7 +83,8 @@ docs/NEW-PROJECT.md how to start a new game.
     text screen, for a DOS-setup-like launcher), `pad.h` (controller
     buttons to keys), `cdimage.h` (a GOG release found and its image
     unpacked, or its installed folder copied), `sys.h` (files, folders, the data folder), `sha256.h`,
-    `shot.h` (screenshots as PNG: Print Screen, `DK_SHOTS` headless).
+    `shot.h` (screenshots as PNG: Print Screen, `DK_SHOTS` headless),
+    `update.h` (newer releases made known, on the player's say).
 - `template/`: the start of a new port's repository (rules, hook, build
   scripts, a C skeleton, the workflow that builds the releases and the
   player's README.txt as docs/RELEASE.md says, `.claude/agents/` for Claude Code subagents such
