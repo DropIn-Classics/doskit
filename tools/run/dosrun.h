@@ -105,6 +105,7 @@ void rwatch_report(void);
 extern int prof_on;                    /* -prof: sample CS:IP */
 void prof_report(void);
 extern int int_watch;                  /* -intwatch NN: log INT NN calls */
+extern uint8_t *cover_map;             /* -cover: RAM_SIZE bits, instruction starts */
 
 /* ---------------------------------------------------------------- I/O ---- */
 uint8_t  io_r8 (uint16_t p);

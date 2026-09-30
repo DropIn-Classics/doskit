@@ -1359,6 +1359,9 @@ static void cpu_undef(const char *what){
         what, cpu.sreg[S_CS], (unsigned)insn_ip, at, bytes);
 }
 
+/* -cover: one bit per linear address where an instruction began */
+uint8_t *cover_map = NULL;
+
 /* Breakpoints and the execution trace (declared in dosrun.h). */
 uint32_t brk_lin[BRK_MAX];
 int brk_n = 0, brk_hit = -1;
@@ -1411,6 +1414,10 @@ static void step(void){
         if(la >= xtrace_lo && la <= xtrace_hi) xtrace_line(la);
     }
     if(prof_on && (++prof_tick & 0xFFF) == 0) prof_sample();
+    if(cover_map){
+        uint32_t la = cs_base + cpu.eip;
+        if(la < RAM_SIZE) cover_map[la >> 3] |= (uint8_t)(1u << (la & 7));
+    }
     /* Before the prefix loop, so a report names the first byte of the whole
      * instruction rather than wherever the decoder had got to. */
     insn_ip = cpu.eip;

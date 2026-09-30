@@ -60,6 +60,9 @@
  *   -cdwav FILE      what the CD drive played (44.1 kHz stereo, from t=0)
  *   -intwatch NN     print every INT NN call (hex)
  *   -prof            the busiest CS:IP at the end
+ *   -cover FILE      every linear address an instruction began at, and the
+ *                    programs' load segments, at the end (tools/gaps.py
+ *                    --cover tells which of a program's gaps ran)
  *   -vgastate        the VGA's registers, DAC and what the CRTC shows, at the end
  *   -v               the devices' and DOS's trace on stderr
  */
@@ -171,6 +174,31 @@ static int ndumps = 0;
 static double dump_every = 0.0, dump_next = 0.0;
 
 static const char *trace_file = NULL;
+
+/* -cover FILE: the programs loaded (name, load segment) and every linear
+ * address an instruction began at, written at the end */
+static const char *cover_file = NULL;
+static struct { char name[16]; uint16_t load; } cover_loads[64];
+static int ncover_loads = 0;
+static void write_cover(void){
+    FILE *f;
+    uint32_t a;
+    int i;
+    if(!cover_file) return;
+    f = fopen(cover_file, "w");
+    if(!f) die("cannot write %s", cover_file);
+    fprintf(f, "# dosrun -cover: 'load NAME SEG' for each program, then the linear\n"
+               "# addresses (hex) instructions began at, ascending\n");
+    for(i = 0; i < ncover_loads; i++)
+        fprintf(f, "load %s %04X\n", cover_loads[i].name, (unsigned)cover_loads[i].load);
+    for(a = 0; a < RAM_SIZE; a += 8){
+        uint8_t m = cover_map[a >> 3];
+        int k;
+        if(!m) continue;
+        for(k = 0; k < 8; k++) if(m & (1u << k)) fprintf(f, "%X\n", (unsigned)(a + (uint32_t)k));
+    }
+    fclose(f);
+}
 static uint64_t trace_count = 0;
 
 /* --------------------------------------------------------------- keys */
@@ -275,6 +303,10 @@ static void on_load(const char *dospath, uint16_t load){
     int i;
     const char *b = base_name(dospath);
     printf("load %s at %04X t=%.6f\n", dospath, load, emu_now());
+    if(cover_file && ncover_loads < 64){
+        snprintf(cover_loads[ncover_loads].name, sizeof(cover_loads[0].name), "%s", b);
+        cover_loads[ncover_loads++].load = load;
+    }
     if(!first_prog[0]) snprintf(first_prog, sizeof(first_prog), "%s", b);
     for(i=0;i<nbrks;i++){
         uint32_t before = brks[i].a.lin;
@@ -403,6 +435,7 @@ int main(int argc, char **argv){
         else if(!strcmp(a,"-loadfix")) loadfix = 1;
         else if(!strcmp(a,"-intwatch")){ NEED(1); int_watch = (int)strtol(argv[++i], NULL, 16); }
         else if(!strcmp(a,"-prof")) prof_on = 1;
+        else if(!strcmp(a,"-cover")){ NEED(1); cover_file = argv[++i]; }
         else if(!strcmp(a,"-vgastate")) vga_state = 1;
         else if(!strcmp(a,"-sb")) sound_debug = 1;
         else if(!strcmp(a,"-v")) trace_level = 1;
@@ -456,6 +489,10 @@ int main(int argc, char **argv){
     for(i=0;i<nbrks;i++) if(brks[i].a.lin == 0xFFFFFFFFu)
         fprintf(stderr, "dosrun: note: %s waits for that program to be loaded\n",
                 addr_str(&brks[i].a));
+    if(cover_file){
+        cover_map = (uint8_t *)calloc(RAM_SIZE / 8, 1);
+        if(!cover_map) die("out of memory for -cover");
+    }
     if(trace_file){
         xtrace_fp = fopen(trace_file, "w");
         if(!xtrace_fp) die("cannot write %s", trace_file);
@@ -597,6 +634,7 @@ int main(int argc, char **argv){
     if(mem_file) write_file(mem_file, ram, RAM_SIZE);
     if(vram_file) write_file(vram_file, vga_vram, sizeof(vga_vram));
     if(xtrace_fp) fclose(xtrace_fp);
+    write_cover();
     sound_wav_close();
     mscdex_wav_close();
     return 0;

@@ -43,7 +43,8 @@ docs/NEW-PROJECT.md how to start a new game.
     `tasm.py`, `x86enc.py`, `tlink.py`: assembler and linker work-alikes
     (with switches for other assemblers' encodings, the `asm` hint).
   - `gaps.py`: what of a code segment is not reached yet, and where the
-    gaps' addresses appear; `ptrscan.py`: immediates that look like
+    gaps' addresses appear (with `--cover`, which of the gaps ran in a
+    run with the runner's `-cover`); `ptrscan.py`: immediates that look like
     addresses; `cv4.py`: CodeView (NB08) debug information to `name`
     hints; `xfer.py`: carries hints to a second program of the same
     engine.

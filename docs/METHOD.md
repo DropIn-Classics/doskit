@@ -100,7 +100,11 @@ offsets from the table's own start, `LEA reg,[reg+table]; JMP reg`;
 `ptr` (an immediate that is a code offset: `MOV DX,offset handler`
 before INT 21h AH=25h), `coderange` (a run of handlers). gaps.py shows
 where each gap's address appears as a word, which usually is the
-pointer. Leave data as data. Code that runs into data after a call
+pointer. Whether a gap is code the analysis misses or code that
+never runs, a run tells: `run.py -cover FILE ...` writes where
+instructions began, `gaps.py --seg all --cover FILE` marks the gaps
+that ran (`RAN`, with the first address); a `-break` there gives SS:SP,
+a second run with `-dump SS:SP N` the return address of its caller. Leave data as data. Code that runs into data after a call
 that never returns (an exit through a service the analysis does not
 know) gets a `stop` hint on that instruction.
 

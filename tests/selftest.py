@@ -41,7 +41,9 @@ In build/selftest (a project as a game's would be, see kit.py):
      runner parses (one it lacks is taken for PROGRAM, and the addresses
      after it go untranslated); it finds MULTISEG's labels by their
      prefixes; the program in the runner, stopped at
-     its end (CODE:0026), its console line read, memory and video memory written out; PMODE.EXE
+     its end (CODE:0026), its console line read, memory and video memory written out; its
+     -cover file, with which gaps.py --cover marks the routines of HELLO's
+     table as run once its words hint is taken out; PMODE.EXE
      in the runner, which checks the runner's protected mode itself (into
      it through INT 15h AH=89h, a #GP, IRQ0 through the IDT, ring 3, a
      call gate, V86 mode with the I/O bitmap, back to real mode; then its
@@ -856,6 +858,25 @@ def main():
     if len(whole) != 0x1000000 or whole[:len(ram)] != ram:
         raise SystemExit('selftest FAILED: -mem is not the 16 MB that begin with -ram\'s bytes')
     print('-mem: 16 MB, beginning with -ram\'s 640 KB')
+    # -cover and gaps.py --cover: with the hints as they are no gap ran;
+    # without the words hint the two routines of the table are gaps, and
+    # both ran
+    cov = os.path.join(b, 'hello.cover')
+    run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-cover', cov, 'HELLO/HELLO.EXE'])
+    out = run([py, os.path.join(TOOLS, 'gaps.py'), 'src/HELLO.hints', '--cover', cov])
+    if not out.endswith('0 gaps ran in that run'):
+        print(out)
+        raise SystemExit('selftest FAILED: gaps.py --cover finds a gap of HELLO that ran')
+    with open(os.path.join(PROJ, 'src', 'HELLO.hints')) as f:
+        whole = f.read()
+    with open(os.path.join(b, 'NOWORDS.hints'), 'w') as f:
+        f.write(re.sub(r'^words .*\n', '', whole, flags=re.M))
+    out = run([py, os.path.join(TOOLS, 'gaps.py'), os.path.join(b, 'NOWORDS.hints'), '--cover', cov])
+    if (not re.search(r'^002B-\S+ .* RAN: \d+ instructions, the first at CODE:002B$', out, re.M)
+            or not out.endswith('1 gaps ran in that run')):
+        print(out)
+        raise SystemExit('selftest FAILED: gaps.py --cover without HELLO\'s words hint')
+    print('-cover: the routines of HELLO\'s table ran; gaps.py --cover shows them once unreached')
     # -rwatch: the table of two pointers is read by one CALL, a word each;
     # counter by INC and ADD (not by the fetches, not by DOS's AH=9)
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-rwatch', 'counter', '6',
