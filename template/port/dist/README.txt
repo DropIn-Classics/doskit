@@ -28,6 +28,15 @@ program, or name it:
 
     {{SLUG}} -gog /path/to/game.gog
 
+Where GOG offers the game for Windows only (on a Mac or Linux too): get
+its Windows installer from your GOG library, the "offline backup game
+installer" setup_....exe (with the setup_...-1.bin files beside it, if
+there are any), and leave it in Downloads, on the Desktop, in Documents
+or beside the program. It is unpacked, not run; nothing is installed.
+Or name it:
+
+    {{SLUG}} -gog /path/to/setup_....exe
+
 The download: a browser may hold back a package that few people have
 downloaded yet, as each new release is (Chrome calls it a dangerous or
 suspicious download). Open the browser's list of downloads and keep the

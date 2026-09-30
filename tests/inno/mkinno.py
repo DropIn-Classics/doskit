@@ -1,14 +1,16 @@
 """A small Inno Setup installer (the 5.6.2 Unicode format, as GOG's), made
 for the selftest: tools/inno.py reads it back.  Nothing of any game.
 
-    mkinno.write(path, slices=0)   -> {language: {path: bytes}} expected
+    mkinno.write(path, slices=0, extra=None)
+                                   -> {language: {path: bytes}} expected
 
 What it holds: README.TXT and GAME/PROG.EXE in one LZMA chunk (PROG.EXE
 through Inno's CALL/JMP filter), and, as GOG's Galaxy installers put
 them, DATA/BIG.DAT in two deflated parts under {tmp}, LANG.TXT once in
 English and once in German, and a dependency (DOSBOX/DEP.EXE) that is
 not the game's.  With slices=2 the data is in PATH-1.bin and PATH-2.bin
-(a chunk across the two) instead of the .exe.
+(a chunk across the two) instead of the .exe.  extra ({path: bytes}) are
+more files into {app}, in the LZMA chunk (a CD image, say).
 """
 import hashlib, lzma, os, struct, zlib
 
@@ -88,7 +90,7 @@ def data_entry(slice_no, chunk_offset, offset, body, stored_size, chunk_size, fl
     return e + struct.pack('<H', flags)
 
 
-def write(path, slices=0):
+def write(path, slices=0, extra=None):
     readme = b'a readme\r\n' * 300
     prog = bytes(range(256)) * 8 + b'\xe8\x10\x00\x00\x00' + b'\x90' * 7 + b'\xe9\xf0\xff\xff\xff'
     prog += b'\xe8\x00\x00\x80\x00' + bytes(300)            # bit 23 set: the high byte flipped
@@ -103,14 +105,22 @@ def write(path, slices=0):
         return len(chunks) - 1
 
     # README.TXT, GAME/PROG.EXE: one solid LZMA chunk
-    c = chunk(readme + call_encode(prog), True)
+    extra = extra or {}
+    c = chunk(readme + call_encode(prog) + b''.join(extra.values()), True)
     data.append((c, 0, readme, len(readme), 1 << 7))
     data.append((c, len(readme), prog, len(prog), 1 << 7 | 1 << 4))
     files.append(('{app}\\README.TXT', 0, '', '', ''))
     files.append(('{app}\\GAME\\PROG.EXE', 1, '', '', ''))
+    at = len(readme) + len(prog)
+    for name, body in extra.items():
+        data.append((c, at, body, len(body), 1 << 7))
+        files.append(('{app}\\' + name.replace('/', '\\'), len(data) - 1, '', '', ''))
+        at += len(body)
     # GOG Galaxy parts, each deflated, in chunks of their own
     md5 = hashlib.md5(big).hexdigest()
     for i, part in enumerate((big[:30000], big[30000:])):
+        if i:                               # a plain file between the parts
+            files.append(('{app}\\BETWEEN.TXT', 0, '', '', ''))
         z = zlib.compress(part)
         data.append((chunk(z, False), 0, z, len(z), 0))
         files.append((f'{{tmp}}\\{i}', len(data) - 1, "check_if_install('en-US#de-DE#','32#64#','')",
@@ -159,5 +169,6 @@ def write(path, slices=0):
         for n, piece in enumerate((blob[:cut], blob[cut:]), 1):
             with open(f'{stem}-{n}.bin', 'wb') as f:
                 f.write(b'idska32\x1a' + struct.pack('<I', 12 + len(piece)) + piece)
-    common = {'README.TXT': readme, 'GAME/PROG.EXE': prog, 'DATA/BIG.DAT': big}
+    common = dict({'README.TXT': readme, 'BETWEEN.TXT': readme, 'GAME/PROG.EXE': prog,
+                   'DATA/BIG.DAT': big}, **extra)
     return {code: dict(common, **{'LANG.TXT': text}) for code, text in lang.items()}

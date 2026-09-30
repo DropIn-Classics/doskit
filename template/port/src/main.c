@@ -1,14 +1,16 @@
 /* main.c - {{NAME}}: a native compatibility implementation requiring an
  * installed copy of the original game.
  *
- *     {{SLUG}} [-game DIR | -gog FILE|FOLDER]
+ *     {{SLUG}} [-game DIR | -gog FILE|FOLDER|SETUP.exe]
  *
  * DIR is the game's unpacked files: -game, else ${{ENV}}, else the first
  * folder `game` holding {{MARKER}} beside the program, in the current
  * directory or in the data folder (sys_find_game).  When there is none,
  * the installed GOG release's image is unpacked into the data folder's
- * `game`, or, installed as a folder, that folder copied there (cdimage.h;
- * -gog names the image or the folder instead of looking for it).
+ * `game`, or, installed as a folder, that folder copied there (cdimage.h);
+ * not installed, GOG's Windows installer (setup_*.exe) lying about is
+ * unpacked instead (inno.h).  -gog names the image, the folder or the
+ * installer instead of looking for it.
  *
  * A release build (PORT_VERSION and PORT_UPDATE_URL defined) asks once
  * whether it may look for newer releases and shows one it found
@@ -20,6 +22,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "cdimage.h"
+#include "inno.h"
 #include "platform.h"
 #include "sys.h"
 #include "textmode.h"
@@ -92,11 +95,12 @@ static void show(void)
 }
 
 /* the game's files: found, or from the GOG release (its CD image
- * unpacked, or its installed folder copied); 1 if there */
+ * unpacked, its installed folder copied, or its Windows installer
+ * unpacked); 1 if there */
 static int get_game(const char *given, const char *gog, char *out, size_t n)
 {
     char from[SYS_PATH], data[SYS_PATH], err[256];
-    int folder, r;
+    int folder, setup, r;
 
     if (sys_find_game(given, "{{ENV}}", "{{MARKER}}", out, n))
         return 1;
@@ -105,9 +109,11 @@ static int get_game(const char *given, const char *gog, char *out, size_t n)
     if (gog)
         snprintf(from, sizeof from, "%s", gog);
     else if (!gog_find(&release, from, sizeof from) &&
-             !gog_find_folder(&release, from, sizeof from))
+             !gog_find_folder(&release, from, sizeof from) &&
+             !inno_find(&release, from, sizeof from))
         return 0;
     folder = sys_is_dir(from);
+    setup = !folder && inno_is_setup(from);
     sys_data_dir(data, sizeof data);
     sys_join(out, n, data, "game");
     tm_clear(' ', TM_ATTR(TM_LIGHTGREY, TM_BLUE));
@@ -117,6 +123,8 @@ static int get_game(const char *given, const char *gog, char *out, size_t n)
     show();
     if (folder)
         r = gog_copy(from, out, "{{MARKER}}", NULL, NULL, err, sizeof err);
+    else if (setup)
+        r = inno_unpack(from, out, "{{MARKER}}", NULL, NULL, err, sizeof err);
     else
         r = cd_unpack(from, out, "{{MARKER}}", NULL, NULL, err, sizeof err);
     if (r != 0) {

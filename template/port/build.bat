@@ -32,7 +32,7 @@ if defined PORT_VERSION set CFLAGS=%CFLAGS% /DPORT_VERSION=\"%PORT_VERSION%\"
 rem where a release looks for newer ones (the workflow sets it; update.h)
 if defined PORT_UPDATE_URL set CFLAGS=%CFLAGS% /DPORT_UPDATE_URL=\"%PORT_UPDATE_URL%\"
 set GAME=src\main.c
-set RUNTIME=%RT%\sys.c %RT%\cdimage.c %RT%\textmode.c %RT%\pad.c %RT%\sha256.c %RT%\rmem.c %RT%\vga.c %RT%\frame.c %RT%\modplay.c %RT%\audiofx.c %RT%\fli.c %RT%\shot.c %RT%\update.c
+set RUNTIME=%RT%\sys.c %RT%\cdimage.c %RT%\inno.c %RT%\textmode.c %RT%\pad.c %RT%\sha256.c %RT%\rmem.c %RT%\vga.c %RT%\frame.c %RT%\modplay.c %RT%\audiofx.c %RT%\fli.c %RT%\shot.c %RT%\update.c
 
 cl %CFLAGS% /Fobuild\obj\ /Fe:build\{{SLUG}}.exe %GAME% %RUNTIME% %RT%\plat_win32.c user32.lib gdi32.lib winmm.lib advapi32.lib shell32.lib winhttp.lib /link /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
 if errorlevel 1 exit /b 1

@@ -93,7 +93,8 @@ In build/selftest (a project as a game's would be, see kit.py):
      template's port started with -gog on that folder (copied into its
      data folder), on the image (unpacked there) and on a folder without
      the marker (refused); without -gog, game.gog put into its data folder
-     found; the template's program made into an app by macapp.py (its
+     found; GOG's Windows installer (tests/inno/mkinno.py's, holding
+     HELLO.EXE) unpacked with -gog, and found in ~/Downloads without it; the template's program made into an app by macapp.py (its
      Info.plist read back; on a Mac the bundle's signature verified).
   7. inno.py: Inno Setup installers as GOG's Windows ones are, made by
      tests/inno/mkinno.py (the data in the .exe, and in two .bin slices
@@ -102,7 +103,11 @@ In build/selftest (a project as a game's would be, see kit.py):
      filter; GOG Galaxy's deflated parts, English and German, their
      dependency left out); a byte changed in the data is caught;
      goglist.py offers such an installer, new_project.py --setup makes a
-     project of it (GOG's ID from it, its files in game/).
+     project of it (GOG's ID from it, its files in game/); the runtime's
+     inno.c (tests/inno/innotest.c) unpacks the same setups alike,
+     refuses one without the marker before writing anything, takes the
+     CD image out of one that holds an image and unpacks that, and
+     catches a changed byte, leaving nothing behind.
 
 Prints `selftest ok` at the end, exit status 0 then.  Needs cc (clang
 or gcc); on Windows it is not written for MSVC yet.
@@ -440,6 +445,55 @@ def check_inno(b):
     else:
         raise SystemExit('selftest FAILED: inno.py took a changed byte')
     print('inno ok (in the .exe and in slices, two languages, a changed byte caught)')
+
+    # the same with the runtime's inno.c (tests/inno/innotest.c)
+    exe = os.path.join(d, 'innotest')
+    run([CC] + CFLAGS + ['-I', RUNTIME, '-o', exe, os.path.join(HERE, 'inno', 'innotest.c')] +
+        [os.path.join(RUNTIME, f) for f in ('inno.c', 'cdimage.c', 'sys.c', 'sha256.c')])
+
+    def c_unpack(setup, out, must_have):
+        r = subprocess.run([exe, setup, out, must_have], capture_output=True, text=True)
+        return r.returncode, r.stdout.strip()
+
+    def tree(out):
+        return {os.path.relpath(os.path.join(r, f), out).replace(os.sep, '/'):
+                open(os.path.join(r, f), 'rb').read() for r, _, fs in os.walk(out) for f in fs}
+    for slices in (0, 2):
+        setup = os.path.join(d, f'setup_c_{slices}.exe')
+        want = mkinno.write(setup, slices)
+        out = os.path.join(d, f'c_{slices}')
+        rc, said = c_unpack(setup, out, 'game/prog.exe')
+        if rc or tree(out) != want['en-US'] or os.path.exists(out + '.part'):
+            raise SystemExit(f'selftest FAILED: inno.c ({slices} slices): {said}')
+    out = os.path.join(d, 'c_missing')
+    rc, said = c_unpack(setup, out, 'NOPE/NOPE.EXE')
+    if not rc or 'not the game' not in said or os.path.exists(out) or os.path.exists(out + '.part'):
+        raise SystemExit(f'selftest FAILED: inno.c took a setup without the marker: {said}')
+    # a setup holding the game's CD image, not its files: the image unpacked
+    image = os.path.join(d, 'image')
+    cd_image({'HELLO/HELLO.EXE': b'MZ' + bytes(100), 'HELLO/README.TXT': b'hello\r\n'}, image)
+    setup = os.path.join(d, 'setup_c_image.exe')
+    mkinno.write(setup, 0, {'CD/game.gog': open(image, 'rb').read()})
+    out = os.path.join(d, 'c_image')
+    rc, said = c_unpack(setup, out, 'HELLO/HELLO.EXE')
+    if (rc or tree(out) != {'HELLO/HELLO.EXE': b'MZ' + bytes(100), 'HELLO/README.TXT': b'hello\r\n'}
+            or os.path.exists(out + '.setup')):
+        raise SystemExit(f'selftest FAILED: inno.c on a setup holding a CD image: {said}')
+    # a changed byte: refused, nothing left behind
+    setup = os.path.join(d, 'setup_c_0.exe')
+    data = bytearray(open(setup, 'rb').read())
+    data[0x440 + 40] ^= 0x55
+    open(setup, 'wb').write(data)
+    out = os.path.join(d, 'c_bad')
+    rc, said = c_unpack(setup, out, '')
+    if not rc or os.path.exists(out) or os.path.exists(out + '.part'):
+        raise SystemExit(f'selftest FAILED: inno.c took a changed byte: {said}')
+    said = [subprocess.run([exe, p], capture_output=True, text=True).stdout.strip()
+            for p in (setup, image)]
+    if said != ['setup', 'not a setup']:
+        raise SystemExit(f'selftest FAILED: inno_is_setup: {said}')
+    print('inno.c ok (the same setups; a missing marker refused, a CD image in a setup unpacked, '
+          'a changed byte caught)')
 
     # goglist.py offers it (a GOG installer lying about), new_project.py
     # --setup makes a project of it: the ID from the setup, its files in game/
@@ -981,6 +1035,28 @@ def main():
         print(r.stdout + r.stderr)
         raise SystemExit('selftest FAILED: game.gog in the data folder not found')
     print('ok   game.gog in the data folder found and unpacked')
+
+    # GOG's Windows installer, where GOG sells a game for Windows only:
+    # named by -gog, and found in ~/Downloads (HOME a folder of its own)
+    # by its product ID without it
+    sys.path.insert(0, os.path.join(HERE, 'inno'))
+    import mkinno
+    home = os.path.join(KIT, 'build', 'selftest-home')
+    if os.path.isdir(home):
+        shutil.rmtree(home)
+    os.makedirs(os.path.join(home, 'Downloads'))
+    setup = os.path.join(home, 'Downloads', 'setup_hello_game_1.0_(1).exe')
+    mkinno.write(setup, 0, {'HELLO/HELLO.EXE': hello})
+    for what, args in (('-gog', ['-gog', setup]), ('found in Downloads', [])):
+        shutil.rmtree(data)
+        os.makedirs(data)
+        r = subprocess.run([exe] + args, cwd=empty, capture_output=True, text=True,
+                           env=dict(os.environ, DK_FRAMES='3', DK_DATA_DIR=data, HOME=home,
+                                    USERPROFILE=home))
+        if r.returncode or not os.path.isfile(got) or open(got, 'rb').read() != hello:
+            print(r.stdout + r.stderr)
+            raise SystemExit(f'selftest FAILED: the template\'s port and a setup ({what})')
+    print('ok   the template\'s port: GOG\'s Windows installer unpacked, named and found')
 
     # the macOS release's app around the template's program
     import macapp, plistlib
