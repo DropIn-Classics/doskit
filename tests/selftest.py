@@ -72,7 +72,8 @@ In build/selftest (a project as a game's would be, see kit.py):
      made here: a game's goggame-ID.info and a raw CD image with HELLO's
      files, cd_image below, named by a cue sheet): its name, ID, folder
      name, image path and marker in its port/src/main.c, the image
-     unpacked into its game/ as it was.
+     unpacked into its game/ as it was; one installed as a folder (no
+     image) copied into game/, its program taken for the marker.
 
 Prints `selftest ok` at the end, exit status 0 then.  Needs cc (clang
 or gcc); on Windows it is not written for MSVC yet.
@@ -661,14 +662,20 @@ def main():
              os.path.join(installed, 'CD', 'HELLO.DAT'))
     with open(os.path.join(installed, 'CD', 'HELLO.CUE'), 'w') as f:
         f.write('FILE "HELLO.DAT" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n')
+    # one installed as a folder (no CD image): copied into game/ below
+    folder_game = os.path.join(gog, 'Floppy Game')
+    os.makedirs(os.path.join(folder_game, 'HELLO'))
+    with open(os.path.join(folder_game, 'goggame-1234567892.info'), 'w') as f:
+        f.write('{"gameId": "1234567892", "name": "Floppy Game"}')
+    shutil.copy(os.path.join(PROJ, 'game', 'HELLO', 'HELLO.EXE'), os.path.join(folder_game, 'HELLO'))
     chosen = os.path.join(KIT, 'build', 'selftest-chosen')
     if os.path.isdir(chosen):
         shutil.rmtree(chosen)
     # the game (the add-on left out), the slug, the CD's first program, unpacked
     r = subprocess.run([py, os.path.join(TOOLS, 'new_project.py'), chosen, '--no-submodule'],
-                       input='1\nhello\n1\ny\n', capture_output=True, text=True,
+                       input='2\nhello\n1\ny\n', capture_output=True, text=True,
                        env=dict(os.environ, DOSKIT_GOG_DIRS=gog))
-    print(r.stdout.strip().splitlines()[0])
+    print(r.stdout.strip().splitlines()[1])
     if r.returncode or 'An add-on' in r.stdout:
         print(r.stdout + r.stderr)
         raise SystemExit('selftest FAILED: new_project.py choosing an installed GOG game')
@@ -681,6 +688,21 @@ def main():
     if not os.path.isfile(got) or open(got, 'rb').read() != hello:
         raise SystemExit('selftest FAILED: the chosen game\'s image not unpacked into game/')
     print('ok   chosen from the installed GOG games: main.c filled in, game/ unpacked')
+
+    # the one installed as a folder (no CD image): the folder copied into game/
+    copied = os.path.join(KIT, 'build', 'selftest-copied')
+    if os.path.isdir(copied):
+        shutil.rmtree(copied)
+    r = subprocess.run([py, os.path.join(TOOLS, 'new_project.py'), copied, '--no-submodule'],
+                       input='1\nfloppy\n1\ny\n', capture_output=True, text=True,
+                       env=dict(os.environ, DOSKIT_GOG_DIRS=gog))
+    main_c = open(os.path.join(copied, 'port', 'src', 'main.c')).read() if not r.returncode else ''
+    got = os.path.join(copied, 'game', 'HELLO', 'HELLO.EXE')
+    if (r.returncode or '"HELLO/HELLO.EXE",' not in main_c or '"1234567892",' not in main_c
+            or not os.path.isfile(got) or open(got, 'rb').read() != hello):
+        print(r.stdout + r.stderr)
+        raise SystemExit('selftest FAILED: a game installed as a folder not copied into game/')
+    print('ok   one installed as a folder: copied into game/, its program the marker')
 
     for agent in ('doskit-collector', 'git-committer'):
         p = os.path.join(new, '.claude', 'agents', f'{agent}.md')

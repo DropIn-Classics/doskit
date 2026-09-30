@@ -8,11 +8,14 @@
    one chosen gives the name, GOG's product ID, the installed folder's
    name and the CD image's path (on a Mac also its path inside the
    application); it asks for the slug and the marker (the CD's programs
-   offered) and unpacks the image into `game/` if wanted. Without the
+   offered) and unpacks the image into `game/` if wanted; a game
+   installed as a folder (no CD image) has the whole folder copied into
+   `game/` instead. Without the
    game installed here, everything is named:
 
        python3 ~/doskit/tools/new_project.py ~/mygame "My Game" mygame \
-           --marker GAME/GAME.EXE --gog-id 1234567890 [--image PATH/game.gog]
+           --marker GAME/GAME.EXE --gog-id 1234567890 \
+           [--image PATH/game.gog | --copy INSTALLED-FOLDER]
 
    It copies template/, fills in the game's name everywhere (PROVENANCE.md
    among them), runs `git init`, enables the hook and adds the kit as the
@@ -28,7 +31,7 @@
    it or with a placeholder left in it.
 
 3. The game's files into `game/` (ignored), unless new_project.py
-   unpacked them: `python3 doskit/tools/isox.py IMAGE` for a CD image
+   unpacked or copied them: `python3 doskit/tools/isox.py IMAGE` for a CD image
    (GOG's is often, not always, `game.gog`), else copy the installed
    folder. List the
    programs and data files in docs/HANDOFF.md.

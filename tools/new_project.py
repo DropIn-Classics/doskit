@@ -4,7 +4,7 @@
     new_project.py DIR
     new_project.py DIR "Game Name" SLUG [--marker PATH] [--gog-id ID]
                    [--gog-folder NAME] [--gog-image PATH] [--mac-bundle PATH]
-                   [--image FILE]
+                   [--image FILE | --copy FOLDER]
     (both: [--kit URL] [--no-submodule])
 
 DIR must not exist.  With DIR alone the GOG games installed here are
@@ -12,7 +12,9 @@ listed (goglist.py) and the one to port is chosen; its name, product ID,
 folder and (on a Mac) the image's place in the application come from
 the installation, the slug and the marker are asked for (the CD's
 programs offered), and the CD image, if it has one, is unpacked into the
-project's game/ when wanted.
+project's game/ when wanted; a game installed as a folder (no CD image:
+from floppies, or a DOSBox folder) has that folder copied into game/
+instead, its programs offered for the marker.
 
 Otherwise "Game Name" is the game's title (in PROVENANCE.md, the README,
 the window's title), SLUG a short lower-case name (the program's, the
@@ -23,7 +25,8 @@ goggame-ID.info in the installed folder: on Windows the port finds the
 installation by it in the registry.  --gog-folder is the installed
 folder's name (default: the game's name), --gog-image the CD image's
 path in it (default: game.gog), --mac-bundle the image's path inside
-/Applications on a Mac.  --image FILE is unpacked into game/.
+/Applications on a Mac.  --image FILE is unpacked into game/, --copy
+FOLDER (an installed game's) copied into it.
 What is not given is filled in later (port/src/main.c); a missing
 --gog-id is said.
 
@@ -81,9 +84,27 @@ def cd_programs(image):
             if not isdir and p.upper().endswith(('.EXE', '.COM'))]
 
 
+def folder_programs(folder):
+    """the programs in an installed game's folder: its .EXE and .COM files'
+    paths in it"""
+    out = []
+    for d, dirs, files in os.walk(folder):
+        dirs.sort()
+        out += [os.path.relpath(os.path.join(d, f), folder).replace(os.sep, '/')
+                for f in sorted(files) if f.upper().endswith(('.EXE', '.COM'))]
+    return out
+
+
+def pick_marker(progs):
+    for i, p in enumerate(progs, 1):
+        print(f'{i:3}  {p}')
+    k = ask('marker, the file the game\'s folder is known by (number or path; Enter: later)')
+    return progs[int(k) - 1] if k.isdigit() and 1 <= int(k) <= len(progs) else k
+
+
 def choose(a):
-    """a's name, slug, gog_id, gog_folder, mac_bundle, marker and image from
-    an installed GOG game the user picks"""
+    """a's name, slug, gog_id, gog_folder, mac_bundle, marker and image (or
+    folder to copy) from an installed GOG game the user picks"""
     games = goglist.installed()
     if not games:
         raise SystemExit('no GOG games found here: name the game and its slug '
@@ -102,17 +123,15 @@ def choose(a):
                  re.sub(r'[^a-z0-9]+', '-', g.name.lower()).strip('-'))
     if g.image:
         print(f'CD image: {g.image}')
-        progs = cd_programs(g.image)
-        for i, p in enumerate(progs, 1):
-            print(f'{i:3}  {p}')
-        k = ask('marker, the file the game\'s folder is known by (number or path; '
-                'Enter: later)')
-        a.marker = progs[int(k) - 1] if k.isdigit() and 1 <= int(k) <= len(progs) else k
+        a.marker = pick_marker(cd_programs(g.image))
         if ask('unpack the image into game/ (y/n)', 'y').lower().startswith('y'):
             a.image = g.image
     else:
-        a.marker = ask('marker, the file the game\'s folder is known by (Enter: later)')
-        print('no CD image: copy the installed game\'s files into game/ yourself')
+        # installed as a folder (from floppies, or a DOSBox folder): all of it
+        print('no CD image: the installed folder holds the game\'s files')
+        a.marker = pick_marker(folder_programs(g.folder))
+        if ask('copy the installed folder into game/ (y/n)', 'y').lower().startswith('y'):
+            a.copy = g.folder
 
 
 def main():
@@ -126,6 +145,7 @@ def main():
     ap.add_argument('--gog-image', default='')
     ap.add_argument('--mac-bundle', default='')
     ap.add_argument('--image')
+    ap.add_argument('--copy')
     ap.add_argument('--kit', default=KIT_URL)
     ap.add_argument('--no-submodule', action='store_true')
     a = ap.parse_args()
@@ -148,6 +168,10 @@ def main():
         raise SystemExit('--gog-id: the number in goggame-ID.info, digits only')
     if a.image and not goglist.is_cd_image(a.image):
         raise SystemExit(f'{a.image}: not a CD image')
+    if a.image and a.copy:
+        raise SystemExit('--image or --copy, not both')
+    if a.copy and not os.path.isdir(a.copy):
+        raise SystemExit(f'{a.copy}: not a folder')
     shutil.copytree(TEMPLATE, dst)
     fill(dst, {'NAME': a.name, 'SLUG': a.slug,
                'ENV': re.sub(r'[^A-Z0-9]', '_', a.slug.upper()) + '_GAME',
@@ -169,6 +193,10 @@ def main():
         print('no marker: fill it in in port/src/main.c')
     if a.image:
         print(f'{isox.unpack(a.image, os.path.join(dst, "game"))} files unpacked into game/')
+    if a.copy:
+        shutil.copytree(a.copy, os.path.join(dst, 'game'), symlinks=True)
+        n = sum(len(fs) for _, _, fs in os.walk(os.path.join(dst, 'game')))
+        print(f'{n} files copied into game/ from {a.copy}')
     if a.no_submodule:
         print('no submodule: add the kit as doskit/ yourself (git submodule add URL doskit)')
     else:
@@ -180,7 +208,7 @@ def main():
                   '\nadd it later: git submodule add URL doskit')
         else:
             print(f'doskit/ added as a submodule from {a.kit}')
-    print('next: ' + ('' if a.image else 'the game\'s files into game/ (python3 '
+    print('next: ' + ('' if a.image or a.copy else 'the game\'s files into game/ (python3 '
                       'doskit/tools/isox.py IMAGE), then ') + 'docs/HANDOFF.md, "Next"')
 
 
