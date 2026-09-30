@@ -12,51 +12,40 @@
 
 /* ---- finding the image */
 
-static int take(const char *path, char *out, size_t n)
+static int has_file(const char *image, const char *must_have);
+
+/* `path` if it is there and, with `must_have`, holds that file */
+static int take(const char *path, const char *must_have, char *out, size_t n)
 {
-    if (!sys_is_file(path))
+    if (!sys_is_file(path) || (must_have && !has_file(path, must_have)))
         return 0;
     snprintf(out, n, "%s", path);
     return 1;
 }
 
 /* dir/name */
-static int take_in(const char *dir, const char *name, char *out, size_t n)
+static int take_in(const char *dir, const char *name, const char *must_have, char *out, size_t n)
 {
     char path[SYS_PATH];
     sys_join(path, sizeof path, dir, name);
-    return take(path, out, n);
+    return take(path, must_have, out, n);
 }
 
 #ifdef _WIN32
-/* GOG's installers keep a key per game under GOG.com\Games with the
- * folder in its value "path"; the first that holds the image is taken
- * (not checked on a Windows installation) */
-static int from_registry(const char *key, const char *image, char *out, size_t n)
+/* GOG's installers keep a key per game under GOG.com\Games, named by
+ * its product ID, with the folder in its value "path" (not checked on a
+ * Windows installation) */
+static int from_registry(const char *games, const GogRelease *rel, const char *image,
+                         const char *must_have, char *out, size_t n)
 {
-    HKEY games, game;
-    char sub[256], dir[MAX_PATH];
-    DWORD i, len, type, size;
-    int found = 0;
+    char key[256], dir[MAX_PATH];
+    DWORD size = sizeof dir;
 
-    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, key, 0, KEY_READ, &games) != ERROR_SUCCESS)
+    snprintf(key, sizeof key, "%s\\%s", games, rel->gog_id);
+    if (RegGetValueA(HKEY_LOCAL_MACHINE, key, "path", RRF_RT_REG_SZ, NULL, dir, &size) !=
+        ERROR_SUCCESS)
         return 0;
-    for (i = 0; !found; i++) {
-        len = sizeof sub;
-        if (RegEnumKeyExA(games, i, sub, &len, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
-            break;
-        if (RegOpenKeyExA(games, sub, 0, KEY_READ, &game) != ERROR_SUCCESS)
-            continue;
-        size = sizeof dir - 1;
-        if (RegQueryValueExA(game, "path", NULL, &type, (BYTE *)dir, &size) == ERROR_SUCCESS &&
-            type == REG_SZ) {
-            dir[size < sizeof dir ? size : sizeof dir - 1] = 0;
-            found = take_in(dir, image, out, n);
-        }
-        RegCloseKey(game);
-    }
-    RegCloseKey(games);
-    return found;
+    return take_in(dir, image, must_have, out, n);
 }
 #endif
 
@@ -64,27 +53,29 @@ int gog_find(const GogRelease *rel, char *out, size_t n)
 {
     char dir[SYS_PATH], path[SYS_PATH];
     const char *image = rel->image ? rel->image : "game.gog";
+    const char *must = rel->must_have && *rel->must_have ? rel->must_have : NULL;
 
     sys_exe_dir(dir, sizeof dir);
-    if (take_in(dir, image, out, n) || take(image, out, n))
+    if (take_in(dir, image, must, out, n) || take(image, must, out, n))
         return 1;
 #ifdef _WIN32
     {
         char drive;
         const char *pf = getenv("ProgramFiles(x86)");
 
-        if (from_registry("SOFTWARE\\WOW6432Node\\GOG.com\\Games", image, out, n) ||
-            from_registry("SOFTWARE\\GOG.com\\Games", image, out, n))
+        if (rel->gog_id &&
+            (from_registry("SOFTWARE\\WOW6432Node\\GOG.com\\Games", rel, image, must, out, n) ||
+             from_registry("SOFTWARE\\GOG.com\\Games", rel, image, must, out, n)))
             return 1;
         /* the installer's default folder, on any drive; GOG Galaxy's */
         for (drive = 'C'; drive <= 'Z'; drive++) {
             snprintf(path, sizeof path, "%c:\\GOG Games\\%s", drive, rel->folder);
-            if (take_in(path, image, out, n))
+            if (take_in(path, image, must, out, n))
                 return 1;
         }
         snprintf(path, sizeof path, "%s\\GOG Galaxy\\Games\\%s",
                  pf ? pf : "C:\\Program Files (x86)", rel->folder);
-        if (take_in(path, image, out, n))
+        if (take_in(path, image, must, out, n))
             return 1;
     }
 #else
@@ -101,17 +92,17 @@ int gog_find(const GogRelease *rel, char *out, size_t n)
         if (rel->mac_bundle) {
             /* on a Mac the release is an application, the image inside */
             snprintf(path, sizeof path, "/Applications/%s", rel->mac_bundle);
-            if (take(path, out, n))
+            if (take(path, must, out, n))
                 return 1;
             sys_join(dir, sizeof dir, home, "Applications");
             sys_join(path, sizeof path, dir, rel->mac_bundle);
-            if (take(path, out, n))
+            if (take(path, must, out, n))
                 return 1;
         }
         for (i = 0; i < sizeof home_dirs / sizeof home_dirs[0]; i++) {
             sys_join(dir, sizeof dir, home, home_dirs[i]);
             sys_join(dir, sizeof dir, dir, rel->folder);
-            if (take_in(dir, image, out, n))
+            if (take_in(dir, image, must, out, n))
                 return 1;
         }
     }
@@ -285,6 +276,45 @@ static void remove_entry(void *ctx, const char *name, int is_dir)
         remove(path);
 }
 
+/* `image` opened into u->f, its sector size found and its primary
+ * volume descriptor (sector 16: the root directory's record at 156) read
+ * into `pvd`; 0, else -1 with the reason in u->err and nothing open */
+static int open_image(Unpack *u, const char *image, uint8_t *pvd)
+{
+    static const uint8_t sync[12] = {0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0};
+    uint8_t head[12];
+
+    u->f = fopen(image, "rb");
+    if (!u->f)
+        return fail(u, "The image cannot be opened.");
+    u->raw = fread(head, 1, 12, u->f) == 12 && !memcmp(head, sync, 12) ? RAW : DATA;
+    if (sector(u, 16, pvd) || pvd[0] != 1 || memcmp(pvd + 1, "CD001", 5) != 0) {
+        fclose(u->f);
+        u->f = NULL;
+        return fail(u, "The image holds no CD file system.");
+    }
+    return 0;
+}
+
+/* 1 if `image` is a CD image holding `must_have` */
+static int has_file(const char *image, const char *must_have)
+{
+    Unpack u;
+    uint8_t pvd[DATA];
+    char err[128];
+
+    memset(&u, 0, sizeof u);
+    u.err = err;
+    u.n = sizeof err;
+    u.must_have = must_have;
+    if (open_image(&u, image, pvd) != 0)
+        return 0;
+    if (walk(&u, le32(pvd + 156 + 2), le32(pvd + 156 + 10), NULL, "", 0) != 0)
+        u.has_program = 0;
+    fclose(u.f);
+    return u.has_program;
+}
+
 int cd_unpack(const char *image, const char *dir, const char *must_have,
               int (*progress)(void *ctx, const char *file, long done, long total), void *ctx,
               char *err, size_t n)
@@ -302,19 +332,8 @@ int cd_unpack(const char *image, const char *dir, const char *must_have,
     if (sys_is_dir(dir) || sys_is_file(dir))
         return fail(&u, "The folder for the game's files is there already.");
     u.must_have = must_have && *must_have ? must_have : NULL;
-    u.f = fopen(image, "rb");
-    if (!u.f)
-        return fail(&u, "The image cannot be opened.");
-    {
-        static const uint8_t sync[12] = {0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0};
-        uint8_t head[12];
-        u.raw = fread(head, 1, 12, u.f) == 12 && !memcmp(head, sync, 12) ? RAW : DATA;
-    }
-    /* the primary volume descriptor, sector 16: the root directory's record at 156 */
-    if (sector(&u, 16, pvd) || pvd[0] != 1 || memcmp(pvd + 1, "CD001", 5) != 0) {
-        fclose(u.f);
-        return fail(&u, "The image holds no CD file system.");
-    }
+    if (open_image(&u, image, pvd) != 0)
+        return -1;
     r = walk(&u, le32(pvd + 156 + 2), le32(pvd + 156 + 10), NULL, "", 0);
     if (r == 0 && u.must_have && !u.has_program)
         r = fail(&u, "The image is not the game's CD (a file it must have is missing).");

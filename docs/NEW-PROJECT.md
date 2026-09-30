@@ -24,8 +24,9 @@
    IDENTICAL, `doskit/tools/check.py` before every commit.
 
 5. The port: port/src/main.c finds the game (and unpacks the GOG image on
-   the first start); fill in the GOG folder name and, if there is one, the
-   Mac release's path in its `release`. Then stage 3 as METHOD.md says:
+   the first start); fill in the GOG folder name, GOG's product ID (the
+   number in the installed folder's `goggame-ID.info`) and, if there is
+   one, the Mac release's path in its `release`. Then stage 3 as METHOD.md says:
    `doskit/tools/symmap.py port/src/gen/names.h PREFIX KEY=src/NAME.hints`,
    the program over `rmem.h`, compared with the runner.
 

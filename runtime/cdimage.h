@@ -18,12 +18,19 @@ typedef struct {
     /* on a Mac, the image's path inside /Applications (the release is an
      * app, often with a DOSBox bundle inside); NULL: no Mac release */
     const char *mac_bundle;
+    /* GOG's product ID, the number in the goggame-ID.info in the installed
+     * folder: on Windows the registry key GOG.com\Games\ID says where the
+     * game is; NULL: the registry is not looked at */
+    const char *gog_id;
+    /* a path on the CD, as cd_unpack's must_have: an image without it is
+     * not taken (GOG ships many DOS games' CDs as game.gog); NULL: any */
+    const char *must_have;
 } GogRelease;
 
 /* The installed release's image: beside the program, in the current
  * directory, where GOG's installers put it (on Windows also where GOG's
- * registry entries say a game is; the first holding such an image is
- * taken), on a Mac inside the app.  1 if found. */
+ * registry entry for the game says it is), on a Mac inside the app.
+ * 1 if found. */
 int gog_find(const GogRelease *rel, char *out, size_t n);
 
 /* The files of `image` unpacked into `dir`, which must not exist: into
