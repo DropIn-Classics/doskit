@@ -162,6 +162,11 @@ class Slices:
                 self.files[n] = self.open_bin(n)
         return self.files[n]
 
+    def close(self):
+        for f, _, _ in self.files.values():
+            f.close()
+        self.files = {}
+
     def open_bin(self, n):
         stem = re.sub(r'(?i)\.exe$', '', self.path)
         stem = re.sub(r'-0\.bin$', '', stem)
@@ -173,6 +178,7 @@ class Slices:
                 f = open(os.path.join(folder, name), 'rb')
                 head = f.read(12)
                 if head[:8] not in SLICE_MAGICS:
+                    f.close()
                     raise InnoError(f'{name}: not one of the setup\'s .bin files')
                 return f, 0, struct.unpack_from('<I', head, 8)[0]
         raise InnoError(f'{want} missing beside {os.path.basename(self.path)}')
@@ -442,8 +448,11 @@ class Setup:
         for p, us in users.values():
             chunks.setdefault(p.chunk_key(), []).append((p, us))
         out = Output(folder)
-        for key in sorted(chunks):
-            self.unpack_chunk(sorted(chunks[key], key=lambda x: x[0].offset), out)
+        try:
+            for key in sorted(chunks):
+                self.unpack_chunk(sorted(chunks[key], key=lambda x: x[0].offset), out)
+        finally:
+            self.slices.close()
         out.finish(want)
         return len(want)
 
@@ -536,44 +545,47 @@ def _early():
 
 class Output:
     """the files written as their parts come: a GOG Galaxy file's parts
-    inflated one after another, its MD5 checked at the end"""
+    inflated one after another, its MD5 checked at the end. A file is open
+    only while a part of it is written (the next part appended), so a
+    setup of thousands of files stays within the system's limit of open
+    files (256 on macOS)"""
 
     def __init__(self, folder):
-        self.folder, self.open = folder, {}
+        self.folder, self.done = folder, {}
 
     def part(self, users, pieces):
         pieces = list(pieces) if len(users) > 1 else pieces
         for f, i in users:
-            st = self.open.get(id(f))
+            st = self.done.get(id(f))
             if st is None:
                 if i:
                     raise InnoError(f'{f.path}: its parts out of order')
-                path = os.path.join(self.folder, *f.path.split('/'))
-                os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-                st = self.open[id(f)] = [open(path, 'wb'), hashlib.md5(), 0]
-            elif i != st[2]:
+                st = self.done[id(f)] = [hashlib.md5(), 0]
+            elif i != st[1]:
                 raise InnoError(f'{f.path}: its parts out of order')
+            path = os.path.join(self.folder, *f.path.split('/'))
+            os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
             z = zlib.decompressobj() if f.md5 else None
-            for b in pieces:
+            with open(path, 'ab' if i else 'wb') as out:
+                for b in pieces:
+                    if z:
+                        b = z.decompress(b)
+                        st[0].update(b)
+                    out.write(b)
                 if z:
-                    b = z.decompress(b)
-                    st[1].update(b)
-                st[0].write(b)
-            if z:
-                b = z.flush()
-                st[1].update(b)
-                st[0].write(b)
-            st[2] += 1
+                    b = z.flush()
+                    st[0].update(b)
+                    out.write(b)
+            st[1] += 1
 
     def finish(self, files):
         for f in files:
-            st = self.open.pop(id(f), None)
+            st = self.done.pop(id(f), None)
             if st is None:
                 continue
-            st[0].close()
-            if st[2] != len(f.parts):
+            if st[1] != len(f.parts):
                 raise InnoError(f'{f.path}: parts missing')
-            if f.md5 and st[1].hexdigest() != f.md5:
+            if f.md5 and st[0].hexdigest() != f.md5:
                 raise InnoError(f'{f.path}: MD5 wrong')
 
 

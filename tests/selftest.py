@@ -445,7 +445,28 @@ def check_inno(b):
         pass
     else:
         raise SystemExit('selftest FAILED: inno.py took a changed byte')
-    print('inno ok (in the .exe and in slices, two languages, a changed byte caught)')
+    # more files than may be open at once: each closed when written
+    many = {f'DATA/F{i:03}.DAT': b'%d\r\n' % i for i in range(300)}
+    setup = os.path.join(d, 'setup_many.exe')
+    mkinno.write(setup, 0, many)
+    out = os.path.join(d, 'many')
+    try:
+        import resource
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (min(100, hard), hard))
+    except (ImportError, ValueError, OSError):
+        resource = None                     # Windows: the unpack alone
+    try:
+        inno.Setup(setup).unpack(out)
+    except OSError as e:
+        raise SystemExit(f'selftest FAILED: inno.py on 300 files: {e}')
+    finally:
+        if resource:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
+    if any(open(os.path.join(out, *k.split('/')), 'rb').read() != v for k, v in many.items()):
+        raise SystemExit('selftest FAILED: inno.py on 300 files: not the same')
+    print('inno ok (in the .exe and in slices, two languages, a changed byte caught, '
+          'more files than may be open)')
 
     # the same with the runtime's inno.c (tests/inno/innotest.c)
     exe = os.path.join(d, 'innotest')
