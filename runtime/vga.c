@@ -254,19 +254,34 @@ void vga_set_mode(int mode)
     static const uint8_t attr12[21] = {
         0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x14, 0x07, 0x38, 0x39, 0x3A,
         0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x01, 0x00, 0x0F, 0x00, 0x00};
-    int m12 = mode == 0x12;
+    /* the 16-colour 200-line modes 0Dh (320 wide) and 0Eh (640 wide):
+     * planar, scan-doubled; the tables the runner's BIOS mode set uses
+     * (tools/run/vga.c), the graphics controller as mode 12h's */
+    static const uint8_t seq0d[5] = {0x03, 0x09, 0x0F, 0x00, 0x06};
+    static const uint8_t crtc0d[25] = {
+        0x2D, 0x27, 0x28, 0x90, 0x2B, 0x80, 0xBF, 0x1F, 0x00, 0xC0, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x9C, 0x8E, 0x8F, 0x14, 0x00, 0x96, 0xB9, 0xE3, 0xFF};
+    static const uint8_t seq0e[5] = {0x03, 0x01, 0x0F, 0x00, 0x06};
+    static const uint8_t crtc0e[25] = {
+        0x5F, 0x4F, 0x50, 0x82, 0x54, 0x80, 0xBF, 0x1F, 0x00, 0xC0, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x9C, 0x8E, 0x8F, 0x28, 0x00, 0x96, 0xB9, 0xE3, 0xFF};
+    static const uint8_t attr0d[21] = {
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x10, 0x11, 0x12,
+        0x13, 0x14, 0x15, 0x16, 0x17, 0x01, 0x00, 0x0F, 0x00, 0x00};
+    int m12 = mode == 0x12, m0d = mode == 0x0D || mode == 0x0E;
 
     memset(&v, 0, sizeof v);
     v.misc = m12 ? 0xE3 : 0x63;
-    memcpy(v.seq, m12 ? seq12 : seq13, sizeof v.seq);
-    memcpy(v.crtc, m12 ? crtc12 : crtc13, sizeof v.crtc);
-    memcpy(v.gc, m12 ? gc12 : gc13, sizeof v.gc);
-    memcpy(v.attr, m12 ? attr12 : attr13, sizeof v.attr);
+    memcpy(v.seq, m12 ? seq12 : mode == 0x0D ? seq0d : mode == 0x0E ? seq0e : seq13, sizeof v.seq);
+    memcpy(v.crtc, m12 ? crtc12 : mode == 0x0D ? crtc0d : mode == 0x0E ? crtc0e : crtc13,
+           sizeof v.crtc);
+    memcpy(v.gc, m12 || m0d ? gc12 : gc13, sizeof v.gc);
+    memcpy(v.attr, m12 ? attr12 : m0d ? attr0d : attr13, sizeof v.attr);
     v.pel_mask = 0xFF;
-    /* mode 12h: the BIOS's 64 EGA colours in DAC 0-3Fh (bits 0-2 blue,
-     * green, red at 2/3, bits 3-5 at 1/3), which the attribute registers
-     * above pick the 16 from */
-    if (m12) {
+    /* modes 12h, 0Dh and 0Eh: the BIOS's 64 EGA colours in DAC 0-3Fh
+     * (bits 0-2 blue, green, red at 2/3, bits 3-5 at 1/3), which the
+     * attribute registers above pick the 16 from */
+    if (m12 || m0d) {
         int i;
         for (i = 0; i < 0x40; i++) {
             v.dac[i][0] = (uint8_t)((i >> 2 & 1) * 42 + (i >> 5 & 1) * 21);

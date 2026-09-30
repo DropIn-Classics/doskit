@@ -56,7 +56,9 @@ In build/selftest (a project as a game's would be, see kit.py):
      the stack is not the same and not compared); its picture as a PNG
      (shot.c, DK_SHOTS) read back and compared with its PPM (DK_DUMP);
      tests/shot/shottest.c's PNGs (noise, long runs, far repeats) read
-     back and compared with the pixels it wrote; tests/flat/port.c (the
+     back and compared with the pixels it wrote; tests/vgamode/runtime.c
+     (the runtime's vga.c in modes 0Dh and 0Eh: size, a planar pixel and
+     its colour, 70 Hz) says "vga modes ok"; tests/flat/port.c (the
      start of FLAT.386 in C over pmem.h, loaded at a linear address with
      a selector per descriptor) against the memory made here from the
      image, by memcmp.py --base, which also finds a byte changed in it;
@@ -543,6 +545,13 @@ def main():
             raise SystemExit(f'selftest FAILED: shot.c\'s {name}.png')
         print(f'shot.c {name}.png: {w}x{h}, {os.path.getsize(os.path.join(shots, name + ".png"))}'
               f' bytes for {w * h} pixels')
+    exe = os.path.join(b, 'vgamodes')
+    run([CC] + CFLAGS + ['-I', RUNTIME, '-o', exe, os.path.join(HERE, 'vgamode', 'runtime.c'),
+                         os.path.join(RUNTIME, 'vga.c'), '-lm'])
+    out = run([exe])
+    if 'vga modes ok' not in out:
+        raise SystemExit('selftest FAILED: vga.c\'s 16-colour 200-line modes: ' + out)
+    print(out.strip())
     print(run([py, os.path.join(TOOLS, 'memcmp.py'), 'src/HELLO.hints',
                os.path.join(b, 'orig.ram'), os.path.join(b, 'port.ram'), '--skip', 'STACK',
                '--vram', os.path.join(b, 'orig.vram'), os.path.join(b, 'port.vram')]))

@@ -28,10 +28,12 @@ uint8_t vga_inb(uint16_t port);
 void vga_write(uint16_t offset, uint8_t value);
 uint8_t vga_read(uint16_t offset);
 
-/* INT 10h AH=00h: mode 12h (640x480, 16 colours) or 13h (320x200, 256
- * colours, chain-4); the registers the BIOS sets, memory cleared.  The
- * BIOS palette is loaded for mode 12h (programs show 16-colour pictures
- * in it), not for 13h, whose programs set their own. */
+/* INT 10h AH=00h: mode 12h (640x480, 16 colours), 0Dh or 0Eh (320x200
+ * and 640x200, 16 colours, scan-doubled) or 13h (320x200, 256 colours,
+ * chain-4; any other number too); the registers the BIOS sets, memory
+ * cleared.  The BIOS palette is loaded for the 16-colour modes (programs
+ * show 16-colour pictures in it), not for 13h, whose programs set their
+ * own. */
 void vga_set_mode(int mode);
 
 /* the picture the CRTC would show now */
