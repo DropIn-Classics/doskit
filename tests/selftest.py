@@ -28,8 +28,11 @@ In build/selftest (a project as a game's would be, see kit.py):
      build.py's check; MULTISEG (code segments beginning in the middle of
      a paragraph, labels at the same offsets in two of them) from
      tests/multiseg/src/MULTISEG.hints (start=, prefix=, linker tlink,
-     relocorder original), and without its prefix= hints build.py stops
-     and says the labels collide;
+     relocorder original; a segment stored before it is defined; Borland
+     C's encodings with the asm switches imm8_alu and xchg_ax_short; a
+     displacement written in full though small, taken for an address; a
+     FAR PTR call within its segment), with no instruction as DB, and
+     without its prefix= hints build.py stops and says the labels collide;
      PROVENANCE.md (the template's) is there; the names headers symmap.py
      wrote (HELLO's, FLAT's) are up to date; FLAT without its raw hint rebuilds too (the
      line tasm.py refuses written as DB by build.py);
@@ -336,10 +339,13 @@ def make_relmod():
 
 
 def make_multiseg():
-    """tests/multiseg/MULTISEG.ASM with TLINK's header, the relocations
+    """tests/multiseg/MULTISEG.ASM encoded as Borland C does (AND and OR
+    with a word constant, XCHG AX,reg as 87h /r), with TLINK's header, the relocations
     in reverse order (not by address, as TLINK writes them in the order of
     its object records)"""
     a = tasm.Assembler(os.path.join(HERE, 'multiseg', 'MULTISEG.ASM'))
+    a.imm8_alu = {'add', 'adc', 'sbb', 'sub', 'cmp', 'xor'}    # as Borland C encodes
+    a.xchg_ax_short = False
     a.assemble()
     out = tlink.link([tlink.module_from_asm(a, 'MULTISEG')])
     exe = tlink.write_mz(out, reloc_order=list(reversed(out.relocs)), version=0x30)
@@ -738,6 +744,10 @@ def main():
     print(out)
     if not out.splitlines()[-1].startswith('all ok'):
         raise SystemExit('selftest FAILED: check.py')
+    # MULTISEG's instructions as the assembler writes them, none as DB (a
+    # far call in its own segment, the word forms, the full displacement)
+    if not re.search(r'MULTISEG\.hints: .* 0 as DB', out):
+        raise SystemExit('selftest FAILED: MULTISEG has instructions written as DB')
     with open(os.path.join(PROJ, 'build', 'FLAT.ASM')) as f:
         text = f.read()
     for want in ('DW L00D5-C00D6', 'DW L00DE-C00D6', 'DW L00E5-C00D6', '[EDI+C00D6]'):
@@ -821,8 +831,8 @@ def main():
                          + ' '.join(sorted(parsed ^ set(run_py.OPTS))))
     import disasm
     names = run_py.Names(disasm.Hints(os.path.join(PROJ, 'src', 'MULTISEG.hints')), 'MULTISEG/MULTISEG.EXE')
-    got = [names.lookup(t) for t in ('LTWO_0006', 'LTHR_0012', 'ONE_0001', 'third')]
-    if got != [('TWO', 6), ('THREE', 0x12), ('ONE', 1), ('THREE', 6)]:
+    got = [names.lookup(t) for t in ('LTWO_000C', 'LTHR_0023', 'ONE_0006', 'third')]
+    if got != [('TWO', 0xC), ('THREE', 0x23), ('ONE', 6), ('THREE', 0xC)]:
         raise SystemExit(f'selftest FAILED: run.py\'s names of segments with prefix=: {got}')
     print('run.py finds the labels of segments with their own prefix')
     b = os.path.join(PROJ, 'build')

@@ -2,6 +2,7 @@
 ; in several segments that are BYTE and WORD aligned, so each begins in the
 ; middle of a paragraph after the one before (as a compiled program's
 ; modules do), with routines at the same offsets in different segments;
+; a segment's value stored into memory before the segment is defined;
 ; written with TLINK's header and its relocations in an order that is not
 ; the address order (selftest.py makes it so).
 .186
@@ -13,6 +14,7 @@ start:
 	CALL FAR PTR first
 	CALL FAR PTR second
 	CALL FAR PTR third
+	CALL FAR PTR fourth
 	MOV AH,9
 	MOV DX,OFFSET text
 	INT 21H
@@ -51,6 +53,12 @@ TWO ENDS
 THREE SEGMENT BYTE PUBLIC 'CODE'
 	ASSUME CS:THREE
 third	PROC FAR
+	PUSH BP
+	MOV BP,SP
+	PUSH AX
+	MOV WORD PTR [BP-2],DATA	; a segment defined later, stored (C7 /0)
+	POP AX
+	POP BP
 	MOV AX,SEG second
 	OR AX,AX
 	JZ third_done
@@ -59,6 +67,30 @@ third_done:
 	RETF
 third	ENDP
 THREE ENDS
+
+; encoded as Borland C does (selftest.py assembles it so; the hints'
+; asm line says it): AND and OR with a small constant in the word form,
+; ADD in the byte form, XCHG AX,reg as 87h /r; an array in DATA at a small
+; offset indexed by BX (its displacement written in full, as the linker
+; fills it in); a far call to a routine of the same segment
+FOUR SEGMENT BYTE PUBLIC 'CODE'
+	ASSUME CS:FOUR
+fourth	PROC FAR
+	PUSH BP
+	MOV BP,SP
+	AND WORD PTR [BP+6],3
+	OR DI,0CH
+	ADD DI,4
+	XCHG AX,BX
+	MOV AL,BYTE PTR [BX+text+2]
+	CALL FAR PTR fourth_end
+	POP BP
+	RETF
+fourth	ENDP
+fourth_end PROC FAR
+	RETF
+fourth_end ENDP
+FOUR ENDS
 
 DATA SEGMENT PARA PUBLIC 'DATA'
 text	DB 'multiseg', 13, 10, '$'

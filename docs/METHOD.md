@@ -78,6 +78,14 @@ which assembler it was:
 - `ADD AX,5` as `83 C0 05`: MASM (`asm alu_ax_short=0`);
 - `TEST r1,r2` with r1 in r/m: MASM (`asm test_form=rm_reg`).
 
+A compiler writes machine code itself and has its own choices; Borland
+C (1991): `AND`/`OR` with a small constant in the word form (`asm
+imm8_alu=add,adc,sbb,sub,cmp,xor`), `XCHG AX,reg` as 87h /r (`asm
+xchg_ax_short=0`), `TEST r1,r2` with r1 in r/m; a jump at the edge of
+the short range sized otherwise than TASM's estimate (`raw`). The run
+time library's assembly modules in the same program keep the
+assembler's forms: `raw` for those.
+
 Single instructions encoded by hand (a DB in the original source) are
 `raw` hints; build.py lists them as candidates each round.
 
@@ -103,7 +111,8 @@ register is then used as a base; check each by eye before adding a
 `dptr`. A `dptr`/`ptr` on an instruction without an immediate names its
 displacement (`CALL [SI+table]`). A small displacement with a register
 (below 100h) is taken for a field offset unless such a hint says
-otherwise; so is one with a register that lands in reached code (at an
+otherwise, or unless it is written in two bytes though it fits one (the
+assembler did not know it: an address, a compiler's `array[BX]`); so is one with a register that lands in reached code (at an
 instruction or inside one), as a flat program's records and buffers
 have offsets far beyond 100h.
 

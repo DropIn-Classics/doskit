@@ -129,6 +129,12 @@ Hints syntax (one per line, ';' starts a comment, numbers are hex):
                                                          sign-extended 83h form
                                          test_form=rm_reg  TEST r,r with the
                                                          first register in r/m
+                                         imm8_alu=OP,OP...  only these ALU
+                                                         operations (add, or,
+                                                         adc, sbb, and, sub,
+                                                         xor, cmp) take the
+                                                         83h byte form
+                                         xchg_ax_short=0  XCHG AX,reg as 87h /r
 """
 import argparse, os, re, struct, sys
 import capstone
@@ -363,9 +369,12 @@ class Hints:
                 elif k == 'asm':
                     for o in f[1:]:
                         key, val = o.split('=', 1)
-                        if key not in ('lea_smart', 'alu_ax_short', 'test_form'):
+                        if key not in ('lea_smart', 'alu_ax_short', 'test_form', 'imm8_alu', 'xchg_ax_short'):
                             raise ValueError(f'unknown asm option {key}')
-                        self.asm[key] = val if key == 'test_form' else val not in ('0', 'no', 'off')
+                        if key == 'imm8_alu':
+                            self.asm[key] = set(val.lower().split(','))
+                        else:
+                            self.asm[key] = val if key == 'test_form' else val not in ('0', 'no', 'off')
                 elif k == 'raw':
                     self.raw.add(self.addr(f[1]))
                 elif k == 'stop':
@@ -816,14 +825,18 @@ class Analysis:
                     continue
                 d = op.mem.disp & self.mask
                 T = self.byname[sn]
+                # a displacement written in full though it fits a byte is
+                # one the assembler did not know: an address (a compiler's
+                # array[BX])
+                wide = has_reg and (d < 0x80 or d > self.mask - 0x80)
                 # a small displacement with a register is most often a
                 # field offset, not an address; a ptr hint says otherwise
-                if has_reg and (d < 0x100 and key not in self.h.ptr or d >= T.size):
+                if has_reg and (d < 0x100 and key not in self.h.ptr and not wide or d >= T.size):
                     continue
                 if not has_reg and d > T.size:
                     continue
                 ins.refs['disp'] = (sn, d)
-                if has_reg and key not in self.h.ptr:
+                if has_reg and key not in self.h.ptr and not wide:
                     self.regdisp.append(ins)    # labelled once all code is known
                 else:
                     self.label(sn, d)

@@ -351,7 +351,11 @@ def enc_alu(e, mn, toks):
             return
         # single-pass TASM reserves the word form for a constant it has not
         # seen yet, and pads the byte form with a NOP later
-        small = e.decide('imm8', is_small_imm(s) and not (FORCE_WORD[0] and s.fwd))
+        # a compiler may keep the word form for some operations (Borland
+        # C's AND and OR: hint `asm imm8_alu=add,adc,sbb,sub,cmp`)
+        ops = getattr(e.a, 'imm8_alu', None)
+        small = e.decide('imm8', is_small_imm(s) and not (FORCE_WORD[0] and s.fwd)
+                         and (ops is None or mn.lower() in ops))
         if small:
             e.b(0x83)
             emit_modrm(e, d, n)
@@ -403,6 +407,10 @@ def enc_mov(e, mn, toks):
         e.b(0x8D)
         emit_modrm(e, s, regno(d))
         return
+    if cd == 'mem' and cs == 'mem' and s.unknown and not (s.mem or s.hasbr or s.base or s.index):
+        # MOV [mem],NAME with NAME not defined yet (a segment defined
+        # later): only an immediate can be stored there
+        cs = 'imm'
     size = opsize(d, s)
     if cd == 'sreg':
         if cs == 'sreg':
@@ -593,7 +601,8 @@ def enc_xchg(e, mn, toks):
     d, s = parse_operands(e.a, toks)
     cd, cs = classify(d), classify(s)
     size = opsize(d, s)
-    if cd == 'r16' and cs == 'r16' and ('AX' in (d.reg, s.reg)):
+    if cd == 'r16' and cs == 'r16' and ('AX' in (d.reg, s.reg)) and getattr(e.a, 'xchg_ax_short', True):
+        # the one-byte form (Borland C writes 87h /r: `asm xchg_ax_short=0`)
         other = s if d.reg == 'AX' else d
         e.b(0x90 + regno(other))
         return
@@ -837,7 +846,8 @@ def enc_jmp(e, mn, toks):
     far = (v.dist == 'FAR' and not same) or (kind != 'extern' and not same and kind != 'fwd') \
         or (kind == 'extern' and v.dist == 'FAR')
     if mn == 'CALL':
-        if kind == 'known' and v.dist == 'FAR':
+        if kind in ('known', 'fwd') and v.dist == 'FAR':
+            # FAR PTR (or a FAR label) in the same segment too: 9Ah
             far = True
         shape = e.decide('c', 'far' if far else 'near')
         if shape == 'far':

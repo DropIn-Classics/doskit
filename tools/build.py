@@ -151,7 +151,9 @@ def build_once(hints, raw):
                     mask |= set(range(ci.disp_offset, ci.disp_offset + ci.disp_size))
                 if ci.imm_size:
                     mask |= set(range(ci.imm_offset, ci.imm_offset + ci.imm_size))
-                if ci.mnemonic in disasm.JUMPS or ci.mnemonic == 'call':
+                if ci.mnemonic in disasm.JUMPS or ci.mnemonic in ('call', 'lcall', 'ljmp'):
+                    # the target follows from the lines before (a far one's
+                    # segment word too, relocated)
                     mask |= set(range(1, n))
             elif 'DW ' in text or 'DD ' in text or 'DF ' in text:
                 continue
@@ -217,7 +219,8 @@ def main():
         print('written as DB (add a raw hint or teach disasm.py):')
         for s, off in sorted(raw):
             ins = an.insns[(s, off)]
-            print(f'   raw {s}:{off:04X}   ; {ins.ci.mnemonic} {ins.ci.op_str}  [{ins.ci.bytes.hex()}]')
+            # no bytes of the program: the line goes into the hints as it is
+            print(f'   raw {s}:{off:04X}   ; {ins.ci.mnemonic} {ins.ci.op_str}')
     if not same:
         n = min(len(exe), len(ref))
         diff = next((i for i in range(n) if exe[i] != ref[i]), n)
