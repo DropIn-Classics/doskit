@@ -110,7 +110,7 @@ def choose(a):
         raise SystemExit('no GOG games found here: name the game and its slug '
                          '(new_project.py DIR "Game Name" SLUG ...)')
     for i, g in enumerate(games, 1):
-        print(f'{i:3}  {g.name}  ({g.id}{"" if g.image else ", no CD image"})')
+        print(f'{i:3}  {g.name}  ({g.id or "no GOG ID"}{"" if g.image else ", no CD image"})')
     while True:
         k = ask('the game to port (number)')
         if k.isdigit() and 1 <= int(k) <= len(games):

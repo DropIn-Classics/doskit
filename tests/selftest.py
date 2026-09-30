@@ -78,7 +78,9 @@ In build/selftest (a project as a game's would be, see kit.py):
      run headless on HELLO's files; its check.py says all ok.  Then one
      chosen from the installed GOG games (DOSKIT_GOG_DIRS naming a folder
      made here: a game's goggame-ID.info and a raw CD image with HELLO's
-     files, cd_image below, named by a cue sheet): its name, ID, folder
+     files, cd_image below, named by a cue sheet; and one of GOG's older
+     Mac applications, found by its Info.plist, its *.dat the image and
+     not Boxer's DummyCD.iso): its name, ID, folder
      name, image path and marker in its port/src/main.c, the image
      unpacked into its game/ as it was; one installed as a folder (no
      image) copied into game/, its program taken for the marker; the
@@ -776,7 +778,26 @@ def main():
     with open(os.path.join(folder_game, 'goggame-1234567892.info'), 'w') as f:
         f.write('{"gameId": "1234567892", "name": "Floppy Game"}')
     shutil.copy(os.path.join(PROJ, 'game', 'HELLO', 'HELLO.EXE'), os.path.join(folder_game, 'HELLO'))
-    chosen = os.path.join(KIT, 'build', 'selftest-chosen')
+    # one of GOG's older Mac applications: no goggame-ID.info, an Info.plist
+    # without quotes, Boxer's DummyCD.iso beside the game's image (*.dat)
+    old_mac = os.path.join(gog, 'Old Mac Game.app', 'Contents')
+    box = os.path.join(old_mac, 'Resources', 'Old Mac Game.boxer', 'C Old.harddisk')
+    os.makedirs(box)
+    with open(os.path.join(old_mac, 'Info.plist'), 'w') as f:
+        f.write('<?xml version=1.0 encoding=UTF-8?>\n<!DOCTYPE plist PUBLIC -//Apple//DTD PLIST '
+                '1.0//EN http://www.apple.com/DTDs/PropertyList-1.0.dtd>\n<plist version=1.0>\n'
+                '<dict>\n\t<key>BXOrganizationName</key>\n\t<string>GOG.com</string>\n'
+                '\t<key>CFBundleName</key>\n\t<string>Old Mac Game</string>\n</dict>\n</plist>\n')
+    cd_image({'DUMMY/EMPTY.TXT': b'\r\n' * 100000}, os.path.join(old_mac, 'Resources', 'DummyCD.iso'))
+    cd_image({'HELLO/HELLO.EXE': hello}, os.path.join(box, 'OLD.DAT'))
+    r = subprocess.run([py, os.path.join(TOOLS, 'goglist.py')], capture_output=True, text=True,
+                       env=dict(os.environ, DOSKIT_GOG_DIRS=gog))
+    if r.returncode or not re.search(r'\(no ID\)  Old Mac Game\n.*\n.*C Old\.harddisk.OLD\.DAT\n',
+                                     r.stdout):
+        print(r.stdout + r.stderr)
+        raise SystemExit('selftest FAILED: goglist.py and an older GOG Mac application')
+    print('ok   an older GOG Mac application found, its *.dat the image, not DummyCD.iso')
+    chosen =os.path.join(KIT, 'build', 'selftest-chosen')
     if os.path.isdir(chosen):
         shutil.rmtree(chosen)
     # the game (the add-on left out), the slug, the CD's first program, unpacked

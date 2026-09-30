@@ -9,16 +9,20 @@ gameName and PATH); everywhere the folders GOG's installers and the usual
 launchers put games in (on a Mac the applications in /Applications and
 ~/Applications), each game's folder holding GOG's goggame-ID.info (JSON:
 gameId, name; on a Mac in Contents/Resources, with a dot in front).
+GOG's older Mac applications (DOSBox or Boxer bundles, about 2012-2014)
+carry no such file: an application whose Info.plist says it is GOG.com's
+(BXOrganizationName, or an identifier com.gog.*) is taken by its
+CFBundleName, without a product ID.
 $DOSKIT_GOG_DIRS (folders, separated as in PATH) is looked in instead of
 all that.  An add-on (its rootGameId another game's) is left out.  The
 image is a file below the game's folder holding an ISO 9660 file system:
-one a cue sheet names, or one named *.gog, *.iso, *.bin, *.img, *.ins or
-*.inst (GOG's names vary); games on floppies, or installed as a folder,
-have none.  The
+one a cue sheet names, or one named *.gog, *.iso, *.bin, *.img, *.ins,
+*.inst or *.dat (GOG's names vary; Boxer's own DummyCD.iso is not one);
+games on floppies, or installed as a folder, have none.  The
 registry's gameName is taken as GOG's installer is said to write it (not
 checked on an installation; PATH is).
 """
-import glob, json, os, re, string, sys
+import glob, json, os, plistlib, re, string, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import isox
@@ -58,7 +62,9 @@ def is_cd_image(path):
         return False
 
 
-IMAGE_EXTS = ('.gog', '.iso', '.bin', '.img', '.ins', '.inst')
+IMAGE_EXTS = ('.gog', '.iso', '.bin', '.img', '.ins', '.inst', '.dat')
+# the empty CD Boxer's standalone bundles carry for themselves, no game's
+NOT_IMAGES = ('dummycd.iso',)
 
 
 def cue_files(cue):
@@ -76,6 +82,8 @@ def find_image(folder):
     for d, dirs, files in os.walk(folder):
         for f in files:
             p = os.path.join(d, f)
+            if f.lower() in NOT_IMAGES:
+                continue
             if f.lower().endswith(IMAGE_EXTS):
                 found.add(p)
             elif f.lower().endswith('.cue'):
@@ -135,6 +143,43 @@ def from_folders(dirs):
     return out
 
 
+def gog_mac_app(folder):
+    """the name of an application GOG.com made without a goggame-ID.info (its
+    older Mac releases), else None"""
+    try:
+        with open(os.path.join(folder, 'Contents', 'Info.plist'), 'rb') as f:
+            data = f.read()
+    except OSError:
+        return None
+    # some of GOG's write <?xml version=1.0 ...?>, the DOCTYPE and <plist
+    # version=1.0> without quotes, which macOS reads and expat does not:
+    # what comes before the <dict> made plain
+    if not data.startswith(b'bplist'):
+        data = re.sub(rb'^.*?(?=<dict>)', b'<plist version="1.0">', data, count=1, flags=re.S)
+    try:
+        info = plistlib.loads(data)
+    except Exception:   # not a plist (expat's errors are not ValueError)
+        return None
+    if not isinstance(info, dict):
+        return None
+    ident = str(info.get('CFBundleIdentifier', ''))
+    if info.get('BXOrganizationName') != 'GOG.com' and not ident.startswith('com.gog.'):
+        return None
+    return str(info.get('CFBundleName') or os.path.basename(folder)[:-len('.app')])
+
+
+def old_mac_apps(dirs, known):
+    """[(name, folder)] of GOG's applications below `dirs` not among the `known` folders"""
+    known = {os.path.normpath(f) for f in known}
+    out = []
+    for root in dirs:
+        for folder in sorted(glob.glob(os.path.join(glob.escape(root), '*.app'))):
+            name = None if os.path.normpath(folder) in known else gog_mac_app(folder)
+            if name:
+                out.append((name, folder))
+    return out
+
+
 def from_registry():
     """{id: (name, folder)} from GOG's registry keys (Windows)"""
     import winreg
@@ -167,16 +212,19 @@ def installed():
     found = {}
     if sys.platform == 'win32' and 'DOSKIT_GOG_DIRS' not in os.environ:
         found.update(from_registry())
-    for gid, v in from_folders(roots()).items():
+    dirs = roots()
+    for gid, v in from_folders(dirs).items():
         found.setdefault(gid, v)
-    return sorted((Game(gid, name, folder) for gid, (name, folder) in found.items()),
-                  key=lambda g: g.name.lower())
+    games = [Game(gid, name, folder) for gid, (name, folder) in found.items()]
+    games += [Game('', name, folder)
+              for name, folder in old_mac_apps(dirs, [f for _, f in found.values()])]
+    return sorted(games, key=lambda g: g.name.lower())
 
 
 def main():
     games = installed()
     for g in games:
-        print(f'{g.id:>12}  {g.name}\n              {g.folder}\n'
+        print(f'{g.id or "(no ID)":>12}  {g.name}\n              {g.folder}\n'
               f'              {g.image or "(no CD image)"}')
     if not games:
         print('no GOG games found')
