@@ -1,9 +1,18 @@
 # Starting a new game
 
-1. The repository, from the template:
+1. The repository, from the template, for a game installed from GOG:
+
+       python3 ~/doskit/tools/new_project.py ~/mygame
+
+   It lists the GOG games installed here (`tools/goglist.py`), and the
+   one chosen gives the name, GOG's product ID, the installed folder's
+   name and the CD image's path (on a Mac also its path inside the
+   application); it asks for the slug and the marker (the CD's programs
+   offered) and unpacks the image into `game/` if wanted. Without the
+   game installed here, everything is named:
 
        python3 ~/doskit/tools/new_project.py ~/mygame "My Game" mygame \
-           --marker GAME/GAME.EXE --gog-id 1234567890
+           --marker GAME/GAME.EXE --gog-id 1234567890 [--image PATH/game.gog]
 
    It copies template/, fills in the game's name everywhere (PROVENANCE.md
    among them), runs `git init`, enables the hook and adds the kit as the
@@ -18,8 +27,10 @@
    project releases (the template's CI does that). check.py fails without
    it or with a placeholder left in it.
 
-3. The game's files into `game/` (ignored): `python3 doskit/tools/isox.py
-   PATH/game.gog` for a CD image, else copy the installed folder. List the
+3. The game's files into `game/` (ignored), unless new_project.py
+   unpacked them: `python3 doskit/tools/isox.py IMAGE` for a CD image
+   (GOG's is often, not always, `game.gog`), else copy the installed
+   folder. List the
    programs and data files in docs/HANDOFF.md.
 
 4. Stage 1 for each program (doskit/docs/METHOD.md): `src/NAME.hints`,
@@ -27,9 +38,11 @@
    IDENTICAL, `doskit/tools/check.py` before every commit.
 
 5. The port: port/src/main.c finds the game (and unpacks the GOG image on
-   the first start); fill in the GOG folder name, GOG's product ID if
-   new_project.py did not have it, and, if there is one, the Mac
-   release's path in its `release`. Then stage 3 as METHOD.md says:
+   the first start); its `release` has what new_project.py knew: fill in
+   what is missing (the GOG folder name, the image's path in it, GOG's
+   product ID, the Mac release's path) and check what was taken from
+   another platform's release (from a Mac's, the Windows image's path is
+   only its name). Then stage 3 as METHOD.md says:
    `doskit/tools/symmap.py port/src/gen/names.h PREFIX KEY=src/NAME.hints`,
    the program over `rmem.h`, compared with the runner.
 

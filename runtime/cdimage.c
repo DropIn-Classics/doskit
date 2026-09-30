@@ -53,7 +53,7 @@ static int from_registry(const char *games, const GogRelease *rel, const char *i
 int gog_find(const GogRelease *rel, char *out, size_t n)
 {
     char dir[SYS_PATH], path[SYS_PATH];
-    const char *image = rel->image ? rel->image : "game.gog";
+    const char *image = rel->image && *rel->image ? rel->image : "game.gog";
     const char *must = rel->must_have && *rel->must_have ? rel->must_have : NULL;
 
     sys_exe_dir(dir, sizeof dir);
@@ -90,7 +90,7 @@ int gog_find(const GogRelease *rel, char *out, size_t n)
         size_t i;
 
         sys_home_dir(home, sizeof home);
-        if (rel->mac_bundle) {
+        if (rel->mac_bundle && *rel->mac_bundle) {
             /* on a Mac the release is an application, the image inside */
             snprintf(path, sizeof path, "/Applications/%s", rel->mac_bundle);
             if (take(path, must, out, n))
