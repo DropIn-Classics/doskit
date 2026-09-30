@@ -64,7 +64,7 @@ int gog_find(const GogRelease *rel, char *out, size_t n)
         char drive;
         const char *pf = getenv("ProgramFiles(x86)");
 
-        if (rel->gog_id &&
+        if (rel->gog_id && *rel->gog_id &&
             (from_registry("SOFTWARE\\WOW6432Node\\GOG.com\\Games", rel, image, must, out, n) ||
              from_registry("SOFTWARE\\GOG.com\\Games", rel, image, must, out, n)))
             return 1;

@@ -20,7 +20,7 @@ typedef struct {
     const char *mac_bundle;
     /* GOG's product ID, the number in the goggame-ID.info in the installed
      * folder: on Windows the registry key GOG.com\Games\ID says where the
-     * game is; NULL: the registry is not looked at */
+     * game is; NULL or "": the registry is not looked at */
     const char *gog_id;
     /* a path on the CD, as cd_unpack's must_have: an image without it is
      * not taken (GOG ships many DOS games' CDs as game.gog); NULL: any */

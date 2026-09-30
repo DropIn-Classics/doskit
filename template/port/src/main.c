@@ -23,7 +23,7 @@ static const GogRelease release = {
     "{{NAME}}",                 /* GOG's folder name: check on an installation */
     NULL,                       /* game.gog */
     NULL,                       /* the Mac release's path in /Applications: not known yet */
-    NULL,                       /* GOG's product ID (goggame-ID.info): not known yet */
+    "{{GOG_ID}}",               /* GOG's product ID, the number in goggame-ID.info */
     "{{MARKER}}",               /* on the CD: images of other games are passed over */
 };
 

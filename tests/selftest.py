@@ -570,7 +570,9 @@ def main():
     if os.path.isdir(new):
         shutil.rmtree(new)
     run([py, os.path.join(TOOLS, 'new_project.py'), new, 'Test Game', 'testgame',
-         '--marker', 'HELLO/HELLO.EXE', '--no-submodule'])
+         '--marker', 'HELLO/HELLO.EXE', '--gog-id', '1234567890', '--no-submodule'])
+    if '"1234567890",' not in open(os.path.join(new, 'port', 'src', 'main.c')).read():
+        raise SystemExit('selftest FAILED: --gog-id not filled into port/src/main.c')
     os.symlink(KIT, os.path.join(new, 'doskit'))
     shutil.copytree(os.path.join(PROJ, 'game'), os.path.join(new, 'game'))
     r = subprocess.run(['sh', os.path.join(new, 'port', 'build.sh')], capture_output=True, text=True)
