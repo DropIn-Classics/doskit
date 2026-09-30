@@ -13,6 +13,10 @@ GOG's older Mac applications (DOSBox or Boxer bundles, about 2012-2014)
 carry no such file: an application whose Info.plist says it is GOG.com's
 (BXOrganizationName, or an identifier com.gog.*) is taken by its
 CFBundleName, without a product ID.
+GOG's Windows installers not installed (setup_*.exe, Inno Setup; a game
+GOG sells for Windows only comes as one) are listed too, from the home
+folder, Downloads, Documents and Desktop: their name and ID from the
+setup, their folder the setup itself (inno.py unpacks it).
 $DOSKIT_GOG_DIRS (folders, separated as in PATH) is looked in instead of
 all that.  An add-on (its rootGameId another game's) is left out.  The
 image is a file below the game's folder holding an ISO 9660 file system:
@@ -25,10 +29,12 @@ checked on an installation; PATH is).
 import glob, json, os, plistlib, re, string, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import isox
+import inno, isox
 
 
 class Game:
+    setup = None                            # an installer's path, not an installation
+
     def __init__(self, gid, name, folder):
         self.id, self.name, self.folder = gid, name, folder
         self.image = find_image(folder)
@@ -53,6 +59,51 @@ class Game:
             if self.image and self.image.startswith(apps + os.sep):
                 return os.path.relpath(self.image, apps).replace(os.sep, '/')
         return ''
+
+
+class SetupGame(Game):
+    """a game GOG's Windows installer holds: what it installs unknown
+    until unpacked (unpack)"""
+
+    def __init__(self, gid, name, setup):
+        self.id, self.name, self.folder, self.setup, self.image = gid, name, setup, setup, None
+
+    def folder_name(self):
+        return self.name                    # GOG's installer names the folder so
+
+    def unpack(self, folder):
+        """the setup unpacked into folder, then taken for the installation"""
+        inno.Setup(self.setup).unpack(folder)
+        self.folder, self.image = folder, find_image(folder)
+
+
+def setups(dirs, have):
+    """[SetupGame] of GOG's installers (setup_*.exe) in dirs whose IDs are
+    not among have"""
+    out, seen = [], set(have)
+    for d in dirs:
+        for p in sorted(glob.glob(os.path.join(glob.escape(d), 'setup_*.exe'))):
+            try:
+                s = inno.Setup(p)
+            except (inno.InnoError, OSError):
+                continue
+            gid = s.app_id if re.fullmatch(r'[0-9]+', s.app_id) else ''
+            m = re.search(r'_\(([0-9]+)\)\.exe$', p)         # GOG's names end so
+            gid = gid or (m.group(1) if m else '')
+            if gid and gid in seen:
+                continue
+            seen.add(gid)
+            out.append(SetupGame(gid, s.name, p))
+    return out
+
+
+def setup_dirs():
+    env = os.environ.get('DOSKIT_GOG_DIRS')
+    if env is not None:
+        return [d for d in env.split(os.pathsep) if d]
+    home = os.path.expanduser('~')
+    return [d for d in [home] + [os.path.join(home, x) for x in ('Downloads', 'Documents', 'Desktop')]
+            if os.path.isdir(d)]
 
 
 def is_cd_image(path):
@@ -218,6 +269,7 @@ def installed():
     games = [Game(gid, name, folder) for gid, (name, folder) in found.items()]
     games += [Game('', name, folder)
               for name, folder in old_mac_apps(dirs, [f for _, f in found.values()])]
+    games += setups(setup_dirs(), [g.id for g in games if g.id])
     return sorted(games, key=lambda g: g.name.lower())
 
 
@@ -225,7 +277,7 @@ def main():
     games = installed()
     for g in games:
         print(f'{g.id or "(no ID)":>12}  {g.name}\n              {g.folder}\n'
-              f'              {g.image or "(no CD image)"}')
+              f'              {"(Windows installer)" if g.setup else g.image or "(no CD image)"}')
     if not games:
         print('no GOG games found')
 

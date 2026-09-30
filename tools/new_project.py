@@ -4,7 +4,7 @@
     new_project.py DIR
     new_project.py DIR "Game Name" SLUG [--marker PATH] [--gog-id ID]
                    [--gog-folder NAME] [--gog-image PATH] [--mac-bundle PATH]
-                   [--image FILE | --copy FOLDER]
+                   [--image FILE | --copy FOLDER | --setup SETUP.exe]
     (both: [--kit URL] [--no-submodule])
 
 DIR must not exist.  With DIR alone the GOG games installed here are
@@ -14,7 +14,10 @@ the installation, the slug and the marker are asked for (the CD's
 programs offered), and the CD image, if it has one, is unpacked into the
 project's game/ when wanted; a game installed as a folder (no CD image:
 from floppies, or a DOSBox folder) has that folder copied into game/
-instead, its programs offered for the marker.
+instead, its programs offered for the marker.  GOG's Windows installers
+lying about (setup_*.exe, for games GOG sells for Windows only) are
+offered too: the one chosen is unpacked (inno.py), then taken as an
+installation.
 
 Otherwise "Game Name" is the game's title (in PROVENANCE.md, the README,
 the window's title), SLUG a short lower-case name (the program's, the
@@ -26,7 +29,9 @@ installation by it in the registry.  --gog-folder is the installed
 folder's name (default: the game's name), --gog-image the CD image's
 path in it (default: game.gog), --mac-bundle the image's path inside
 /Applications on a Mac.  --image FILE is unpacked into game/, --copy
-FOLDER (an installed game's) copied into it.
+FOLDER (an installed game's) copied into it, --setup SETUP.exe (GOG's
+Windows installer) unpacked and its CD image, or else its files, put
+into it (GOG's ID taken from it when not given).
 What is not given is filled in later (port/src/main.c); a missing
 --gog-id is said.
 
@@ -39,11 +44,11 @@ repository on GitHub, KIT_URL; a local folder works too, but its path
 then stands in .gitmodules).  Nothing is committed.  Every project
 carries PROVENANCE.md; check.py insists on it.
 """
-import argparse, datetime, os, re, shutil, struct, subprocess, sys
+import argparse, datetime, os, re, shutil, struct, subprocess, sys, tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from kit import KIT
-import goglist, isox
+import goglist, inno, isox
 
 TEMPLATE = os.path.join(KIT, 'template')
 KIT_URL = 'https://github.com/mindphluxnet/doskit.git'
@@ -117,6 +122,10 @@ def choose(a):
             break
     g = games[int(k) - 1]
     print(f'{g.name}: {g.folder}')
+    if g.setup:
+        a.unpacked = tempfile.mkdtemp(prefix='doskit-setup-')
+        print('unpacking the installer ...')
+        g.unpack(a.unpacked)
     a.name, a.gog_id, a.gog_folder = g.name, g.id, g.folder_name()
     a.gog_image, a.mac_bundle = g.image_path(), g.mac_bundle()
     a.slug = ask('slug (lower case: the program\'s name)',
@@ -134,6 +143,25 @@ def choose(a):
             a.copy = g.folder
 
 
+def from_setup(a):
+    """--setup: the installer unpacked into a folder of its own, then its
+    image (or its files) taken as --image (--copy)"""
+    try:
+        s = inno.Setup(a.setup)
+    except (inno.InnoError, OSError) as e:
+        raise SystemExit(f'{a.setup}: {e}')
+    a.unpacked = tempfile.mkdtemp(prefix='doskit-setup-')
+    print(f'{s.unpack(a.unpacked)} files unpacked from {a.setup}')
+    image = goglist.find_image(a.unpacked)
+    if image:
+        a.image = image
+        a.gog_image = a.gog_image or os.path.relpath(image, a.unpacked).replace(os.sep, '/')
+    else:
+        a.copy = a.unpacked
+    if not a.gog_id and re.fullmatch(r'[0-9]+', s.app_id):
+        a.gog_id = s.app_id
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('dir')
@@ -146,12 +174,22 @@ def main():
     ap.add_argument('--mac-bundle', default='')
     ap.add_argument('--image')
     ap.add_argument('--copy')
+    ap.add_argument('--setup')
     ap.add_argument('--kit', default=KIT_URL)
     ap.add_argument('--no-submodule', action='store_true')
     a = ap.parse_args()
+    a.unpacked = None
     dst = os.path.abspath(a.dir)
     if os.path.exists(dst):
         raise SystemExit(f'{dst} is there already')
+    try:
+        make(a, dst)
+    finally:
+        if a.unpacked:
+            shutil.rmtree(a.unpacked, ignore_errors=True)
+
+
+def make(a, dst):
     if a.name is None:
         choose(a)
     elif a.slug is None:
@@ -168,8 +206,10 @@ def main():
         raise SystemExit('--gog-id: the number in goggame-ID.info, digits only')
     if a.image and not goglist.is_cd_image(a.image):
         raise SystemExit(f'{a.image}: not a CD image')
-    if a.image and a.copy:
-        raise SystemExit('--image or --copy, not both')
+    if sum(map(bool, (a.image, a.copy, a.setup))) > 1:
+        raise SystemExit('--image, --copy or --setup, one of them')
+    if a.setup:
+        from_setup(a)
     if a.copy and not os.path.isdir(a.copy):
         raise SystemExit(f'{a.copy}: not a folder')
     shutil.copytree(TEMPLATE, dst)

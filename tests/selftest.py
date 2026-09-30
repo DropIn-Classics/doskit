@@ -100,7 +100,9 @@ In build/selftest (a project as a game's would be, see kit.py):
      with a chunk across them): the files listed and unpacked as they
      were put in (an LZMA chunk with two files, one through the CALL/JMP
      filter; GOG Galaxy's deflated parts, English and German, their
-     dependency left out); a byte changed in the data is caught.
+     dependency left out); a byte changed in the data is caught;
+     goglist.py offers such an installer, new_project.py --setup makes a
+     project of it (GOG's ID from it, its files in game/).
 
 Prints `selftest ok` at the end, exit status 0 then.  Needs cc (clang
 or gcc); on Windows it is not written for MSVC yet.
@@ -438,6 +440,28 @@ def check_inno(b):
     else:
         raise SystemExit('selftest FAILED: inno.py took a changed byte')
     print('inno ok (in the .exe and in slices, two languages, a changed byte caught)')
+
+    # goglist.py offers it (a GOG installer lying about), new_project.py
+    # --setup makes a project of it: the ID from the setup, its files in game/
+    mkinno.write(os.path.join(d, 'setup_test_(1234567890).exe'))
+    env = dict(os.environ, DOSKIT_GOG_DIRS=d)
+    r = subprocess.run([sys.executable, os.path.join(TOOLS, 'goglist.py')], capture_output=True,
+                       text=True, env=env)
+    if 'Test Setup' not in r.stdout or '(Windows installer)' not in r.stdout:
+        print(r.stdout + r.stderr)
+        raise SystemExit('selftest FAILED: goglist.py did not offer the installer')
+    proj = os.path.join(d, 'project')
+    r = subprocess.run([sys.executable, os.path.join(TOOLS, 'new_project.py'), proj, 'Test Setup',
+                        'testsetup', '--marker', 'GAME/PROG.EXE', '--setup',
+                        os.path.join(d, 'setup_test_(1234567890).exe'), '--no-submodule'],
+                       capture_output=True, text=True, env=env)
+    main_c = os.path.join(proj, 'port', 'src', 'main.c')
+    got = os.path.join(proj, 'game', 'DATA', 'BIG.DAT')
+    if (r.returncode or '"1234567890",' not in open(main_c).read() or not os.path.isfile(got)
+            or open(got, 'rb').read() != want['en-US']['DATA/BIG.DAT']):
+        print(r.stdout + r.stderr)
+        raise SystemExit('selftest FAILED: new_project.py --setup')
+    print('ok   the installer offered by goglist.py, made a project by new_project.py --setup')
 
 
 def check_pmem(py, b):
