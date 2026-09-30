@@ -96,6 +96,11 @@ class Names:
             return m.group(1).upper(), int(m.group(2), 16)
         if t.upper() in self.byname:
             return self.byname[t.upper()]
+        for s in self.h.segs:              # a label of a segment with prefix=
+            if s.own_prefix:
+                m = re.fullmatch(r'L?' + re.escape(s.prefix) + r'([0-9A-Fa-f]{4})', t, re.I)
+                if m:
+                    return s.name, int(m.group(1), 16)
         m = re.fullmatch(r'(L?)([A-Za-z])([0-9A-Fa-f]{4})', t)
         if m:
             code, letter, off = m.group(1), m.group(2).upper(), int(m.group(3), 16)

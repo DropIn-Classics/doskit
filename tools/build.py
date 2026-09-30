@@ -12,7 +12,8 @@ differently (tasm.py and the original's assembler do not always agree)
 is reported and written as DB in the next round; a data line that
 differs is a bug of disasm.py.  Ends with the byte comparison of the
 whole file.  The EXE header is laid out as Microsoft LINK lays it out
-(write_mz); a program linked otherwise needs its own layout there.  A
+(write_mz), or as Borland's TLINK does (`linker tlink`, tlink.write_mz);
+a program linked otherwise needs its own layout there.  A
 pMAX image is written by write_pmax.  A line tasm.py cannot assemble is
 written as DB in the next round too.
 """
@@ -22,17 +23,36 @@ import disasm, tasm, tlink
 from kit import build_dir
 
 
-def write_mz(out, prog, reloc_segs):
+def reloc_order(out, an):
+    """the linked program's relocations (address, frame of the site's
+    segment, target) in the order of the table: by the segments the
+    relocorder hint names, or as in the original's table (`relocorder
+    original`; relocations it does not have go last, and the comparison
+    of the files shows them)"""
+    if an.h.relocorder == ['original']:
+        pos = {seg * 16 + off: i for i, (off, seg) in enumerate(an.p.relocs)}
+        return sorted(out.relocs, key=lambda r: (pos.get(r[0], len(pos)), r[0]))
+    rel = []
+    for frame in [an.byname[s].frame for s in an.h.relocorder]:
+        rel += sorted((r for r in out.relocs if r[1] == frame), key=lambda r: r[0])
+    return rel
+
+
+def write_mz(out, prog, reloc_segs=(), rel=None):
     """The EXE the way Microsoft LINK lays it out: word 1 at 1Ch, the
-    relocations from 1Eh, the header padded to 512 bytes."""
+    relocations from 1Eh, the header padded to 512 bytes; the relocations
+    by the frames of the segments holding them (reloc_segs), or as rel
+    (reloc_order's list) has them."""
     img = out.img
     end = len(img)
     while end > 0 and not out.init[end - 1]:
         end -= 1
     stored = bytes(img[:end])
-    rel = []
-    for frame in reloc_segs:
-        rel += sorted(a for a, fr, _ in out.relocs if fr == frame)
+    if rel is None:
+        rel = []
+        for frame in reloc_segs:
+            rel += sorted((r for r in out.relocs if r[1] == frame), key=lambda r: r[0])
+    rel = [a for a, fr, _ in rel]
     hdr_len = (0x1E + 4 * len(rel) + 511) // 512 * 512
     size = hdr_len + len(stored)
     minalloc = (len(img) - len(stored) + 15) // 16
@@ -144,7 +164,11 @@ def build_once(hints, raw):
             raise SystemExit('a raw image has no relocations: a segment reference in the source')
         exe = bytes(out.img)
     else:
-        exe = write_mz(out, an.p, [an.byname[s].frame for s in an.h.relocorder])
+        rel = reloc_order(out, an)
+        if an.h.linker:
+            exe = tlink.write_mz(out, reloc_order=rel, version=an.h.linker[1])
+        else:
+            exe = write_mz(out, an.p, rel=rel)
     if an.h.keeptail:
         exe += an.p.tail
     return an, em, a, out, exe, bad, name

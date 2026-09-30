@@ -50,9 +50,23 @@ Hints syntax (one per line, ';' starts a comment, numbers are hex):
                                        the bits of MASK in such a dword are
                                        flags, not part of the offset
                                        (written DD label+FLAGS)
-    segment    NAME FRAME CLASS [stack] [size=N]   in image order; in a
-                                       pMAX image FRAME is the descriptor's
-                                       number (base and size are its own)
+    segment    NAME FRAME CLASS [stack] [size=N] [start=N] [prefix=P]
+                                       in image order; in a pMAX image FRAME
+                                       is the descriptor's number (base and
+                                       size are its own).  start=N: the
+                                       segment's first byte is at offset N
+                                       (below 10h) of its frame, as a BYTE-
+                                       or WORD-aligned segment the linker put
+                                       after the previous one's end (written
+                                       SEGMENT BYTE); size=N counts from the
+                                       frame, not from the start.  Labels are made of
+                                       the name's first letter and the
+                                       offset, code labels of L and the
+                                       offset (L, the letter and the offset
+                                       outside a CODE-class segment); with
+                                       prefix=P they are P+offset and
+                                       L+P+offset (a program of many code
+                                       segments, whose labels would collide)
     code       SEG:OFF [NAME]          an entry point
     coderange  SEG:OFF-END             code throughout, a routine after every
                                        RET/JMP (handlers reached by pointers)
@@ -96,6 +110,16 @@ Hints syntax (one per line, ';' starts a comment, numbers are hex):
                                        the original, not made
     relocorder SEG SEG...              the order of the relocation table:
                                        by the segment holding the site
+    relocorder original                the order of the original's table
+                                       (a linker that writes them as it
+                                       meets them in the object records,
+                                       as TLINK does); the set is still
+                                       compared
+    linker     tlink VER               the header as Borland's TLINK writes
+                                       it (relocations from 3Eh, its mark
+                                       01 00 FB VER 6A 72 at 1Ch; VER the
+                                       original's byte at 1Fh); Microsoft
+                                       LINK's otherwise
     asm        OPTION=VALUE...         how the original's assembler encoded
                                        what has two encodings (tasm.py's
                                        defaults otherwise):
@@ -127,11 +151,13 @@ def hexnum(n):
 # ---------------------------------------------------------------- the program
 
 class Seg:
-    def __init__(self, name, frame, cls, stack=False, size=None):
+    def __init__(self, name, frame, cls, stack=False, size=None, prefix=None, start=0):
         self.name, self.frame, self.cls, self.stack = name, frame, cls, stack
         self.base = frame * 16
+        self.start = start        # offset of the first byte (a segment not on a paragraph)
         self.size = size          # set from the next segment when not given
-        self.prefix = name[0]
+        self.prefix = prefix or name[0]
+        self.own_prefix = prefix is not None
 
 
 def program_path(name):
@@ -255,6 +281,7 @@ class Hints:
         self.stop = set()
         self.relocorder = []
         self.keeptail = False
+        self.linker = None        # None: Microsoft LINK's header; ('tlink', VER)
         self.noentry = False
         self.offrel, self.offflags = None, 0
         self.asm = {}             # assembler switches (see the docstring)
@@ -274,7 +301,11 @@ class Hints:
                 elif k == 'segment':
                     opts = f[4:]
                     size = next((int(o[5:], 16) for o in opts if o.startswith('size=')), None)
-                    self.segs.append(Seg(f[1], int(f[2], 16), f[3], 'stack' in opts, size))
+                    prefix = next((o[7:] for o in opts if o.startswith('prefix=')), None)
+                    start = next((int(o[6:], 16) for o in opts if o.startswith('start=')), 0)
+                    if not 0 <= start < 0x10:
+                        raise ValueError('start= must be below 10h (a larger one is another frame)')
+                    self.segs.append(Seg(f[1], int(f[2], 16), f[3], 'stack' in opts, size, prefix, start))
                 elif k == 'code':
                     s, o = self.addr(f[1])
                     self.code.append((s, o, f[2] if len(f) > 2 else None))
@@ -325,6 +356,10 @@ class Hints:
                     self.keeptail = True
                 elif k == 'relocorder':
                     self.relocorder = f[1:]
+                elif k == 'linker':
+                    if f[1] != 'tlink' or len(f) != 3:
+                        raise ValueError('linker tlink VER is the only one')
+                    self.linker = ('tlink', int(f[2], 16))
                 elif k == 'asm':
                     for o in f[1:]:
                         key, val = o.split('=', 1)
@@ -381,7 +416,8 @@ class Analysis:
             s.base, s.size = prog.descs[s.frame]
         for i, s in enumerate(self.segs):
             if s.size is None:
-                nxt = self.segs[i + 1].base if i + 1 < len(self.segs) else len(prog.img)
+                n = self.segs[i + 1] if i + 1 < len(self.segs) else None
+                nxt = n.base + n.start if n else len(prog.img)
                 s.size = nxt - s.base
         self.byname = {s.name: s for s in self.segs}
         self.byframe = {s.frame: s for s in self.segs}
@@ -397,6 +433,7 @@ class Analysis:
         self.entry = prog.entry(self.byframe)
         self.insns = {}           # (seg, off) -> Insn
         self.labels = {}          # (seg, off) -> name
+        self.label_owner = {}     # name in upper case -> (seg, off)
         self.farptrs = {}         # image offset of offset word -> (seg, off)
         self.regdisp = []         # instructions with a register and a displacement
         self.warnings = []
@@ -411,7 +448,7 @@ class Analysis:
     # ---- helpers
     def seg_at(self, a):
         for s in self.segs:
-            if s.base <= a < s.base + s.size:
+            if s.base + s.start <= a < s.base + s.size:
                 return s
         return None
 
@@ -431,9 +468,14 @@ class Analysis:
                 s = self.byname[seg]
                 code = kind == 'code'
                 name = ('L' if code else s.prefix) + f'{off:04X}'
-                if code and s.cls != 'CODE':
+                if code and (s.cls != 'CODE' or s.own_prefix):
                     name = 'L' + s.prefix + f'{off:04X}'
+                other = self.label_owner.get(name.upper())
+                if other is not None and other != key:
+                    raise SystemExit(f'label {name} for {seg}:{off:04X} and {other[0]}:{other[1]:04X}: '
+                                     f'give the segments their own prefix= (hints: segment)')
             self.labels[key] = name
+            self.label_owner[name.upper()] = key
         return self.labels[key]
 
     # ---- code
@@ -1102,13 +1144,14 @@ class Emitter:
         use = ' USE32' if an.w == 4 else ''
         order = an.segs
         for S in order:
+            al = 'BYTE' if S.start else 'PARA'
             if S.cls == 'CODE':
-                self.out(f'{S.name} SEGMENT PARA PUBLIC{use} \'{S.cls}\'')
+                self.out(f'{S.name} SEGMENT {al} PUBLIC{use} \'{S.cls}\'')
                 self.out(f'\tASSUME CS:{S.name},DS:{an.dflt_ds},ES:NOTHING,SS:NOTHING')
             elif S.stack:
                 self.out(f'{S.name} SEGMENT PARA STACK{use} \'{S.cls}\'')
             else:
-                self.out(f'{S.name} SEGMENT PARA PUBLIC{use} \'{S.cls}\'')
+                self.out(f'{S.name} SEGMENT {al} PUBLIC{use} \'{S.cls}\'')
             self.segment(S)
             self.out(f'{S.name} ENDS')
             self.out('')
@@ -1133,7 +1176,7 @@ class Emitter:
         tables = set(o for s, o, cnt, t in an.h.words if s == S.name)
         tables |= set(o for s, o, cnt, frm in an.h.rwords if s == S.name)
         import bisect
-        off = 0
+        off = S.start
         w = an.w
         self.f.assumed_ds = an.dflt_ds      # as the ASSUME at the segment's start says
         while off < S.size:
@@ -1332,7 +1375,7 @@ def gaps(an, seg='CODE', show=3):
         if s == seg:
             cov[o:o + ins.size] = b'\1' * ins.size
     out = []
-    o = 0
+    o = S.start
     while o < S.size:
         if cov[o]:
             o += 1

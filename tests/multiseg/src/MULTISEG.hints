@@ -1,0 +1,26 @@
+; MULTISEG.EXE, the kit's test of a program in many code segments
+; (tests/multiseg/MULTISEG.ASM)
+; Hints for tools/disasm.py; numbers are hex.
+
+exe MULTISEG/MULTISEG.EXE
+
+; the segments from the relocations and the header (SS:SP = 0009:0100);
+; ONE, TWO and THREE begin where the one before ends (start=), and TWO's
+; and THREE's routines are both at offset 6: their own prefixes keep the
+; labels apart
+segment CODE  0000 CODE
+segment ONE   0002 CODE start=1 prefix=ONE_
+segment TWO   0003 CODE start=6 prefix=TWO_
+segment THREE 0005 CODE start=6 prefix=THR_
+segment DATA  0007 DATA
+segment STACK 0009 STACK stack size=100
+
+; TLINK's header, its relocations in the original's order
+linker tlink 30
+relocorder original
+
+code CODE:0000 start
+name ONE:0001 count
+name ONE:0002 first
+name TWO:0006 second
+name THREE:0006 third

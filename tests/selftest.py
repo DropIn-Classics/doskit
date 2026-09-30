@@ -16,20 +16,27 @@ In build/selftest (a project as a game's would be, see kit.py):
      game/PMODE/PMODE.EXE, tests/cdrom/CDROM.ASM into game/CDROM/CDROM.EXE,
      tests/vgamode/VGAMODE.ASM into game/VGAMODE/VGAMODE.EXE,
      tests/sb16/SB16.ASM into game/SB16/SB16.EXE, tests/cdplay/CDPLAY.ASM
-     into game/CDPLAY/CDPLAY.EXE;
+     into game/CDPLAY/CDPLAY.EXE, tests/multiseg/MULTISEG.ASM into
+     game/MULTISEG/MULTISEG.EXE with TLINK's header and its relocations
+     in reverse order;
   2. check.py: disasm.py makes their sources from tests/hello/src/HELLO.hints
      and tests/flat/src/FLAT.hints, tests/raw/RAWDRV.ASM's raw image from
      tests/raw/src/RAWDRV.hints, RELMOD's from tests/relmod/src/RELMOD.hints
      (its offsets exactly the offrel list's, the numbers that look like
      offsets left numbers), build.py rebuilds them byte for byte; RELMOD
      with a dword of a words table taken out of its offrel list fails
-     build.py's check;
+     build.py's check; MULTISEG (code segments beginning in the middle of
+     a paragraph, labels at the same offsets in two of them) from
+     tests/multiseg/src/MULTISEG.hints (start=, prefix=, linker tlink,
+     relocorder original), and without its prefix= hints build.py stops
+     and says the labels collide;
      PROVENANCE.md (the template's) is there; the names headers symmap.py
      wrote (HELLO's, FLAT's) are up to date; FLAT without its raw hint rebuilds too (the
      line tasm.py refuses written as DB by build.py);
   3. run.py: its table of the runner's options has every option the
      runner parses (one it lacks is taken for PROGRAM, and the addresses
-     after it go untranslated); the program in the runner, stopped at
+     after it go untranslated); it finds MULTISEG's labels by their
+     prefixes; the program in the runner, stopped at
      its end (CODE:0026), its console line read, memory and video memory written out; PMODE.EXE
      in the runner, which checks the runner's protected mode itself (into
      it through INT 15h AH=89h, a #GP, IRQ0 through the IDT, ring 3, a
@@ -326,6 +333,20 @@ def make_relmod():
     with open(os.path.join(files, 'RELMOD.REL'), 'wb') as f:
         f.write(b''.join(struct.pack('<I', x) for x in sorted(out.offs32, reverse=True)))
     return len(out.img), len(out.offs32)
+
+
+def make_multiseg():
+    """tests/multiseg/MULTISEG.ASM with TLINK's header, the relocations
+    in reverse order (not by address, as TLINK writes them in the order of
+    its object records)"""
+    a = tasm.Assembler(os.path.join(HERE, 'multiseg', 'MULTISEG.ASM'))
+    a.assemble()
+    out = tlink.link([tlink.module_from_asm(a, 'MULTISEG')])
+    exe = tlink.write_mz(out, reloc_order=list(reversed(out.relocs)), version=0x30)
+    os.makedirs(os.path.join(PROJ, 'game', 'MULTISEG'))
+    with open(os.path.join(PROJ, 'game', 'MULTISEG', 'MULTISEG.EXE'), 'wb') as f:
+        f.write(exe)
+    return len(exe)
 
 
 def check_update(b):
@@ -693,12 +714,14 @@ def main():
     print(f'{make_exe()} bytes; FLAT.386 {make_flat()} bytes; RAWDRV.DRV {make_raw()} bytes; '
           f'RELMOD.MOD %d bytes, %d offsets; PMODE.EXE {make_exe("PMODE")} bytes; '
           f'CDROM.EXE {make_exe("CDROM")} bytes; VGAMODE.EXE {make_exe("VGAMODE")} bytes; '
-          f'SB16.EXE {make_exe("SB16")} bytes; CDPLAY.EXE {make_exe("CDPLAY")} bytes'
+          f'SB16.EXE {make_exe("SB16")} bytes; CDPLAY.EXE {make_exe("CDPLAY")} bytes; '
+          f'MULTISEG.EXE {make_multiseg()} bytes'
           % make_relmod())
     shutil.copy(os.path.join(HERE, 'hello', 'src', 'HELLO.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'flat', 'src', 'FLAT.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'raw', 'src', 'RAWDRV.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'relmod', 'src', 'RELMOD.hints'), os.path.join(PROJ, 'src'))
+    shutil.copy(os.path.join(HERE, 'multiseg', 'src', 'MULTISEG.hints'), os.path.join(PROJ, 'src'))
     # every project carries PROVENANCE.md (check.py insists)
     with open(os.path.join(KIT, 'template', 'PROVENANCE.md'), 'rb') as f:
         text = f.read().replace(b'{{NAME}}', b'HELLO (the kit\'s test program)')
@@ -777,6 +800,17 @@ def main():
         print(out)
         raise SystemExit('selftest FAILED: RELMOD with a shorter offrel list')
     print('RELMOD with a words table\'s dword left out of its offrel list: build.py refuses it')
+    hints = os.path.join(PROJ, 'src', 'MULTISEG.hints')
+    with open(hints) as f:
+        whole = f.read()
+    with open(os.path.join(PROJ, 'build', 'NOPREFIX.hints'), 'w') as f:
+        # without the names too: TWO's and THREE's routines both L0006
+        f.write(re.sub(r'^name .*\n', '', re.sub(r' prefix=\S+', '', whole), flags=re.M))
+    out = run([py, os.path.join(TOOLS, 'build.py'), os.path.join(PROJ, 'build', 'NOPREFIX.hints')], check=False)
+    if 'give the segments their own prefix=' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: MULTISEG without prefix= hints')
+    print('MULTISEG without its prefix= hints: build.py says the labels collide')
 
     step('3. run in the runner (run.py)')
     import run as run_py
@@ -785,6 +819,12 @@ def main():
     if parsed != set(run_py.OPTS):
         raise SystemExit('selftest FAILED: run.py\'s OPTS and the runner\'s options differ: '
                          + ' '.join(sorted(parsed ^ set(run_py.OPTS))))
+    import disasm
+    names = run_py.Names(disasm.Hints(os.path.join(PROJ, 'src', 'MULTISEG.hints')), 'MULTISEG/MULTISEG.EXE')
+    got = [names.lookup(t) for t in ('LTWO_0006', 'LTHR_0012', 'ONE_0001', 'third')]
+    if got != [('TWO', 6), ('THREE', 0x12), ('ONE', 1), ('THREE', 6)]:
+        raise SystemExit(f'selftest FAILED: run.py\'s names of segments with prefix=: {got}')
+    print('run.py finds the labels of segments with their own prefix')
     b = os.path.join(PROJ, 'build')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-break', 'CODE:0026',
                '-dump', 'counter', '2', '-ram', os.path.join(b, 'orig.ram'),

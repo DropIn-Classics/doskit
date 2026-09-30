@@ -48,6 +48,25 @@ the relocation table by the segment holding the site (read it from the
 original's table). `keeptail` keeps what follows
 the image (debug information) as it is.
 
+**Many code segments.** A program made of modules (a compiled one, or
+assembly in many source files) has a code segment per module, BYTE or
+WORD aligned: each begins where the one before ends, in the middle of a
+paragraph, and its frame is that paragraph. `start=N` on the segment
+line says at which offset of its frame it begins; the lowest offset a far
+CALL/JMP enters it by is the first guess (build.py then reports a jump
+to a label that is not there, or a segment grown by a paragraph, where
+the guess is wrong: an instruction running past the next segment's
+start). Labels are the segment's first letter and the offset, code
+labels L and the offset, so two code segments' labels collide: give each
+segment its own `prefix=` (disasm.py stops and says so).
+
+**The linker.** Microsoft LINK's header (relocations from 1Eh) is the
+default. Borland's TLINK writes 01 00 FB VER 6A 72 at 1Ch and the
+relocations from 3Eh (`linker tlink VER`), in the order it meets the
+fixups in the object records, which the source does not say:
+`relocorder original` takes the order from the original's table (the
+set of relocations is still compared).
+
 **The assembler.** The original was assembled with some assembler whose
 choices `tasm.py` must repeat where an instruction has two encodings.
 `build.py` reports each instruction encoded otherwise; the pattern tells
@@ -288,7 +307,7 @@ linked by Microsoft LINK, 186/386 instructions in 16-bit code. Not tried:
   register (67h) is written with TASM's address-size operator,
   `DS:[SMALL 27H]` (tasm.py takes it; tests/enc32, tests/relmod);
 - other linkers' header layouts (`build.py`'s write_mz is Microsoft
-  LINK's).
+  LINK's; TLINK's is there, `linker tlink`).
 
 Each new game will stretch one of these; extend the kit (with a test in
 tests/) rather than the project.

@@ -95,7 +95,8 @@ docs/NEW-PROJECT.md how to start a new game.
   as `doskit-collector`, a cheaper model for repetitive stage 1/2 data
   collection).
 - `tests/`: `selftest.py`, the whole way on a program of our own
-  (`tests/hello`), no game needed; the 32-bit encoder (`tests/enc32`) and
+  (`tests/hello`), no game needed; a program in many code segments
+  with TLINK's header (`tests/multiseg`); the 32-bit encoder (`tests/enc32`) and
   a pMAX image rebuilt (`tests/flat`).
 
 ## Use
