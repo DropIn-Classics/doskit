@@ -254,7 +254,10 @@ uint8_t io_r8(uint16_t p){
     case 0x70: return cmos_idx;
     case 0x71: return 0;
     case 0x92: return (uint8_t)(kbd_a20 ? 0x02 : 0x00);
-    case 0x201: return 0xF0;                    /* game port: nothing attached */
+    case 0x201: return 0xFF;                    /* game port: nothing attached, the
+                                                   buttons up and the axis bits never
+                                                   falling (0 would be a stick at its
+                                                   upper left) */
     case 0x388: case 0x389: return opl_status();
     }
     if(dma_is_port(p)) return dma_read(p);

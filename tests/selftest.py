@@ -15,6 +15,7 @@ In build/selftest (a project as a game's would be, see kit.py):
      RELMOD.REL (the linker's OFF32 fixups); tests/pmode/PMODE.ASM into
      game/PMODE/PMODE.EXE, tests/cdrom/CDROM.ASM into game/CDROM/CDROM.EXE,
      tests/vgamode/VGAMODE.ASM into game/VGAMODE/VGAMODE.EXE,
+     tests/gameport/GAMEPORT.ASM into game/GAMEPORT/GAMEPORT.EXE,
      tests/sb16/SB16.ASM into game/SB16/SB16.EXE, tests/cdplay/CDPLAY.ASM
      into game/CDPLAY/CDPLAY.EXE, tests/multiseg/MULTISEG.ASM into
      game/MULTISEG/MULTISEG.EXE with TLINK's header and its relocations
@@ -61,7 +62,9 @@ In build/selftest (a project as a game's would be, see kit.py):
      channels; VGAMODE.EXE, which checks the runner's BIOS mode set
      (modes 0Dh and 0Eh planar at A0000h, back to text; VESA 4F00h,
      4F01h, 4F02h with modes 101h and 103h, 4F03h) and says
-     "vgamode ok"; SB16.EXE, which checks the runner's
+     "vgamode ok"; GAMEPORT.EXE, which reads the game port as a PC
+     without a joystick has it (FFh, the axis bits never falling after
+     the one-shots are started) and says "gameport ok"; SB16.EXE, which checks the runner's
      Sound Blaster 16 (the DSP's reset, the mixer's IRQ and DMA, a 16-bit
      transfer on DMA 5 and an 8-bit one on DMA 1, each ending in IRQ 7,
      and a 16-bit one started with DMA 5 masked, which waits for the
@@ -729,6 +732,7 @@ def main():
     print(f'{make_exe()} bytes; FLAT.386 {make_flat()} bytes; RAWDRV.DRV {make_raw()} bytes; '
           f'RELMOD.MOD %d bytes, %d offsets; PMODE.EXE {make_exe("PMODE")} bytes; '
           f'CDROM.EXE {make_exe("CDROM")} bytes; VGAMODE.EXE {make_exe("VGAMODE")} bytes; '
+          f'GAMEPORT.EXE {make_exe("GAMEPORT")} bytes; '
           f'SB16.EXE {make_exe("SB16")} bytes; CDPLAY.EXE {make_exe("CDPLAY")} bytes; '
           f'MULTISEG.EXE {make_multiseg()} bytes'
           % make_relmod())
@@ -919,6 +923,11 @@ def main():
     if 'con: vgamode ok' not in out:
         print(out)
         raise SystemExit('selftest FAILED: VGAMODE.EXE (the runner\'s BIOS mode set)')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', 'GAMEPORT/GAMEPORT.EXE'])
+    print('\n'.join(l for l in out.splitlines() if l.startswith('con:')))
+    if 'con: gameport ok' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: GAMEPORT.EXE (the runner\'s game port)')
     wav = os.path.join(b, 'sb16.wav')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-wav', wav, 'SB16/SB16.EXE'])
     print('\n'.join(l for l in out.splitlines() if l.startswith('con:')))
