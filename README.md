@@ -38,7 +38,8 @@ docs/NEW-PROJECT.md how to start a new game.
   - `disasm.py`: analysis and source generator (the hints syntax is in
     its docstring), for MZ programs, pMAX (a DOS extender's) 32-bit
     flat images and raw 32-bit images (`bin`: a driver loaded into a
-    segment of its own); `build.py`: generate, assemble, link, compare;
+    segment of its own, or a module its host relocates by a list of
+    offsets, `offrel`); `build.py`: generate, assemble, link, compare;
     `tasm.py`, `x86enc.py`, `tlink.py`: assembler and linker work-alikes
     (with switches for other assemblers' encodings, the `asm` hint).
   - `gaps.py`: what of a code segment is not reached yet, and where the

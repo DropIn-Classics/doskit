@@ -134,6 +134,11 @@ NEAR_AHEAD:
 FAR_AHEAD:
 SUB1:
     ENTER 8, 0                      ; = enter 8, 0 [4]
+    MOV ESI, DS:[SMALL 14H]         ; = mov esi, dword ptr [0x14] [5]
+    MOV EAX, DS:[SMALL 10H]         ; = mov eax, dword ptr [0x10] [4]
+    MOV DS:[SMALL 20H], EBP         ; = mov dword ptr [0x20], ebp [5]
+    MOV WORD PTR ES:[SMALL 27H], 0  ; = mov word ptr es:[0x27], 0 [9]
+    PUSH DWORD PTR DS:[SMALL 8]     ; = push dword ptr [8] [5]
     LEAVE                           ; = leave [1]
     RET                             ; = ret [1]
 

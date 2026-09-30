@@ -10,14 +10,20 @@ In build/selftest (a project as a game's would be, see kit.py):
      game/HELLO/HELLO.EXE (the "shipped program"); tests/flat/FLAT.ASM,
      32-bit, the same way into a pMAX image, build/files/FLAT.386 (as a
      project's tool would unpack it), tests/raw/RAWDRV.ASM into a raw
-     32-bit image, build/files/RAWDRV.DRV; tests/pmode/PMODE.ASM into
+     32-bit image, build/files/RAWDRV.DRV, tests/relmod/RELMOD.ASM into a
+     relocatable one, build/files/RELMOD.MOD with its offrel list
+     RELMOD.REL (the linker's OFF32 fixups); tests/pmode/PMODE.ASM into
      game/PMODE/PMODE.EXE, tests/cdrom/CDROM.ASM into game/CDROM/CDROM.EXE,
      tests/vgamode/VGAMODE.ASM into game/VGAMODE/VGAMODE.EXE,
      tests/sb16/SB16.ASM into game/SB16/SB16.EXE, tests/cdplay/CDPLAY.ASM
      into game/CDPLAY/CDPLAY.EXE;
   2. check.py: disasm.py makes their sources from tests/hello/src/HELLO.hints
      and tests/flat/src/FLAT.hints, tests/raw/RAWDRV.ASM's raw image from
-     tests/raw/src/RAWDRV.hints, build.py rebuilds them byte for byte;
+     tests/raw/src/RAWDRV.hints, RELMOD's from tests/relmod/src/RELMOD.hints
+     (its offsets exactly the offrel list's, the numbers that look like
+     offsets left numbers), build.py rebuilds them byte for byte; RELMOD
+     with a dword of a words table taken out of its offrel list fails
+     build.py's check;
      PROVENANCE.md (the template's) is there; the names headers symmap.py
      wrote (HELLO's, FLAT's) are up to date; FLAT without its raw hint rebuilds too (the
      line tasm.py refuses written as DB by build.py);
@@ -112,11 +118,11 @@ def step(what):
     print(f'---- {what}', flush=True)
 
 
-def run(cmd, **kw):
+def run(cmd, check=True, **kw):
     r = subprocess.run(cmd, cwd=PROJ, capture_output=True, text=True,
                        env=dict(os.environ, DOSKIT_PROJECT=PROJ), **kw)
     out = (r.stdout + r.stderr).strip()
-    if r.returncode:
+    if r.returncode and check:
         print(out)
         raise SystemExit(f'selftest FAILED: {" ".join(os.path.basename(c) for c in cmd[:2])}')
     return out
@@ -291,6 +297,21 @@ def make_raw():
     with open(os.path.join(PROJ, 'build', 'files', 'RAWDRV.DRV'), 'wb') as f:
         f.write(bytes(out.img))
     return len(out.img)
+
+
+def make_relmod():
+    """tests/relmod/RELMOD.ASM as a relocatable raw image and its offrel
+    list: the image offsets of the linker's OFF32 fixups, in reverse order
+    (the order is not the analysis's business)"""
+    a = tasm.Assembler(os.path.join(HERE, 'relmod', 'RELMOD.ASM'))
+    a.assemble()
+    out = tlink.link([tlink.module_from_asm(a, 'RELMOD')])
+    files = os.path.join(PROJ, 'build', 'files')
+    with open(os.path.join(files, 'RELMOD.MOD'), 'wb') as f:
+        f.write(bytes(out.img))
+    with open(os.path.join(files, 'RELMOD.REL'), 'wb') as f:
+        f.write(b''.join(struct.pack('<I', x) for x in sorted(out.offs32, reverse=True)))
+    return len(out.img), len(out.offs32)
 
 
 def check_update(b):
@@ -510,12 +531,15 @@ def main():
     print(f'{check_enc32()} lines as capstone reads them')
 
     step('1. HELLO.EXE assembled and linked')
-    print(f'{make_exe()} bytes; FLAT.386 {make_flat()} bytes; RAWDRV.DRV {make_raw()} bytes; PMODE.EXE {make_exe("PMODE")} bytes; '
+    print(f'{make_exe()} bytes; FLAT.386 {make_flat()} bytes; RAWDRV.DRV {make_raw()} bytes; '
+          f'RELMOD.MOD %d bytes, %d offsets; PMODE.EXE {make_exe("PMODE")} bytes; '
           f'CDROM.EXE {make_exe("CDROM")} bytes; VGAMODE.EXE {make_exe("VGAMODE")} bytes; '
-          f'SB16.EXE {make_exe("SB16")} bytes; CDPLAY.EXE {make_exe("CDPLAY")} bytes')
+          f'SB16.EXE {make_exe("SB16")} bytes; CDPLAY.EXE {make_exe("CDPLAY")} bytes'
+          % make_relmod())
     shutil.copy(os.path.join(HERE, 'hello', 'src', 'HELLO.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'flat', 'src', 'FLAT.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'raw', 'src', 'RAWDRV.hints'), os.path.join(PROJ, 'src'))
+    shutil.copy(os.path.join(HERE, 'relmod', 'src', 'RELMOD.hints'), os.path.join(PROJ, 'src'))
     # every project carries PROVENANCE.md (check.py insists)
     with open(os.path.join(KIT, 'template', 'PROVENANCE.md'), 'rb') as f:
         text = f.read().replace(b'{{NAME}}', b'HELLO (the kit\'s test program)')
@@ -570,6 +594,30 @@ def main():
         print(out)
         raise SystemExit('selftest FAILED: FLAT without its stop hint')
     print('FLAT without its stop hint: the data after CODE:00B5 taken for code')
+    with open(os.path.join(PROJ, 'build', 'RELMOD.ASM')) as f:
+        text = f.read()
+    for want in ('DD INIT', 'DD STEP', 'DD NAMETXT+80000000H', 'DD L005E', 'DD L0064',
+                 'MOV EAX,OFFSET TABLE', 'MOV ECX,20H', '[EBX*4+TABLE]', 'CMP EAX,[LIMIT]',
+                 '\tDB 0BEH\t; mov esi, 0x20\n\tDD NAMETXT\n', '[EBX+NAMETXT]', 'MOV EDX,DS:[SMALL 14H]'):
+        if want not in text:
+            raise SystemExit(f'selftest FAILED: RELMOD.ASM has no {want} (offrel)')
+    if 'DD COUNT' in text or 'OFFSET INIT' in text:
+        raise SystemExit('selftest FAILED: RELMOD.ASM has a number written as an offset')
+    print('RELMOD: the offrel list\'s dwords written as offsets (in a raw instruction too), the numbers as numbers')
+    rel = os.path.join(PROJ, 'build', 'files', 'RELMOD.REL')
+    with open(rel, 'rb') as f:
+        whole = f.read()
+    with open(rel, 'wb') as f:
+        # TABLE's first entry, which the words hint still writes as DD
+        f.write(b''.join(whole[i:i + 4] for i in range(0, len(whole), 4)
+                         if int.from_bytes(whole[i:i + 4], 'little') != 0x18))
+    out = run([py, os.path.join(TOOLS, 'build.py'), os.path.join(PROJ, 'src', 'RELMOD.hints')], check=False)
+    with open(rel, 'wb') as f:
+        f.write(whole)
+    if 'which the offrel list has' in out or 'the offrel list does not have' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: RELMOD with a shorter offrel list')
+    print('RELMOD with a words table\'s dword left out of its offrel list: build.py refuses it')
 
     step('3. run in the runner (run.py)')
     import run as run_py

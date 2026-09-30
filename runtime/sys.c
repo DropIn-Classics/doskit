@@ -533,7 +533,8 @@ int sys_data_migrate(const char *const *names)
             continue;
         }
         /* copied under another name first: a half copy is never taken for one */
-        snprintf(part, sizeof part, "%s.part", to);
+        if (snprintf(part, sizeof part, "%s.part", to) >= (int)sizeof part)
+            continue;
         if (sys_is_dir(from) ? copy_tree(from, part) : copy_file(from, part)) {
             if (sys_rename(part, to) == 0)
                 moved++;

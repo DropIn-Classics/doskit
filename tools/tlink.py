@@ -145,6 +145,7 @@ def link(modules, stack_from=None):
     img = bytearray(total)
     initmask = bytearray(total)
     relocs = []
+    offs32 = []               # where a 32-bit offset of a label went
 
     def seg_of(m, sn):
         for p in m.pieces:
@@ -205,6 +206,7 @@ def link(modules, stack_from=None):
                     val = tabs - tframe * 16 + addend
                     struct.pack_into('<I', img, a, val & 0xFFFFFFFF)
                     initmask[a + 2:a + 4] = b'\1\1'
+                    offs32.append(a)
                 elif kind == 'REL32':
                     val = tabs + addend - (a + 4)
                     struct.pack_into('<I', img, a, val & 0xFFFFFFFF)
@@ -217,6 +219,7 @@ def link(modules, stack_from=None):
     out.img = img
     out.init = initmask
     out.relocs = relocs
+    out.offs32 = offs32
     out.segs = segs
     out.order = order
     out.byname = byname

@@ -1,0 +1,18 @@
+; The kit's test of a relocatable raw image (tests/selftest.py):
+; tests/relmod/RELMOD.ASM, the image and its offrel list written into the
+; build folder by the selftest.
+bin        build/files/RELMOD.MOD noentry
+offrel     build/files/RELMOD.REL flags=C0000000
+segment    CODE 0 CODE
+
+words      CODE:0000 2 CODE        ; the header's code pointers
+words      CODE:0018 2 CODE
+
+name       CODE:0000 HEADER
+name       CODE:0010 COUNT
+name       CODE:0014 LIMIT
+name       CODE:0018 TABLE
+name       CODE:0020 NAMETXT
+name       CODE:0027 INIT
+name       CODE:003C STEP
+raw        CODE:005E               ; written as DB, its offset stays DD NAMETXT
