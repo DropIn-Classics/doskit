@@ -23,13 +23,181 @@ static int take(const char *path, const char *must_have, char *out, size_t n)
     return 1;
 }
 
-/* dir/name */
+/* dir/name, each part of name ("CD/GAME.INS") in any case: on Linux
+ * GAME.GOG is not game.gog */
 static int take_in(const char *dir, const char *name, const char *must_have, char *out, size_t n)
 {
-    char path[SYS_PATH];
-    sys_join(path, sizeof path, dir, name);
+    char path[SYS_PATH], next[SYS_PATH], part[SYS_PATH];
+
+    snprintf(path, sizeof path, "%s", dir);
+    while (*name) {
+        size_t len = strcspn(name, "/\\");
+
+        snprintf(part, sizeof part, "%.*s", (int)len, name);
+        if (!sys_find(path, part, next, sizeof next))
+            return 0;
+        memcpy(path, next, sizeof path);
+        name += len;
+        while (*name == '/' || *name == '\\')
+            name++;
+    }
     return take(path, must_have, out, n);
 }
+
+#ifndef _WIN32
+/* the search through a machine's folders: fn(dir, ctx) for each folder
+ * the game may be in; `dir` the folder being listed */
+typedef struct {
+    const GogRelease *rel;
+    int (*fn)(const char *dir, void *ctx);
+    void *ctx;
+    const char *dir;
+    int found;
+} Walk;
+
+/* An install folder: the game in it, or in its folder data (where GOG's
+ * Linux installer put a DOSBox game's image, as seen with one release).
+ * `any`: a folder that may be of another game (named in a list, found by
+ * looking around), taken only if it is named as the release's folder or
+ * the release names a must_have that tells its game from others. */
+static int install(Walk *w, const char *dir, int any)
+{
+    char path[SYS_PATH], data[SYS_PATH];
+    size_t len;
+
+    snprintf(path, sizeof path, "%s", dir);
+    for (len = strlen(path); len > 1 && path[len - 1] == '/'; len--)
+        path[len - 1] = 0;
+    if (any && !(w->rel->must_have && *w->rel->must_have)) {
+        const char *base = strrchr(path, '/');
+        if (strcmp(base ? base + 1 : path, w->rel->folder))
+            return 0;
+    }
+    sys_join(data, sizeof data, path, "data");
+    return w->fn(path, w->ctx) || w->fn(data, w->ctx);
+}
+
+/* the folders the Windows installer and GOG Galaxy choose, inside the
+ * Wine prefix `prefix` (Wine, Lutris, Bottles) */
+static int in_prefix(Walk *w, const char *prefix)
+{
+    static const char *const dirs[] = {
+        "drive_c/GOG Games",
+        "drive_c/Program Files (x86)/GOG Galaxy/Games",
+        "drive_c/Program Files/GOG Galaxy/Games",
+    };
+    char dir[SYS_PATH], path[SYS_PATH];
+    size_t i;
+
+    for (i = 0; i < sizeof dirs / sizeof dirs[0]; i++) {
+        sys_join(dir, sizeof dir, prefix, dirs[i]);
+        sys_join(path, sizeof path, dir, w->rel->folder);
+        if (install(w, path, 0))
+            return 1;
+    }
+    return 0;
+}
+
+/* each folder in a folder of games or of Wine prefixes: the game's own
+ * folder (Lutris without Wine), a prefix, or one holding the game's
+ * folder */
+static void scan_entry(void *ctx, const char *name, int is_dir)
+{
+    Walk *w = (Walk *)ctx;
+    char dir[SYS_PATH], sub[SYS_PATH];
+
+    if (w->found || !is_dir)
+        return;
+    sys_join(dir, sizeof dir, w->dir, name);
+    sys_join(sub, sizeof sub, dir, w->rel->folder);
+    w->found = install(w, dir, 1) || in_prefix(w, dir) || install(w, sub, 0);
+}
+
+/* a text file, ending in a 0, NULL if it cannot be read */
+static char *load_text(const char *path)
+{
+    size_t size;
+    char *data = (char *)sys_load(path, &size), *text;
+
+    if (!data || (text = (char *)realloc(data, size + 1)) == NULL) {
+        free(data);
+        return NULL;
+    }
+    text[size] = 0;
+    return text;
+}
+
+/* Heroic's list of the GOG games it installed, a JSON file: each
+ * "install_path" in it */
+static int from_heroic(Walk *w, const char *json)
+{
+    static const char key[] = "\"install_path\"";
+    char *data = load_text(json), *p, dir[SYS_PATH];
+    int found = 0;
+
+    if (!data)
+        return 0;
+    for (p = strstr(data, key); p && !found; p = strstr(p, key)) {
+        size_t len = 0;
+
+        p += sizeof key - 1;
+        while (*p == ' ' || *p == ':' || *p == '\t' || *p == '\r' || *p == '\n')
+            p++;
+        if (*p++ != '"')
+            continue;
+        while (*p && *p != '"' && len + 1 < sizeof dir) {
+            if (*p == '\\' && p[1])
+                p++;
+            dir[len++] = *p++;
+        }
+        dir[len] = 0;
+        found = install(w, dir, 1);
+    }
+    free(data);
+    return found;
+}
+
+/* A menu entry of GOG's Linux installer, gog_com-NAME_1.desktop: the
+ * game's folder, wherever the player installed it, in its Path= (as
+ * seen with one release) or as the folder of the start.sh its Exec=
+ * starts */
+static void menu_entry(void *ctx, const char *name, int is_dir)
+{
+    Walk *w = (Walk *)ctx;
+    size_t len = strlen(name);
+    char path[SYS_PATH], dir[SYS_PATH], *data, *line, *end;
+
+    if (w->found || is_dir || strncmp(name, "gog_com-", 8) || len < 16 ||
+        strcmp(name + len - 8, ".desktop"))
+        return;
+    sys_join(path, sizeof path, w->dir, name);
+    if ((data = load_text(path)) == NULL)
+        return;
+    for (line = data; line && !w->found; line = end ? end + 1 : NULL) {
+        char *from, *to;
+
+        end = strchr(line, '\n');
+        if (end)
+            *end = 0;
+        if (!strncmp(line, "Path=", 5)) {
+            from = line + 5;
+            to = from + strcspn(from, "\r");
+        } else if (!strncmp(line, "Exec=", 5) && (to = strstr(line, "/start.sh")) != NULL) {
+            for (from = to; from > line + 5 && from[-1] != '"' && from[-1] != '\''; from--)
+                ;
+        } else {
+            continue;
+        }
+        if (*from == '"' && to > from && to[-1] == '"') {
+            from++;
+            to--;
+        }
+        snprintf(dir, sizeof dir, "%.*s", (int)(to - from), from);
+        w->found = install(w, dir, 1);
+    }
+    free(data);
+}
+#endif
 
 /* calls fn for each folder the game may be installed in, until it
  * returns 1; 1 then */
@@ -67,13 +235,33 @@ static int each_install_dir(const GogRelease *rel, int (*fn)(const char *dir, vo
              pf ? pf : "C:\\Program Files (x86)", rel->folder);
     return fn(path, ctx);
 #else
-    /* On a Mac the release is an application; elsewhere (the Windows
-     * release under Wine, Heroic, Lutris) guesses at the usual folders,
-     * not checked */
-    static const char *const home_dirs[] = {
-        "GOG Games", "Games/Heroic", ".wine/drive_c/GOG Games",
+    /* On a Mac the release is an application.  On Linux GOG's Linux
+     * release where its installer (the .sh) put it: its menu entry names
+     * the folder, by default ~/GOG Games/FOLDER (as seen with one
+     * release; /opt/GOG Games as root).  Or the Windows release: in
+     * Heroic's list of installed games (as installed and as a Flatpak),
+     * where Heroic, Minigalaxy and Lutris put games by default, in the
+     * Wine prefixes of Wine, Lutris and Bottles.  These folders are the
+     * programs' defaults as documented, not checked on a machine. */
+    static const char *const menus[] = {
+        ".local/share/applications", "Desktop", "/usr/share/applications",
     };
+    static const char *const heroic[] = {
+        ".config/heroic/gog_store/installed.json",
+        ".var/app/com.heroicgameslauncher.hgl/config/heroic/gog_store/installed.json",
+    };
+    static const char *const game_dirs[] = {
+        "GOG Games", "/opt/GOG Games", "Games/Heroic",
+    };
+    static const char *const scan_dirs[] = {
+        "Games", "Games/Heroic", "Games/Heroic/Prefixes",
+        ".local/share/bottles/bottles",
+        ".var/app/com.usebottles.bottles/data/bottles/bottles",
+        ".local/share/wineprefixes",
+    };
+    const char *wineprefix = getenv("WINEPREFIX");
     char home[SYS_PATH], dir[SYS_PATH];
+    Walk w;
     size_t i;
 
     /* a path too long for the buffer is passed over, not cut short */
@@ -85,10 +273,38 @@ static int each_install_dir(const GogRelease *rel, int (*fn)(const char *dir, vo
     if (snprintf(path, sizeof path, "%s/%s.app", dir, rel->folder) < (int)sizeof path
         && fn(path, ctx))
         return 1;
-    for (i = 0; i < sizeof home_dirs / sizeof home_dirs[0]; i++) {
-        sys_join(dir, sizeof dir, home, home_dirs[i]);
+    w.rel = rel;
+    w.fn = fn;
+    w.ctx = ctx;
+    w.found = 0;
+    for (i = 0; i < sizeof menus / sizeof menus[0]; i++) {
+        sys_join(dir, sizeof dir, menus[i][0] == '/' ? "" : home, menus[i]);
+        w.dir = dir;
+        sys_list_dir(dir, menu_entry, &w);
+        if (w.found)
+            return 1;
+    }
+    for (i = 0; i < sizeof heroic / sizeof heroic[0]; i++) {
+        sys_join(path, sizeof path, home, heroic[i]);
+        if (from_heroic(&w, path))
+            return 1;
+    }
+    for (i = 0; i < sizeof game_dirs / sizeof game_dirs[0]; i++) {
+        sys_join(dir, sizeof dir, game_dirs[i][0] == '/' ? "" : home, game_dirs[i]);
         sys_join(path, sizeof path, dir, rel->folder);
-        if (fn(path, ctx))
+        if (install(&w, path, 0))
+            return 1;
+    }
+    if (wineprefix && *wineprefix && in_prefix(&w, wineprefix))
+        return 1;
+    sys_join(dir, sizeof dir, home, ".wine");
+    if (in_prefix(&w, dir))
+        return 1;
+    for (i = 0; i < sizeof scan_dirs / sizeof scan_dirs[0]; i++) {
+        sys_join(dir, sizeof dir, home, scan_dirs[i]);
+        w.dir = dir;
+        sys_list_dir(dir, scan_entry, &w);
+        if (w.found)
             return 1;
     }
     return 0;

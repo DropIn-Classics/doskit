@@ -21,9 +21,11 @@ a point below.
    (Linux: `libSDL2-2.0.so.0`).
 3. **The game found by itself.** On the first start the port finds the
    player's GOG release (`cdimage.h`: registry, GOG's folders, the Mac
-   app) and offers to copy the game's files; the setup screen comes
-   first. If it is not found, the message says what to do, and the
-   program looks where README.txt says a `game.gog` can be put.
+   app; on Linux GOG's Linux installer, `.sh`, with its menu entry,
+   Heroic, Lutris, Minigalaxy, Bottles, Wine) and offers to copy the
+   game's files; the setup screen comes first. If it is not found, the
+   message says what to do, and the program looks where README.txt says
+   a `game.gog` can be put.
 4. **Nothing written into the program's package.** Settings, saves and
    the copied game go into the user's data folder, `sys_data_dir`:
    `%LOCALAPPDATA%\NAME` on Windows, `~/.local/share/SLUG` (or

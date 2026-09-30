@@ -13,7 +13,9 @@ Starting
 Start {{SLUG}} ({{SLUG}}.exe on Windows, {{SLUG}}.app on a Mac). The
 first time it looks for your GOG release: where GOG installed it (on
 Windows found through the registry too), the GOG app in /Applications
-or ~/Applications on a Mac, beside the program. It offers to copy the
+or ~/Applications on a Mac, on Linux where GOG's installer (the .sh)
+put it, also in a folder of your choice, or where Heroic, Lutris,
+Minigalaxy, Bottles or Wine usually put it; beside the program. It offers to copy the
 game's files from it into its data folder, where the settings and saves
 go too:
 

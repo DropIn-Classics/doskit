@@ -62,8 +62,12 @@ In build/selftest (a project as a game's would be, see kit.py):
      (update.c: versions, latest.json's fields, nothing before the
      player's yes, a latest.json made here fetched by curl as file://,
      then the kept one used the same day; sys_data_migrate) says
-     "update ok" twice, when curl is there; tests/flat/port.c (the
-     start of FLAT.386 in C over pmem.h, loaded at a linear address with
+     "update ok" twice, when curl is there; tests/gogfind/gogfind.c
+     (cdimage.c's gog_find, HOME a folder laid out as the Linux
+     installer, a menu entry, Heroic, Wine and Lutris leave it; the image
+     in a folder data, its name in other case; a folder of another name
+     taken only with a must_have) says which image it found;
+     tests/flat/port.c (the start of FLAT.386 in C over pmem.h, loaded at a linear address with
      a selector per descriptor) against the memory made here from the
      image, by memcmp.py --base, which also finds a byte changed in it;
      the runner's -mem (the HELLO run of step 3) begins with -ram's bytes;
@@ -312,6 +316,66 @@ def check_update(b):
             print(r.stdout + r.stderr)
             raise SystemExit(f'selftest FAILED: update.c ({mode})')
         print(r.stdout.strip())
+
+
+def check_gogfind(b):
+    """tests/gogfind/gogfind.c (cdimage.c's gog_find) with HOME a folder
+    made here as each kind of installation lays it out, one at a time"""
+    d = os.path.join(b, 'gogfind')
+    if os.path.isdir(d):
+        shutil.rmtree(d)
+    os.makedirs(os.path.join(d, 'data'))
+    exe = os.path.join(d, 'gogfind')
+    run([CC] + CFLAGS + ['-I', RUNTIME, '-o', exe, os.path.join(HERE, 'gogfind', 'gogfind.c'),
+                         os.path.join(RUNTIME, 'cdimage.c'), os.path.join(RUNTIME, 'sys.c')])
+    image = os.path.join(d, 'image')
+    cd_image({'HELLO/HELLO.EXE': b'MZ' + bytes(100)}, image)
+    home = os.path.join(d, 'home')
+    menu = '.local/share/applications/gog_com-Test_Game_1.desktop'
+    heroic = '.config/heroic/gog_store/installed.json'
+    # (what, the image's place in HOME, other files {path: text}, WINEPREFIX,
+    #  must_have, found)
+    cases = [
+        ('the Linux installer\'s default folder', 'GOG Games/Test Game/data/game.gog', {}, '',
+         'HELLO/HELLO.EXE', True),
+        ('a folder named in a menu entry\'s Path=', 'mine/Test Game/data/GAME.GOG',
+         {menu: '[Desktop Entry]\nName=Test Game\nPath={home}/mine/Test Game/\n'}, '', '', True),
+        ('a folder named in a menu entry\'s Exec=', 'mine/Test Game/game.gog',
+         {menu: '[Desktop Entry]\nExec="{home}/mine/Test Game/start.sh"'}, '', '', True),
+        ('another name in a menu entry, no must_have', 'mine/Other/data/game.gog',
+         {menu: '[Desktop Entry]\nPath={home}/mine/Other\n'}, '', '', False),
+        ('another name in a menu entry, with must_have', 'mine/Other/data/game.gog',
+         {menu: '[Desktop Entry]\nPath={home}/mine/Other\n'}, '', 'HELLO/HELLO.EXE', True),
+        ('Heroic\'s list', 'sd/Test Game/game.gog',
+         {heroic: '{{"installed": [{{"install_path": "/nowhere"}},\n'
+                  ' {{"appName": "1", "install_path": "{home}\\/sd\\/Test Game"}}]}}'},
+         '', '', True),
+        ('$WINEPREFIX', 'px/drive_c/GOG Games/Test Game/game.gog', {}, '{home}/px', '', True),
+        ('a Lutris prefix, GOG Galaxy\'s folder',
+         'Games/test-game/drive_c/Program Files (x86)/GOG Galaxy/Games/Test Game/game.gog', {}, '',
+         '', True),
+        ('nothing', None, {}, '', 'HELLO/HELLO.EXE', False),
+    ]
+    for what, place, files, prefix, must, ok in cases:
+        if os.path.isdir(home):
+            shutil.rmtree(home)
+        os.makedirs(home)
+        if place:
+            os.makedirs(os.path.dirname(os.path.join(home, place)))
+            shutil.copy(image, os.path.join(home, place))
+        for path, text in files.items():
+            os.makedirs(os.path.dirname(os.path.join(home, path)), exist_ok=True)
+            with open(os.path.join(home, path), 'w') as f:
+                f.write(text.format(home=home))
+        env = dict(os.environ, HOME=home, DK_DATA_DIR=os.path.join(d, 'data'),
+                   WINEPREFIX=prefix.format(home=home))
+        r = subprocess.run([exe, 'Test Game'] + ([must] if must else []), cwd=d,
+                           capture_output=True, text=True, env=env)
+        want = os.path.join(home, place) if ok else 'not found'
+        if r.stdout.strip() != want:
+            print(r.stdout + r.stderr)
+            raise SystemExit(f'selftest FAILED: gog_find ({what})')
+    print(f'gog_find ok ({len(cases)} installations)')
 
 
 def check_pmem(py, b):
@@ -635,6 +699,7 @@ def main():
         raise SystemExit('selftest FAILED: vga.c\'s 16-colour 200-line modes: ' + out)
     print(out.strip())
     check_update(b)
+    check_gogfind(b)
     print(run([py, os.path.join(TOOLS, 'memcmp.py'), 'src/HELLO.hints',
                os.path.join(b, 'orig.ram'), os.path.join(b, 'port.ram'), '--skip', 'STACK',
                '--vram', os.path.join(b, 'orig.vram'), os.path.join(b, 'port.vram')]))
