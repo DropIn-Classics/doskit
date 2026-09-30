@@ -75,7 +75,11 @@ limit):
 
 The notes are the annotated tag's message (`git tag -a v1.3`), written
 for players; a release is tagged that way. The builds get the address
-as `PORT_UPDATE_URL`.
+as `PORT_UPDATE_URL`, always in the ports' organisation,
+`https://github.com/DropIn-Classics/REPO/...`: a repository is moved
+there at its first public release, and a release built before the move
+must still find its successors. The Mac app's identifier is
+`io.github.dropin-classics.SLUG` for the same reason.
 
 - **Fetching**: WinHTTP on Windows (part of the system); the system's
   `curl` on macOS (always there) and Linux (there on most systems, the
