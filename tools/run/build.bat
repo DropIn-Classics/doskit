@@ -25,5 +25,5 @@ if not exist build\obj-run mkdir build\obj-run
 rem /fp:precise and no /fp:fast: the timing is doubles, compared exactly
 cl /nologo /O2 /W3 /fp:precise /D_CRT_SECURE_NO_WARNINGS /Fo:build\obj-run\ /Fe:build\dosrun.exe ^
   tools\run\main.c tools\run\cpu.c tools\run\vga.c tools\run\dev.c tools\run\bios.c ^
-  tools\run\dos.c tools\run\sound.c tools\run\vgafont.c tools\run\png.c tools\run\mscdex.c third_party\stb_vorbis\stb_vorbis.c
+  tools\run\dos.c tools\run\sound.c tools\run\vgafont.c tools\run\png.c tools\run\mscdex.c third_party\stb_vorbis\stb_vorbis.c runtime\opl.c
 if errorlevel 1 exit /b 1

@@ -16,6 +16,7 @@ In build/selftest (a project as a game's would be, see kit.py):
      game/PMODE/PMODE.EXE, tests/cdrom/CDROM.ASM into game/CDROM/CDROM.EXE,
      tests/vgamode/VGAMODE.ASM into game/VGAMODE/VGAMODE.EXE,
      tests/gameport/GAMEPORT.ASM into game/GAMEPORT/GAMEPORT.EXE,
+     tests/adlib/ADLIB.ASM into game/ADLIB/ADLIB.EXE,
      tests/sb16/SB16.ASM into game/SB16/SB16.EXE, tests/cdplay/CDPLAY.ASM
      into game/CDPLAY/CDPLAY.EXE, tests/multiseg/MULTISEG.ASM into
      game/MULTISEG/MULTISEG.EXE with TLINK's header and its relocations
@@ -68,7 +69,10 @@ In build/selftest (a project as a game's would be, see kit.py):
      4F01h, 4F02h with modes 101h and 103h, 4F03h) and says
      "vgamode ok"; GAMEPORT.EXE, which reads the game port as a PC
      without a joystick has it (FFh, the axis bits never falling after
-     the one-shots are started) and says "gameport ok"; SB16.EXE, which checks the runner's
+     the one-shots are started) and says "gameport ok"; ADLIB.EXE, which
+     probes the runner's OPL2 as drivers do (the timers' flags in the
+     status, masked, cleared, not set before their time) and says "adlib
+     ok"; SB16.EXE, which checks the runner's
      Sound Blaster 16 (the DSP's reset, the mixer's IRQ and DMA, a 16-bit
      transfer on DMA 5 and an 8-bit one on DMA 1, each ending in IRQ 7,
      and a 16-bit one started with DMA 5 masked, which waits for the
@@ -192,6 +196,31 @@ def read_png(path):
         for i in row[1:]:
             rgb += plte[3 * i:3 * i + 3]
     return w, h, bytes(rgb)
+
+
+def check_adlib_wav(path):
+    """ADLIB.EXE's note in the runner's -oplwav: 49716 Hz mono; silence,
+    then 491.52 ms (six overflows of timer 2) and the release (release
+    rate 15, under 2 ms) of a 440 Hz sine at an operator's full scale
+    (4096), then silence for most of two more overflows."""
+    import struct
+    with open(path, 'rb') as f:
+        data = f.read()
+    rate, chans = struct.unpack('<I', data[24:28])[0], struct.unpack('<H', data[22:24])[0]
+    s = struct.unpack('<%dh' % ((len(data) - 44) // 2), data[44:])
+    loud = [i for i, x in enumerate(s) if x]
+    if rate != 49716 or chans != 1 or not loud:
+        raise SystemExit(f'selftest FAILED: ADLIB.EXE\'s -oplwav ({rate} Hz, {chans} channels, '
+                         f'{len(loud)} samples not 0)')
+    first, last = loud[0], loud[-1]
+    mid = s[first + rate // 10:last - rate // 10]
+    cross = sum(1 for a, b in zip(mid, mid[1:]) if (a < 0) != (b < 0))
+    hz = cross / 2 / (len(mid) / rate)
+    peak = max(abs(x) for x in mid)
+    dur, tail = (last - first) / rate, (len(s) - last) / rate
+    print(f'adlib.wav: {dur * 1000:.1f} ms at {hz:.1f} Hz, peak {peak}, then {tail * 1000:.0f} ms silent')
+    if not (0.485 < dur < 0.505 and 438 < hz < 442 and 4000 <= peak <= 4096 and tail > 0.14):
+        raise SystemExit('selftest FAILED: ADLIB.EXE\'s -oplwav (the note the OPL2 played)')
 
 
 def make_exe(name='HELLO'):
@@ -815,6 +844,7 @@ def main():
           f'RELMOD.MOD %d bytes, %d offsets; PMODE.EXE {make_exe("PMODE")} bytes; '
           f'CDROM.EXE {make_exe("CDROM")} bytes; VGAMODE.EXE {make_exe("VGAMODE")} bytes; '
           f'GAMEPORT.EXE {make_exe("GAMEPORT")} bytes; '
+          f'ADLIB.EXE {make_exe("ADLIB")} bytes; '
           f'SB16.EXE {make_exe("SB16")} bytes; CDPLAY.EXE {make_exe("CDPLAY")} bytes; '
           f'MULTISEG.EXE {make_multiseg()} bytes'
           % make_relmod())
@@ -1014,6 +1044,13 @@ def main():
     if 'con: gameport ok' not in out:
         print(out)
         raise SystemExit('selftest FAILED: GAMEPORT.EXE (the runner\'s game port)')
+    oplwav = os.path.join(b, 'adlib.wav')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '2', '-oplwav', oplwav, 'ADLIB/ADLIB.EXE'])
+    print('\n'.join(l for l in out.splitlines() if l.startswith('con:')))
+    if 'con: adlib ok' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: ADLIB.EXE (the runner\'s OPL2 timers)')
+    check_adlib_wav(oplwav)
     wav = os.path.join(b, 'sb16.wav')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-wav', wav, 'SB16/SB16.EXE'])
     print('\n'.join(l for l in out.splitlines() if l.startswith('con:')))

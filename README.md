@@ -81,7 +81,9 @@ docs/NEW-PROJECT.md how to start a new game.
     program it (ports, planes, Mode X, mode 12h/13h, the picture scanned
     out); `frame.h`: pacing at the mode's refresh, keys to the program's
     INT 9 handler, a tick callback, a key recorder.
-  - `modplay.h` (MOD playback, micromod), `audiofx.h` (optional EQ and a
+  - `modplay.h` (MOD playback, micromod), `opl.h` (an OPL2's FM synthesis,
+    the AdLib's chip, from the program's register writes; the runner's
+    -oplwav too), `audiofx.h` (optional EQ and a
     headphone mode), `fli.h` (FLI animations), `textmode.h` (an 80x25
     text screen, for a DOS-setup-like launcher), `pad.h` (controller
     buttons to keys), `cdimage.h` (a GOG release found and its image
