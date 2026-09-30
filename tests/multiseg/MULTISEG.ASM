@@ -72,7 +72,8 @@ THREE ENDS
 ; asm line says it): AND and OR with a small constant in the word form,
 ; ADD in the byte form, XCHG AX,reg as 87h /r; an array in DATA at a small
 ; offset indexed by BX (its displacement written in full, as the linker
-; fills it in); a far call to a routine of the same segment
+; fills it in); a far call to a routine of the same segment; routines
+; reached only through pointers into FOUR (ptr and words hints)
 FOUR SEGMENT BYTE PUBLIC 'CODE'
 	ASSUME CS:FOUR
 fourth	PROC FAR
@@ -84,18 +85,30 @@ fourth	PROC FAR
 	XCHG AX,BX
 	MOV AL,BYTE PTR [BX+text+2]
 	CALL FAR PTR fourth_end
+	MOV AX,OFFSET tick	; a far pointer of two immediates, as a
+	MOV DX,SEG tick		; handler is passed on: a ptr hint says so
 	POP BP
 	RETF
 fourth	ENDP
 fourth_end PROC FAR
 	RETF
 fourth_end ENDP
+tick	PROC FAR		; reached only through the pointer above
+	INC WORD PTR DS:[ticks]
+	RETF
+tick	ENDP
+tock	PROC NEAR		; reached only through the table in DATA
+	DEC WORD PTR DS:[ticks]
+	RET
+tock	ENDP
 FOUR ENDS
 
 DATA SEGMENT PARA PUBLIC 'DATA'
 text	DB 'multiseg', 13, 10, '$'
 	DD first
 	DD second
+ticks	DW 0
+	DW OFFSET tock		; a table of near pointers into FOUR
 DATA ENDS
 
 STACK SEGMENT PARA STACK 'STACK'

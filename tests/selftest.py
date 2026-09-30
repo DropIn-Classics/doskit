@@ -31,7 +31,8 @@ In build/selftest (a project as a game's would be, see kit.py):
      relocorder original; a segment stored before it is defined; Borland
      C's encodings with the asm switches imm8_alu and xchg_ax_short; a
      displacement written in full though small, taken for an address; a
-     FAR PTR call within its segment), with no instruction as DB, and
+     FAR PTR call within its segment; routines in FOUR reached only
+     through a ptr and a words hint), with no instruction as DB, and
      without its prefix= hints build.py stops and says the labels collide;
      PROVENANCE.md (the template's) is there; the names headers symmap.py
      wrote (HELLO's, FLAT's) are up to date; FLAT without its raw hint rebuilds too (the
@@ -748,6 +749,13 @@ def main():
     # far call in its own segment, the word forms, the full displacement)
     if not re.search(r'MULTISEG\.hints: .* 0 as DB', out):
         raise SystemExit('selftest FAILED: MULTISEG has instructions written as DB')
+    with open(os.path.join(PROJ, 'build', 'MULTISEG.ASM')) as f:
+        text = f.read()
+    for want in ('MOV AX,OFFSET tick', 'tick:\n\tINC ', 'DW tock', 'tock:\n\tDEC '):
+        if want not in text:
+            raise SystemExit(f'selftest FAILED: MULTISEG.ASM has no {want!r} (ptr and words '
+                             'hints into a code segment other than CODE)')
+    print('MULTISEG: routines reached through pointers into FOUR, a segment not named CODE')
     with open(os.path.join(PROJ, 'build', 'FLAT.ASM')) as f:
         text = f.read()
     for want in ('DW L00D5-C00D6', 'DW L00DE-C00D6', 'DW L00E5-C00D6', '[EDI+C00D6]'):

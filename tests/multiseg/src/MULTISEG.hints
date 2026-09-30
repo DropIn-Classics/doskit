@@ -4,7 +4,7 @@
 
 exe MULTISEG/MULTISEG.EXE
 
-; the segments from the relocations and the header (SS:SP = 000C:0100);
+; the segments from the relocations and the header (SS:SP = 000D:0100);
 ; ONE to FOUR begin where the one before ends (start=), and TWO's and
 ; THREE's routines are both at offset C: their own prefixes keep the
 ; labels apart
@@ -13,8 +13,8 @@ segment ONE   0002 CODE start=6 prefix=ONE_
 segment TWO   0003 CODE start=C prefix=TWO_
 segment THREE 0005 CODE start=C prefix=THR_
 segment FOUR  0007 CODE start=4 prefix=FOUR_
-segment DATA  000A DATA
-segment STACK 000C STACK stack size=100
+segment DATA  000B DATA
+segment STACK 000D STACK stack size=100
 
 ; TLINK's header, its relocations in the original's order
 linker tlink 30
@@ -26,6 +26,14 @@ name ONE:0007 first
 name TWO:000C second
 name THREE:000C third
 name FOUR:0004 fourth
+
+; FOUR's routines reached only through pointers: tick's offset an
+; immediate next to its segment's, tock's in a table in DATA (both seed
+; code though the segment is not the one named CODE)
+ptr FOUR:001E FOUR
+name FOUR:0027 tick
+words DATA:0015 1 FOUR
+name FOUR:002C tock
 
 ; FOUR is encoded as Borland C does: AND and OR with a small constant in
 ; the word form, XCHG AX,reg as 87h /r

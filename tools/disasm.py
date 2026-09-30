@@ -71,7 +71,8 @@ Hints syntax (one per line, ';' starts a comment, numbers are hex):
     coderange  SEG:OFF-END             code throughout, a routine after every
                                        RET/JMP (handlers reached by pointers)
     words      SEG:OFF COUNT TARGETSEG a table of near pointers into TARGETSEG
-                                       (TARGETSEG CODE also seeds code); 32-bit
+                                       (a TARGETSEG of class CODE also seeds
+                                       code there); 32-bit
                                        ones in a pMAX image
     words      SEG:OFF COUNT TARGETSEG stride=N
                                        COUNT pointers N bytes apart (a field
@@ -86,7 +87,8 @@ Hints syntax (one per line, ';' starts a comment, numbers are hex):
                                        as data), counted from SEG:OFF
     name       SEG:OFF NAME            a label's name
     ptr        SEG:OFF TARGETSEG       the immediate of the instruction at
-                                       SEG:OFF is an offset in TARGETSEG (without
+                                       SEG:OFF is an offset in TARGETSEG, code
+                                       there if its class is CODE (without
                                        an immediate: its address operand, as for
                                        a LEA of what is read with another DS)
     dptr       SEG:OFF TARGETSEG       the same for an offset of data (no code
@@ -469,6 +471,12 @@ class Analysis:
         return [frm + int.from_bytes(self.p.img[base + 2 * i:base + 2 * i + 2], 'little', signed=True)
                 for i in range(cnt)]
 
+    def is_code(self, seg):
+        """a segment of class CODE: a ptr or words hint into it seeds code
+        (in a program of many code segments, not only the one named CODE)"""
+        S = self.byname.get(seg)
+        return S is not None and S.cls == 'CODE'
+
     def label(self, seg, off, kind=None):
         key = (seg, off)
         if key not in self.labels:
@@ -515,9 +523,9 @@ class Analysis:
             base = self.byname[s].base + o
             for i in range(cnt):
                 v = int.from_bytes(self.p.img[base + self.w * i:base + self.w * (i + 1)], 'little')
-                if t == 'CODE':
-                    work.append(('CODE', v, dd, None))
-                self.label(t, v, 'code' if t == 'CODE' else None)
+                if self.is_code(t):
+                    work.append((t, v, dd, None))
+                self.label(t, v, 'code' if self.is_code(t) else None)
         for s, o, cnt, frm in self.h.rwords:
             self.label(s, frm)
             for t in self.rword_targets(s, o, cnt, frm):
@@ -851,10 +859,10 @@ class Analysis:
             t = self.h.ptr[key]
             v = int.from_bytes(self.p.img[ia:ia + self.w], 'little')
             ins.refs['imm'] = (t, v)
-            code = t == 'CODE' and key not in self.h.dptr
+            code = self.is_code(t) and key not in self.h.dptr
             self.label(t, v, 'code' if code else None)
             if code:
-                work.append(('CODE', v, self.dflt_ds, None))
+                work.append((t, v, self.dflt_ds, None))
 
     def collect_offrel(self, ins, a, work):
         """an instruction's offsets when an offrel list names them all: its
