@@ -272,7 +272,10 @@ linked by Microsoft LINK, 186/386 instructions in 16-bit code. Not tried:
   (`pmax` in the hints: 32-bit code, USE32 source, the descriptors as
   segments; tests/flat, and one game's main program rebuilt byte for
   byte) and raw 32-bit images (`bin`: no header, entered at 0, as a
-  program's loadable driver; tests/raw), not DOS/4GW's LE/LX or other
+  program's loadable driver; tests/raw; with `offrel` a module the host
+  relocates by adding its base to the dwords of a list, which then says
+  exactly where the offsets are and build.py checks it; tests/relmod),
+  not DOS/4GW's LE/LX or other
   extenders' formats. The runner
   emulates the 386's protected mode (tests/pmode: the BIOS's way in, a
   fault, an interrupt, ring 3, a call gate, V86 mode) for an extender

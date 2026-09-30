@@ -31,12 +31,25 @@ Three kinds of program:
   * a raw 32-bit image (`bin`): the file is the image, offsets from 0,
     entered at 0, no header and no relocations (a driver a program loads
     into a segment of its own and calls); one segment, number 0, the
-    whole file.  Written back as the image alone.
+    whole file.  Written back as the image alone.  With `noentry` nothing
+    is entered at 0 (a module whose host calls it through pointers).
+    With an `offrel` list (a module its host relocates by adding the
+    base it loaded it at to every listed dword) exactly the listed
+    dwords are offsets: an instruction's immediate or displacement
+    there, else a DD; every other number stays a number.  build.py
+    checks that the rebuilt source puts its offsets at exactly those
+    places.
 
 Hints syntax (one per line, ';' starts a comment, numbers are hex):
     exe        GAME/GAME.EXE           an MZ program
     pmax       GAME/GAME.386           a pMAX image
-    bin        GAME/GAME.DRV           a raw 32-bit image
+    bin        GAME/GAME.DRV [noentry] a raw 32-bit image
+    offrel     GAME/GAME.REL [flags=MASK]   the image's offset relocations:
+                                       little-endian 32-bit image offsets,
+                                       each of a dword holding an offset;
+                                       the bits of MASK in such a dword are
+                                       flags, not part of the offset
+                                       (written DD label+FLAGS)
     segment    NAME FRAME CLASS [stack] [size=N]   in image order; in a
                                        pMAX image FRAME is the descriptor's
                                        number (base and size are its own)
@@ -133,6 +146,7 @@ def program_path(name):
 class Program:
     """an MZ program"""
     kind, bits, descs = 'mz', 16, None
+    offsites = None           # an offrel list (a raw image's)
 
     def __init__(self, path):
         d = open(path, 'rb').read()
@@ -167,6 +181,7 @@ class PmaxProgram:
     a format number (1), the number of descriptors, the image's size, the
     entry point (an image offset), the number of relocations."""
     kind, bits = 'pmax', 32
+    offsites = None
 
     def __init__(self, path):
         d = open(path, 'rb').read()
@@ -195,14 +210,25 @@ class RawProgram(PmaxProgram):
     file's size), entered at 0, no relocations."""
     kind = 'bin'
 
-    def __init__(self, path):
+    def __init__(self, path, noentry=False, offrel=None):
         d = open(path, 'rb').read()
         self.file = self.img = d
         self.word0 = self.alloc = self.version = 0
-        self.ip = 0
+        self.ip = None if noentry else 0
         self.descs = [(0, len(d))]
         self.relocs, self.relsites = [], {}
         self.tail = b''
+        if offrel is not None:
+            r = open(offrel, 'rb').read()
+            if len(r) % 4:
+                raise SystemExit(f'{offrel}: not a list of 32-bit offsets ({len(r)} bytes)')
+            self.offsites = set(struct.unpack_from('<I', r, i)[0] for i in range(0, len(r), 4))
+            bad = [a for a in self.offsites if a + 4 > len(d)]
+            if bad:
+                raise SystemExit(f'{offrel}: offset {bad[0]:X} beyond the image')
+
+    def entry(self, byframe):
+        return None if self.ip is None else super().entry(byframe)
 
 
 # ---------------------------------------------------------------- hints
@@ -229,6 +255,8 @@ class Hints:
         self.stop = set()
         self.relocorder = []
         self.keeptail = False
+        self.noentry = False
+        self.offrel, self.offflags = None, 0
         self.asm = {}             # assembler switches (see the docstring)
         for n, line in enumerate(open(path, encoding='utf-8'), 1):
             line = line.split(';', 1)[0].strip() if not line.lstrip().startswith('comment') else line.strip()
@@ -239,6 +267,10 @@ class Hints:
             try:
                 if k in ('exe', 'pmax', 'bin'):
                     self.exe, self.kind = f[1], 'mz' if k == 'exe' else k
+                    self.noentry = 'noentry' in f[2:]
+                elif k == 'offrel':
+                    self.offrel = f[1]
+                    self.offflags = next((int(x[6:], 16) for x in f[2:] if x.startswith('flags=')), 0)
                 elif k == 'segment':
                     opts = f[4:]
                     size = next((int(o[5:], 16) for o in opts if o.startswith('size=')), None)
@@ -369,6 +401,11 @@ class Analysis:
         self.regdisp = []         # instructions with a register and a displacement
         self.warnings = []
         self.dsmap = [(s, a, b, d) for s, a, b, d in hints.ds]
+        # an offrel list: exactly these dwords are offsets (None: found by
+        # the analysis); offdata: those in data, image offset -> (target, flags)
+        self.offs = prog.offsites
+        self.offflags = hints.offflags
+        self.offdata = {}
         self.esmap = [(s, a, b, d) for s, a, b, d in hints.es]
 
     # ---- helpers
@@ -403,9 +440,10 @@ class Analysis:
     def run(self):
         work = []
         dd = self.dflt_ds
-        es, eo = self.entry
-        work.append((es, eo, dd, None))
-        self.label(es, eo, 'code')
+        if self.entry is not None:
+            es, eo = self.entry
+            work.append((es, eo, dd, None))
+            self.label(es, eo, 'code')
         for s, o, n in self.h.code:
             work.append((s, o, dd, None))
             self.label(s, o, 'code')
@@ -438,7 +476,9 @@ class Analysis:
             seg, off, ds, es = work.pop()
             self.trace(seg, off, ds, es, work)
         # pointer variables can lead to more code; repeat until nothing new
-        for _ in range(8):
+        # (with an offrel list every offset is known already)
+        self.ptrvars = {}
+        for _ in range(8 if self.offs is None else 0):
             for seed in self.pointer_vars():
                 work.append(seed)
             if not work:
@@ -448,6 +488,33 @@ class Analysis:
                 self.trace(seg, off, ds, es, work)
         self.field_offsets()
         self.far_pointers()
+        self.offset_data()
+
+    def offset_target(self, v):
+        """an offrel dword's value -> (offset, flags), or None beyond the image"""
+        t = v & ~self.offflags & 0xFFFFFFFF
+        return (t, v - t) if t <= len(self.p.img) else None
+
+    def offset_data(self):
+        """the offrel dwords outside instructions: DD label (+ flags)"""
+        if self.offs is None:
+            return
+        covered = {}
+        for (s, o), ins in self.insns.items():
+            b = self.byname[s].base + o
+            for k in range(ins.size):
+                covered[b + k] = ins
+        for a in sorted(self.offs):
+            if any(a + k in covered for k in range(4)):
+                continue            # an instruction's (collect), or a warning there
+            v = int.from_bytes(self.p.img[a:a + 4], 'little')
+            t = self.offset_target(v)
+            S = self.seg_at(a)
+            if t is None or S is None:
+                self.warnings.append(f'offrel {a:X}: {v:X} is no offset in the image')
+                continue
+            self.offdata[a] = (S.name, t[0], t[1])
+            self.label(S.name, t[0], 'code' if (S.name, t[0]) in self.insns else None)
 
     def field_offsets(self):
         """A displacement with a register that lands in code (at an
@@ -581,6 +648,13 @@ class Analysis:
                     and not (ci.mnemonic in ('lcall', 'ljmp') and rel == [ci.size - 2]):
                 self.warnings.append(f'{seg}:{off:04X}: decoding ran into a relocated word')
                 return
+            if self.offs is not None:
+                fields = {ci.imm_offset if ci.imm_size == 4 else None,
+                          ci.disp_offset if ci.disp_size == 4 else None}
+                hit = [k for k in range(-3, ci.size) if a + k in self.offs]
+                if any(k not in fields for k in hit):
+                    self.warnings.append(f'{seg}:{off:04X}: decoding ran into an offrel dword')
+                    return
             dsh = self.ds_override(seg, off)
             esh = self.ds_override(seg, off, 'esmap')
             ins = Insn(seg, off, ci, dsh or ds, esh or es)
@@ -687,6 +761,9 @@ class Analysis:
                 self.label(T.name, o, 'code')
                 work.append((T.name, o, self.dflt_ds, None))
             return
+        if self.offs is not None:
+            self.collect_offrel(ins, a, work)
+            return
         for op in ci.operands:
             if op.type == x86.X86_OP_MEM and ci.disp_size == self.w and key not in self.h.num:
                 has_reg = op.mem.base != 0 or op.mem.index != 0
@@ -723,6 +800,27 @@ class Analysis:
             self.label(t, v, 'code' if code else None)
             if code:
                 work.append(('CODE', v, self.dflt_ds, None))
+
+    def collect_offrel(self, ins, a, work):
+        """an instruction's offsets when an offrel list names them all: its
+        displacement or immediate where a listed dword is, nothing else"""
+        ci = ins.ci
+        S = self.byname[ins.seg]
+        for what, fo, fs in (('disp', ci.disp_offset, ci.disp_size), ('imm', ci.imm_offset, ci.imm_size)):
+            if fs != 4 or a + fo not in self.offs:
+                continue
+            v = int.from_bytes(self.p.img[a + fo:a + fo + 4], 'little')
+            t = self.offset_target(v)
+            if t is None or t[1]:
+                self.warnings.append(f'{ins.seg}:{ins.off:04X}: offrel {v:X} is no offset in the image')
+                continue
+            ins.refs[what] = (S.name, t[0])
+            key = (ins.seg, ins.off)
+            # an immediate a ptr hint calls code is an entry point
+            code = what == 'imm' and self.h.ptr.get(key) == 'CODE' and key not in self.h.dptr
+            self.label(S.name, t[0], 'code' if code else None)
+            if code:
+                work.append((S.name, t[0], self.dflt_ds, None))
 
     def far_pointers(self):
         """relocated segment words with an offset before them: DD label
@@ -1012,8 +1110,7 @@ class Emitter:
             self.segment(S)
             self.out(f'{S.name} ENDS')
             self.out('')
-        e = an.labels[an.entry]
-        self.out(f'\tEND {e}')
+        self.out(f'\tEND {an.labels[an.entry]}' if an.entry is not None else '\tEND')
 
     def label_lines(self, S, off):
         for c in self.an.h.comments.get((S.name, off), []):
@@ -1066,6 +1163,7 @@ class Emitter:
             end = off + 1
             while end < S.size and (S.name, end) not in an.insns and (S.name, end) not in an.labels \
                     and S.base + end not in an.farptrs and S.base + end not in an.p.relsites \
+                    and S.base + end not in an.offdata \
                     and end not in tables and not (end == stored):
                 end += 1
             a = S.base + off
@@ -1074,6 +1172,12 @@ class Emitter:
                 self.inner_labels(S, off, w + 2)
                 self.out(f'\t{"DF" if w == 4 else "DD"} {an.labels[t]}', (S.name, off, w + 2))
                 off += w + 2
+                continue
+            if a in an.offdata:
+                s, t, fl = an.offdata[a]
+                self.inner_labels(S, off, 4)
+                self.out(f'\tDD {an.labels[(s, t)]}' + (f'+{hexnum(fl)}' if fl else ''), (S.name, off, 4))
+                off += 4
                 continue
             if a in an.p.relsites:
                 v = an.p.relsites[a]
@@ -1146,7 +1250,12 @@ class Emitter:
 
 def load_program(h):
     """the program the hints describe, read from the player's files"""
-    return {'pmax': PmaxProgram, 'bin': RawProgram}.get(h.kind, Program)(program_path(h.exe))
+    if h.kind == 'bin':
+        return RawProgram(program_path(h.exe), h.noentry,
+                          program_path(h.offrel) if h.offrel else None)
+    if h.offrel or h.noentry:
+        raise SystemExit('offrel and noentry are for a raw image (bin)')
+    return {'pmax': PmaxProgram}.get(h.kind, Program)(program_path(h.exe))
 
 
 def generate(hints_path, raw_extra=()):

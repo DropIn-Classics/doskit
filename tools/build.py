@@ -175,6 +175,18 @@ def main():
     open(path, 'wb').write(exe)
     ref = an.p.file
     same = exe == ref
+    offs_ok = True
+    if an.p.offsites is not None:
+        # the source's offsets exactly where the offrel list has them
+        got = set(out.offs32)
+        for x in sorted(got - an.p.offsites)[:8]:
+            print(f'   an offset at {x:X} the offrel list does not have')
+        for x in sorted(an.p.offsites - got)[:8]:
+            print(f'   no offset at {x:X}, which the offrel list has')
+        offs_ok = got == an.p.offsites
+        print(f'offsets: {len(got - an.p.offsites)} not in the offrel list, '
+              f'{len(an.p.offsites - got)} of it missing' if not offs_ok else
+              f'offsets: the {len(got)} of the offrel list, no other')
     print(f'{len(an.insns)} instructions, {len(an.labels)} labels, {len(an.h.raw)} as DB; '
           f'{path}: {"IDENTICAL" if same else "differs"} ({time.time() - t0:.1f} s)')
     if raw:
@@ -186,6 +198,8 @@ def main():
         n = min(len(exe), len(ref))
         diff = next((i for i in range(n) if exe[i] != ref[i]), n)
         print(f'first difference at file offset {diff:05X} (sizes {len(exe)} / {len(ref)})')
+        sys.exit(1)
+    if not offs_ok:
         sys.exit(1)
 
 
