@@ -43,7 +43,7 @@ from kit import KIT
 import goglist, isox
 
 TEMPLATE = os.path.join(KIT, 'template')
-KIT_URL = 'git@github.com:mindphluxnet/doskit.git'
+KIT_URL = 'https://github.com/mindphluxnet/doskit.git'
 
 
 def fill(dst, values):
