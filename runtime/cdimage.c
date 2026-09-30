@@ -128,6 +128,10 @@ int gog_find(const GogRelease *rel, char *out, size_t n)
     sys_exe_dir(dir, sizeof dir);
     if (take_in(dir, s.image, s.must_have, out, n) || take(s.image, s.must_have, out, n))
         return 1;
+    /* where a Mac app keeps its files: its own folder is in the bundle */
+    sys_data_dir(dir, sizeof dir);
+    if (take_in(dir, s.image, s.must_have, out, n))
+        return 1;
 #ifndef _WIN32
     if (rel->mac_bundle && *rel->mac_bundle) {
         /* on a Mac the release is an application, the image inside */

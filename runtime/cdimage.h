@@ -28,7 +28,8 @@ typedef struct {
 } GogRelease;
 
 /* The installed release's image: beside the program, in the current
- * directory, where GOG's installers put it (on Windows also where GOG's
+ * directory, in the data folder (sys_data_dir), where GOG's installers
+ * put it (on Windows also where GOG's
  * registry entry for the game says it is), on a Mac inside the app
  * (mac_bundle).  1 if found. */
 int gog_find(const GogRelease *rel, char *out, size_t n);

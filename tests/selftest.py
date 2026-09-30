@@ -76,7 +76,9 @@ In build/selftest (a project as a game's would be, see kit.py):
      image) copied into game/, its program taken for the marker; the
      template's port started with -gog on that folder (copied into its
      data folder), on the image (unpacked there) and on a folder without
-     the marker (refused).
+     the marker (refused); without -gog, game.gog put into its data folder
+     found; the template's program made into an app by macapp.py (its
+     Info.plist read back; on a Mac the bundle's signature verified).
 
 Prints `selftest ok` at the end, exit status 0 then.  Needs cc (clang
 or gcc); on Windows it is not written for MSVC yet.
@@ -726,6 +728,52 @@ def main():
             raise SystemExit(f'selftest FAILED: the template\'s port with -gog (the {what})')
     print('ok   the template\'s port: the installed folder copied, the image unpacked, '
           'another folder refused')
+
+    # game.gog put into the data folder (where a Mac app's README says),
+    # found without -gog; run in an empty folder, so that neither a game
+    # folder nor game.gog is found in the current directory
+    data = os.path.join(KIT, 'build', 'selftest-data')
+    empty = os.path.join(KIT, 'build', 'selftest-empty')
+    for d in (data, empty):
+        if os.path.isdir(d):
+            shutil.rmtree(d)
+        os.makedirs(d)
+    shutil.copy(os.path.join(installed, 'CD', 'HELLO.DAT'), os.path.join(data, 'game.gog'))
+    r = subprocess.run([exe], cwd=empty, capture_output=True, text=True,
+                       env=dict(os.environ, DK_FRAMES='3', DK_DATA_DIR=data))
+    got = os.path.join(data, 'game', 'HELLO', 'HELLO.EXE')
+    if r.returncode or not os.path.isfile(got) or open(got, 'rb').read() != hello:
+        print(r.stdout + r.stderr)
+        raise SystemExit('selftest FAILED: game.gog in the data folder not found')
+    print('ok   game.gog in the data folder found and unpacked')
+
+    # the macOS release's app around the template's program
+    import macapp, plistlib
+    apps = os.path.join(KIT, 'build', 'selftest-app')
+    if os.path.isdir(apps):
+        shutil.rmtree(apps)
+    os.makedirs(apps)
+    r = subprocess.run([py, os.path.join(TOOLS, 'macapp.py'), exe, apps, '--name', 'testgame',
+                        '--id', 'io.github.test.testgame', '--version', 'v1.2'],
+                       capture_output=True, text=True)
+    app = os.path.join(apps, 'testgame.app')
+    info = os.path.join(app, 'Contents', 'Info.plist')
+    if r.returncode or not os.path.isfile(info):
+        print(r.stdout + r.stderr)
+        raise SystemExit('selftest FAILED: macapp.py')
+    with open(info, 'rb') as f:
+        plist = plistlib.load(f)
+    if (plist != macapp.info('testgame', 'io.github.test.testgame', '1.2')
+            or not os.access(os.path.join(app, 'Contents', 'MacOS', 'testgame'), os.X_OK)):
+        raise SystemExit('selftest FAILED: macapp.py\'s bundle')
+    if sys.platform == 'darwin':
+        r = subprocess.run(['codesign', '--verify', '--deep', '--strict', app],
+                           capture_output=True, text=True)
+        if r.returncode:
+            print(r.stdout + r.stderr)
+            raise SystemExit('selftest FAILED: macapp.py\'s bundle not validly signed')
+    print('ok   macapp.py: the bundle, its Info.plist' +
+          (', its signature' if sys.platform == 'darwin' else ''))
 
     for agent in ('doskit-collector', 'git-committer'):
         p = os.path.join(new, '.claude', 'agents', f'{agent}.md')
