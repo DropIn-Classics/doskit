@@ -37,6 +37,8 @@ In build/selftest (a project as a game's would be, see kit.py):
      without its prefix= hints build.py stops and says the labels collide;
      xfer.py carries MULTISEG's hints to MULTIS2 (its source with FOUR one
      byte further on, ONE and FOUR renamed), which rebuilds from them;
+     MULTISEG with 512 more zero bytes in its header rebuilds with
+     `linker tlink 30 header=original` and not without;
      PROVENANCE.md (the template's) is there; the names headers symmap.py
      wrote (HELLO's, FLAT's) are up to date; FLAT without its raw hint rebuilds too (the
      line tasm.py refuses written as DB by build.py);
@@ -419,6 +421,32 @@ def check_xfer(py):
     out = run([py, os.path.join(TOOLS, 'xfer.py'), 'src/MULTISEG.hints', 'src/MULTIS2.hints',
                '--check'])
     return len(exe)
+
+
+def check_hdrpad(py):
+    """MULTISEG with 512 more zero bytes in its header (as TLINK 5.0 leaves
+    at times): rebuilt identical with `linker tlink 30 header=original`,
+    not without it"""
+    with open(os.path.join(PROJ, 'game', 'MULTISEG', 'MULTISEG.EXE'), 'rb') as f:
+        d = bytearray(f.read())
+    hdr = struct.unpack_from('<H', d, 8)[0] * 16
+    d[hdr:hdr] = bytes(512)
+    struct.pack_into('<H', d, 8, (hdr + 512) // 16)
+    struct.pack_into('<HH', d, 2, len(d) % 512, (len(d) + 511) // 512)
+    os.makedirs(os.path.join(PROJ, 'game', 'MULTIPAD'))
+    with open(os.path.join(PROJ, 'game', 'MULTIPAD', 'MULTIPAD.EXE'), 'wb') as f:
+        f.write(d)
+    with open(os.path.join(HERE, 'multiseg', 'src', 'MULTISEG.hints')) as f:
+        text = f.read().replace('exe MULTISEG/MULTISEG.EXE', 'exe MULTIPAD/MULTIPAD.EXE')
+    for opt, want in ((' header=original', 'IDENTICAL'), ('', 'differs')):
+        hints = os.path.join(PROJ, 'build', 'MULTIPAD.hints')
+        with open(hints, 'w') as f:
+            f.write(text.replace('linker tlink 30', 'linker tlink 30' + opt))
+        out = run([py, os.path.join(TOOLS, 'build.py'), hints], check=False)
+        if want not in out:
+            print(out)
+            raise SystemExit(f'selftest FAILED: MULTIPAD with "linker tlink 30{opt}" not {want}')
+    return len(d)
 
 
 def check_update(b):
@@ -824,6 +852,8 @@ def main():
     print('MULTISEG: routines reached through pointers into FOUR, a segment not named CODE')
     print(f'MULTIS2.EXE ({check_xfer(py)} bytes): MULTISEG\'s hints carried by xfer.py '
           'into renamed and shifted code segments, IDENTICAL')
+    print(f'MULTIPAD.EXE ({check_hdrpad(py)} bytes, a longer header): IDENTICAL with '
+          'header=original, differs without')
     with open(os.path.join(PROJ, 'build', 'FLAT.ASM')) as f:
         text = f.read()
     for want in ('DW L00D5-C00D6', 'DW L00DE-C00D6', 'DW L00E5-C00D6', '[EDI+C00D6]'):

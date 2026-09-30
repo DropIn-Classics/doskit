@@ -237,8 +237,9 @@ def link(modules, stack_from=None):
     return out
 
 
-def write_mz(out, path=None, reloc_order=None, version=0x50):
-    """Build the EXE bytes the way TLINK lays out its header."""
+def write_mz(out, path=None, reloc_order=None, version=0x50, hdr_len=None):
+    """Build the EXE bytes the way TLINK lays out its header (hdr_len: a
+    longer header than the next 512 bytes after the relocations, zeros)"""
     img = out.img
     # trailing uninitialised bytes are not stored
     end = len(img)
@@ -248,8 +249,9 @@ def write_mz(out, path=None, reloc_order=None, version=0x50):
     uninit = len(img) - end
     rel = out.relocs if reloc_order is None else reloc_order
     nrel = len(rel)
-    hdr_len = 0x3E + 4 * nrel
-    hdr_len = (hdr_len + 511) // 512 * 512
+    need = (0x3E + 4 * nrel + 511) // 512 * 512
+    if hdr_len is None or hdr_len < need or hdr_len % 16:
+        hdr_len = need
     size = hdr_len + len(stored)
     last = size % 512
     pages = (size + 511) // 512
