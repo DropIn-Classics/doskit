@@ -33,8 +33,9 @@ static int take_in(const char *dir, const char *name, const char *must_have, cha
 
 #ifdef _WIN32
 /* GOG's installers keep a key per game under GOG.com\Games, named by
- * its product ID, with the folder in its value "path" (not checked on a
- * Windows installation) */
+ * its product ID, with the folder in its value "path" (so on a Windows
+ * installation of one game, the name written "PATH"; the registry
+ * ignores case) */
 static int from_registry(const char *games, const GogRelease *rel, const char *image,
                          const char *must_have, char *out, size_t n)
 {
