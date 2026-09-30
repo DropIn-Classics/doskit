@@ -540,7 +540,20 @@ def check_inno(b):
             or open(got, 'rb').read() != want['en-US']['DATA/BIG.DAT']):
         print(r.stdout + r.stderr)
         raise SystemExit('selftest FAILED: new_project.py --setup')
-    print('ok   the installer offered by goglist.py, made a project by new_project.py --setup')
+    # --setup without name and slug: the installer's game taken as if chosen
+    # (slug and marker asked for), no list, the project made
+    proj = os.path.join(d, 'project2')
+    r = subprocess.run([sys.executable, os.path.join(TOOLS, 'new_project.py'), proj, '--setup',
+                        os.path.join(d, 'setup_test_(1234567890).exe'), '--no-submodule'],
+                       input='\nGAME/PROG.EXE\ny\n', capture_output=True, text=True, env=env)
+    main_c = os.path.join(proj, 'port', 'src', 'main.c')
+    got = os.path.join(proj, 'game', 'DATA', 'BIG.DAT')
+    if (r.returncode or not os.path.isfile(main_c) or '"1234567890",' not in open(main_c).read()
+            or '"GAME/PROG.EXE"' not in open(main_c).read() or not os.path.isfile(got)):
+        print(r.stdout + r.stderr)
+        raise SystemExit('selftest FAILED: new_project.py --setup without a name')
+    print('ok   the installer offered by goglist.py, made a project by new_project.py --setup '
+          '(with and without a name)')
 
 
 def check_pmem(py, b):

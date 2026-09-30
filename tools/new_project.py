@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Start a new port: a repository made from the kit's template/.
 
-    new_project.py DIR
+    new_project.py DIR [--setup SETUP.exe]
     new_project.py DIR "Game Name" SLUG [--marker PATH] [--gog-id ID]
                    [--gog-folder NAME] [--gog-image PATH] [--mac-bundle PATH]
                    [--image FILE | --copy FOLDER | --setup SETUP.exe]
@@ -17,7 +17,8 @@ from floppies, or a DOSBox folder) has that folder copied into game/
 instead, its programs offered for the marker.  GOG's Windows installers
 lying about (setup_*.exe, for games GOG sells for Windows only) are
 offered too: the one chosen is unpacked (inno.py), then taken as an
-installation.
+installation.  With --setup the installer named is taken so, without
+the list.
 
 Otherwise "Game Name" is the game's title (in PROVENANCE.md, the README,
 the window's title), SLUG a short lower-case name (the program's, the
@@ -103,8 +104,16 @@ def folder_programs(folder):
 def pick_marker(progs):
     for i, p in enumerate(progs, 1):
         print(f'{i:3}  {p}')
-    k = ask('marker, the file the game\'s folder is known by (number or path; Enter: later)')
-    return progs[int(k) - 1] if k.isdigit() and 1 <= int(k) <= len(progs) else k
+    while True:
+        k = ask('marker, the file the game\'s folder is known by (number or path; Enter: later)')
+        if k.isdigit() and 1 <= int(k) <= len(progs):
+            return progs[int(k) - 1]
+        # a path typed may be a folder or another file, but a mistyped
+        # one leaves the port never finding the game
+        if (not k or k.upper() in (p.upper() for p in progs)
+                or ask(f'{k} is not among the programs listed: take it (y/n)', 'n')
+                   .lower().startswith('y')):
+            return k
 
 
 def choose(a):
@@ -120,11 +129,17 @@ def choose(a):
         k = ask('the game to port (number)')
         if k.isdigit() and 1 <= int(k) <= len(games):
             break
-    g = games[int(k) - 1]
+    take(a, games[int(k) - 1])
+
+
+def take(a, g):
+    """a's name, slug, gog_id, gog_folder, mac_bundle, marker and image (or
+    folder to copy) from the GOG game g, an installer unpacked first"""
     print(f'{g.name}: {g.folder}')
     if g.setup:
         a.unpacked = tempfile.mkdtemp(prefix='doskit-setup-')
-        print('unpacking the installer ...')
+        print(f'unpacking the installer into {a.unpacked} (its files are put into '
+              'game/, the folder removed at the end) ...')
         g.unpack(a.unpacked)
     a.name, a.gog_id, a.gog_folder = g.name, g.id, g.folder_name()
     a.gog_image, a.mac_bundle = g.image_path(), g.mac_bundle()
@@ -190,7 +205,20 @@ def main():
 
 
 def make(a, dst):
-    if a.name is None:
+    if sum(map(bool, (a.image, a.copy, a.setup))) > 1:
+        raise SystemExit('--image, --copy or --setup, one of them')
+    if a.name is None and a.setup:
+        # the installer named: its game taken, as if chosen from the list
+        try:
+            g = goglist.setup_game(a.setup)
+        except (inno.InnoError, OSError) as e:
+            raise SystemExit(f'{a.setup}: {e}')
+        a.setup = None
+        take(a, g)
+    elif a.name is None:
+        if a.image or a.copy:
+            raise SystemExit('--image and --copy want the game\'s name and slug '
+                             '(new_project.py DIR "Game Name" SLUG ...)')
         choose(a)
     elif a.slug is None:
         raise SystemExit('the game\'s name and its slug, or neither (to choose from the '
@@ -206,8 +234,6 @@ def make(a, dst):
         raise SystemExit('--gog-id: the number in goggame-ID.info, digits only')
     if a.image and not goglist.is_cd_image(a.image):
         raise SystemExit(f'{a.image}: not a CD image')
-    if sum(map(bool, (a.image, a.copy, a.setup))) > 1:
-        raise SystemExit('--image, --copy or --setup, one of them')
     if a.setup:
         from_setup(a)
     if a.copy and not os.path.isdir(a.copy):

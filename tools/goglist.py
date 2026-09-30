@@ -77,6 +77,15 @@ class SetupGame(Game):
         self.folder, self.image = folder, find_image(folder)
 
 
+def setup_game(path):
+    """the SetupGame of GOG's installer at path (inno.InnoError, OSError if
+    it is none)"""
+    s = inno.Setup(path)
+    gid = s.app_id if re.fullmatch(r'[0-9]+', s.app_id) else ''
+    m = re.search(r'_\(([0-9]+)\)\.exe$', path)             # GOG's names end so
+    return SetupGame(gid or (m.group(1) if m else ''), s.name, path)
+
+
 def setups(dirs, have):
     """[SetupGame] of GOG's installers (setup_*.exe) in dirs whose IDs are
     not among have"""
@@ -84,16 +93,13 @@ def setups(dirs, have):
     for d in dirs:
         for p in sorted(glob.glob(os.path.join(glob.escape(d), 'setup_*.exe'))):
             try:
-                s = inno.Setup(p)
+                g = setup_game(p)
             except (inno.InnoError, OSError):
                 continue
-            gid = s.app_id if re.fullmatch(r'[0-9]+', s.app_id) else ''
-            m = re.search(r'_\(([0-9]+)\)\.exe$', p)         # GOG's names end so
-            gid = gid or (m.group(1) if m else '')
-            if gid and gid in seen:
+            if g.id and g.id in seen:
                 continue
-            seen.add(gid)
-            out.append(SetupGame(gid, s.name, p))
+            seen.add(g.id)
+            out.append(g)
     return out
 
 
