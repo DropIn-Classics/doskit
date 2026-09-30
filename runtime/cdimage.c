@@ -76,13 +76,14 @@ static int each_install_dir(const GogRelease *rel, int (*fn)(const char *dir, vo
     char home[SYS_PATH], dir[SYS_PATH];
     size_t i;
 
-    snprintf(path, sizeof path, "/Applications/%s.app", rel->folder);
-    if (fn(path, ctx))
+    /* a path too long for the buffer is passed over, not cut short */
+    if (snprintf(path, sizeof path, "/Applications/%s.app", rel->folder) < (int)sizeof path
+        && fn(path, ctx))
         return 1;
     sys_home_dir(home, sizeof home);
     sys_join(dir, sizeof dir, home, "Applications");
-    snprintf(path, sizeof path, "%s/%s.app", dir, rel->folder);
-    if (fn(path, ctx))
+    if (snprintf(path, sizeof path, "%s/%s.app", dir, rel->folder) < (int)sizeof path
+        && fn(path, ctx))
         return 1;
     for (i = 0; i < sizeof home_dirs / sizeof home_dirs[0]; i++) {
         sys_join(dir, sizeof dir, home, home_dirs[i]);
