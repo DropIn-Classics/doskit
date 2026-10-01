@@ -62,4 +62,15 @@ int cd_unpack(const char *image, const char *dir, const char *must_have,
               int (*progress)(void *ctx, const char *file, long done, long total), void *ctx,
               char *err, size_t n);
 
+/* The disc a cue sheet describes copied into `dir`, which must not exist:
+ * the sheet under its own name and every file its FILE lines name (the
+ * data track's image and the audio tracks, "MUSIC\Track02.ogg" into the
+ * folder MUSIC; the names found whatever their case), so that cda_open
+ * reads the copy as it reads the original.  Into `dir`.part first,
+ * renamed when complete; `progress` as for gog_copy.  0 on success, else
+ * -1 with the reason in err. */
+int cd_copy_disc(const char *cue, const char *dir,
+                 int (*progress)(void *ctx, const char *file, long done, long total), void *ctx,
+                 char *err, size_t n);
+
 #endif

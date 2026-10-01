@@ -3,6 +3,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
+#include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -765,6 +766,172 @@ int gog_copy(const char *folder, const char *dir, const char *must_have,
     if (c.r == 0 && sys_rename(part, dir) != 0)
         copy_fail(&c, "The copied files could not be moved to their folder.");
     if (c.r != 0)
+        remove_tree(part);
+    return c.r;
+}
+
+/* ---- a cue sheet's disc */
+
+/* `name` (a cue sheet's FILE, '\\' or '/' between its parts) under `dir`,
+ * each part found whatever its case; 1 if there */
+static int cue_find(const char *dir, const char *name, char *out, size_t n)
+{
+    char at[SYS_PATH], part[260];
+    const char *p = name;
+
+    snprintf(at, sizeof at, "%s", dir);
+    for (;;) {
+        size_t len = 0;
+
+        while (*p == '\\' || *p == '/')
+            p++;
+        while (p[len] && p[len] != '\\' && p[len] != '/' && len < sizeof part - 1) {
+            part[len] = p[len];
+            len++;
+        }
+        part[len] = 0;
+        p += len;
+        if (!len)
+            break;
+        if (!sys_find(at, part, out, n))
+            return 0;
+        snprintf(at, sizeof at, "%s", out);
+    }
+    snprintf(out, n, "%s", at);
+    return 1;
+}
+
+/* the next FILE line's name of the sheet `f` into name; 0 at the end */
+static int cue_next_file(FILE *f, char *name, size_t n)
+{
+    char line[1024];
+
+    while (fgets(line, sizeof line, f)) {
+        char *p = line, *e;
+
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (toupper((unsigned char)p[0]) != 'F' || toupper((unsigned char)p[1]) != 'I' ||
+            toupper((unsigned char)p[2]) != 'L' || toupper((unsigned char)p[3]) != 'E' ||
+            (p[4] != ' ' && p[4] != '\t'))
+            continue;
+        p += 4;
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (*p == '"') {
+            e = strchr(++p, '"');
+            if (!e)
+                continue;
+        } else {
+            e = p;
+            while (*e && *e != ' ' && *e != '\t' && *e != '\r' && *e != '\n')
+                e++;
+        }
+        snprintf(name, n, "%.*s", (int)(e - p), p);
+        return 1;
+    }
+    return 0;
+}
+
+/* `name`'s folders made under `root` and the file's path there */
+static int cue_target(const char *root, const char *name, char *out, size_t n)
+{
+    char at[SYS_PATH], part[260];
+    const char *p = name;
+
+    snprintf(at, sizeof at, "%s", root);
+    for (;;) {
+        size_t len = 0;
+
+        while (*p == '\\' || *p == '/')
+            p++;
+        while (p[len] && p[len] != '\\' && p[len] != '/' && len < sizeof part - 1) {
+            part[len] = p[len];
+            len++;
+        }
+        part[len] = 0;
+        p += len;
+        if (!len)
+            return 0;
+        sys_join(out, n, at, part);
+        while (*p == '\\' || *p == '/')
+            p++;
+        if (!*p)
+            return 1;
+        if (!sys_is_dir(out) && sys_mkdir(out) != 0)
+            return 0;
+        snprintf(at, sizeof at, "%s", out);
+    }
+}
+
+int cd_copy_disc(const char *cue, const char *dir,
+                 int (*progress)(void *ctx, const char *file, long done, long total), void *ctx,
+                 char *err, size_t n)
+{
+    Copy c;
+    char src_dir[SYS_PATH], part[SYS_PATH], name[512], from[SYS_PATH], to[SYS_PATH];
+    const char *base;
+    FILE *f;
+    int pass;
+
+    memset(&c, 0, sizeof c);
+    c.progress = progress;
+    c.ctx = ctx;
+    c.err = err;
+    c.n = n;
+    if (sys_is_dir(dir) || sys_is_file(dir)) {
+        copy_fail(&c, "The folder for the CD's files is there already.");
+        return -1;
+    }
+    if (!sys_is_file(cue) || !sys_parent(cue, src_dir, sizeof src_dir)) {
+        copy_fail(&c, "The CD's cue sheet is not there.");
+        return -1;
+    }
+    base = cue + strlen(src_dir);
+    while (*base == '/' || *base == '\\')
+        base++;
+    snprintf(part, sizeof part, "%s.part", dir);
+    for (pass = 0; pass < 2 && c.r == 0; pass++) {
+        c.writing = pass;
+        if (pass == 1) {
+            if (sys_is_dir(part))
+                remove_tree(part);
+            if (sys_mkdir(part) != 0) {
+                copy_fail(&c, "The folder for the CD's files cannot be made.");
+                break;
+            }
+            sys_join(to, sizeof to, part, base);
+            copy_bytes(&c, cue, to);
+        } else {
+            c.total += file_size(cue);
+        }
+        f = fopen(cue, "r");
+        if (!f) {
+            copy_fail(&c, "The CD's cue sheet cannot be read.");
+            break;
+        }
+        while (c.r == 0 && cue_next_file(f, name, sizeof name)) {
+            if (!cue_find(src_dir, name, from, sizeof from)) {
+                copy_fail(&c, "A file the CD's cue sheet names is missing.");
+                break;
+            }
+            if (pass == 0) {
+                c.total += file_size(from);
+                continue;
+            }
+            if (!cue_target(part, name, to, sizeof to)) {
+                copy_fail(&c, "A folder for the CD's files could not be made.");
+                break;
+            }
+            copy_bytes(&c, from, to);
+            if (c.r == 0 && c.progress && c.progress(c.ctx, name, c.done, c.total))
+                copy_fail(&c, "Stopped.");
+        }
+        fclose(f);
+    }
+    if (c.r == 0 && sys_rename(part, dir) != 0)
+        copy_fail(&c, "The copied files could not be moved to their folder.");
+    if (c.r != 0 && sys_is_dir(part))
         remove_tree(part);
     return c.r;
 }

@@ -90,7 +90,8 @@ docs/NEW-PROJECT.md how to start a new game.
     headphone mode), `fli.h` (FLI animations), `textmode.h` (an 80x25
     text screen, for a DOS-setup-like launcher), `pad.h` (controller
     buttons to keys), `cdimage.h` (a GOG release found and its image
-    unpacked, or its installed folder copied), `inno.h` (GOG's Windows
+    unpacked, or its installed folder copied; a cue sheet's disc, image
+    and audio tracks, copied), `inno.h` (GOG's Windows
     installer found and unpacked, for a game GOG sells for Windows only;
     the LZMA SDK's decoders, public domain), `sys.h` (files, folders, the data folder), `sha256.h`,
     `shot.h` (screenshots as PNG: Print Screen, `DK_SHOTS` headless),

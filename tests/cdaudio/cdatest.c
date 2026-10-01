@@ -4,13 +4,17 @@
  * samples mixed as they are, the Ogg's tones (left 441 Hz at half scale,
  * right at a quarter) by their loudness, the channels swapped and halved,
  * the play's position and end on the clock (plat_null's, moved by
- * plat_sleep_ms).  Prints "cdaudio ok", exit status 0, or what went wrong.
+ * plat_sleep_ms).  With COPY (a folder not there) the disc is first
+ * copied there by cdimage.c's cd_copy_disc and the copy's sheet read
+ * instead.  Prints "cdaudio ok", exit status 0, or what went wrong.
  *
- *     cdatest CUE */
+ *     cdatest CUE [COPY] */
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include "cdaudio.h"
+#include "cdimage.h"
+#include "sys.h"
 #include "platform.h"
 
 static int16_t out[2 * 44100];
@@ -40,8 +44,21 @@ int main(int argc, char **argv)
     double l, r;
     int i;
 
-    if (argc != 2 || cda_open(argv[1], err, sizeof err) != 0) {
-        printf("cue: %s\n", argc == 2 ? err : "no sheet given");
+    char copy[SYS_PATH];
+    const char *cue = argc >= 2 ? argv[1] : NULL;
+
+    if (argc == 3) {
+        const char *base = strrchr(cue, '/');
+
+        if (cd_copy_disc(cue, argv[2], NULL, NULL, err, sizeof err) != 0) {
+            printf("copy: %s\n", err);
+            return 1;
+        }
+        sys_join(copy, sizeof copy, argv[2], base ? base + 1 : cue);
+        cue = copy;
+    }
+    if (argc < 2 || argc > 3 || cda_open(cue, err, sizeof err) != 0) {
+        printf("cue: %s\n", cue ? err : "no sheet given");
         return 1;
     }
     /* the table the runner prints for the same sheet (selftest's CUE_TABLE) */

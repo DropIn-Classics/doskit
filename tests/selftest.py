@@ -1311,10 +1311,17 @@ def main():
         raise SystemExit('selftest FAILED: vga.c\'s 16-colour and VESA modes: ' + out)
     print(out.strip())
     exe = cc(os.path.join(b, 'cdatest'), [os.path.join(HERE, 'cdaudio', 'cdatest.c')] + [
-        os.path.join(RUNTIME, f) for f in ('cdaudio.c', 'plat_null.c', 'sys.c', 'shot.c')])
+        os.path.join(RUNTIME, f) for f in ('cdaudio.c', 'cdimage.c', 'plat_null.c', 'sys.c', 'shot.c')])
     out = run([exe, make_cue()])
     if 'cdaudio ok' not in out:
         raise SystemExit('selftest FAILED: cdaudio.c: ' + out)
+    copy = os.path.join(b, 'cuecopy')
+    if os.path.isdir(copy):
+        shutil.rmtree(copy)
+    out = run([exe, make_cue(), copy])
+    if 'cdaudio ok' not in out or not os.path.isfile(os.path.join(copy, 'MUSIC', 'TRACK03.OGG')):
+        raise SystemExit('selftest FAILED: cdimage.c\'s cd_copy_disc: ' + out)
+    print('cd_copy_disc: the disc copied, its copy read: ' + out.strip())
     print(out.strip())
     check_update(b)
     check_gogfind(b)
