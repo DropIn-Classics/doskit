@@ -1,8 +1,9 @@
-/* Sound: the two 8237 DMA controllers and a Sound Blaster 16 (DSP and the
- * mixer's configuration registers; see dosrun.h).  The samples the card
+/* Sound: the two 8237 DMA controllers, a Sound Blaster 16 (DSP and the
+ * mixer's configuration registers; see dosrun.h) and an OPL2.  The samples the card
  * would play go to a WAV file (-wav) or nowhere.
  */
 #include "dosrun.h"
+#include "../../runtime/opl.h"
 
 int sound_debug = 0;
 
@@ -446,10 +447,107 @@ void sb_tick(void){
     }
 }
 
-/* ---------------------------------------------------------------- OPL stub */
-static uint8_t opl_regs[512];
-void opl_write(int reg, uint8_t v){ opl_regs[reg & 511] = v; }
-uint8_t opl_status(void){ return 0x06; }
+/* ------------------------------------------------------------------ OPL */
+/* An OPL2 (AdLib) at 388h/389h: the two timers, so that a driver's probe
+ * finds the chip, and with -oplwav its sound (runtime/opl.c) into a WAV
+ * file.  Timer 1 counts up from register 2 in steps of 80 us, timer 2 from
+ * register 3 in steps of 320 us; at the overflow each sets its flag in the
+ * status (bit 6, bit 5, and bit 7 with either) unless register 4 masks it
+ * (bit 6, bit 5), and reloads.  Register 4 with bit 7 clears the flags and
+ * nothing else; otherwise bits 0 and 1 run timer 1 and 2, a timer that is
+ * started loads its register then (a write that leaves it running does not
+ * restart it: how the chip takes that is not known here).  The flags are
+ * worked out from the clock when the status is read.  The status's low
+ * bits read 06h, as an OPL2's are said to. */
+static uint8_t opl_regs[256];
+static struct {
+    int run, mask;                   /* per timer: bit 0 timer 1, bit 1 timer 2 */
+    double start[2];                 /* when each was started or reloaded last */
+    uint8_t flags;                   /* bits 7, 6, 5 as the status reads them */
+} opl_t;
+
+static double opl_period(int k){
+    return (256 - opl_regs[2 + k]) * (k ? 320e-6 : 80e-6);
+}
+static void opl_timers(void){
+    int k;
+    double now = emu_now();
+    for(k = 0; k < 2; k++){
+        double per;
+        if(!(opl_t.run & (1 << k))) continue;
+        per = opl_period(k);
+        if(now - opl_t.start[k] < per) continue;
+        /* the overflows since the start; the timer goes on from the last */
+        opl_t.start[k] += per * (double)(uint64_t)((now - opl_t.start[k]) / per);
+        if(!(opl_t.mask & (1 << k))) opl_t.flags |= (uint8_t)(0x80 | (k ? 0x20 : 0x40));
+    }
+}
+
+/* -oplwav: the chip's own rate, mono, sample k the moment k/OPL_HZ s from
+ * t=0 (as -cdwav); a register write takes effect at the sample of its
+ * moment */
+#define OPL_HZ 49716
+static OPL opl_synth;
+static FILE *oplwav_fp;
+static uint64_t oplwav_n;
+
+static void oplwav_header(void){
+    uint8_t h[44];
+    uint32_t bytes = (uint32_t)(oplwav_n * 2);
+    memset(h, 0, sizeof(h));
+    memcpy(h, "RIFF", 4); wav_put32(h+4, 36 + bytes); memcpy(h+8, "WAVEfmt ", 8);
+    h[16] = 16; h[20] = 1; h[22] = 1;                  /* PCM, mono */
+    wav_put32(h+24, OPL_HZ); wav_put32(h+28, OPL_HZ*2);
+    h[32] = 2; h[34] = 16;
+    memcpy(h+36, "data", 4); wav_put32(h+40, bytes);
+    fseek(oplwav_fp, 0, SEEK_SET);
+    fwrite(h, 1, 44, oplwav_fp);
+    fseek(oplwav_fp, 0, SEEK_END);
+}
+void opl_wav_open(const char *path){
+    oplwav_fp = fopen(path, "wb");
+    if(!oplwav_fp){ fprintf(stderr, "cannot write %s\n", path); return; }
+    opl_init(&opl_synth, OPL_HZ);
+    oplwav_n = 0;
+    oplwav_header();
+}
+void opl_wav_tick(void){
+    int16_t buf[512];
+    uint64_t upto;
+    if(!oplwav_fp) return;
+    upto = (uint64_t)(emu_now() * OPL_HZ);
+    while(oplwav_n < upto){
+        int n = upto - oplwav_n > 512 ? 512 : (int)(upto - oplwav_n);
+        opl_render(&opl_synth, buf, n);
+        fwrite(buf, 2, (size_t)n, oplwav_fp);
+        oplwav_n += (uint64_t)n;
+    }
+}
+void opl_wav_close(void){
+    if(!oplwav_fp) return;
+    opl_wav_tick();
+    oplwav_header();
+    fclose(oplwav_fp); oplwav_fp = NULL;
+}
+
+void opl_io_write(int reg, uint8_t v){
+    reg &= 255;
+    if(reg == 4){
+        int k, run = v & 3;
+        opl_timers();
+        if(v & 0x80){ opl_t.flags = 0; return; }
+        opl_t.mask = ((v >> 6) & 1) | ((v >> 4) & 2);
+        for(k = 0; k < 2; k++)
+            if((run & (1 << k)) && !(opl_t.run & (1 << k))) opl_t.start[k] = emu_now();
+        opl_t.run = run;
+    }
+    opl_regs[reg] = v;
+    if(oplwav_fp){ opl_wav_tick(); opl_write(&opl_synth, reg, v); }
+}
+uint8_t opl_io_status(void){
+    opl_timers();
+    return (uint8_t)(opl_t.flags | 0x06);
+}
 void spk_update(int on, uint16_t div){ (void)on; (void)div; }
 
 

@@ -124,7 +124,11 @@ have offsets far beyond 100h.
 engine (two episodes, a demo and the full game), analyse one,
 then `tools/xfer.py A.hints B.hints` carries its hints to the other by
 aligning the instruction streams (a code address only when the next ten
-instructions match). B.hints keeps its own lines above the carried block;
+instructions match). A program of many code segments is aligned as all
+of them in image order; the segment names map by where the matched code
+lies and by the relocated words in it, so B's segments may have other
+frames and names. B.hints needs its own exe, segment, linker,
+relocorder, asm and keeptail lines (those are not carried). B.hints keeps its own lines above the carried block;
 the block is written by xfer.py only; check.py tells when it is out of
 date.
 
@@ -155,7 +159,10 @@ task switches, V86 mode; see the top of "protected mode" in
 tools/run/cpu.c; INT 15h AH=87h/88h/89h), VGA (planar, chain-4, Mode X, the
 retrace), PIT/PIC/keyboard, BIOS, both 8237 DMA controllers and a Sound Blaster 16
 (DSP and mixer configuration, so the game's own sound drivers run; `-wav`
-writes what it played, `-sb` its transfers), and a small DOS whose drives are
+writes what it played, `-sb` its transfers), an OPL2 at 388h (its timers,
+so that a driver's probe finds an AdLib; `-oplwav` writes what it played,
+through runtime/opl.c: 49716 Hz mono from t=0, the chip's sound, not its
+exact samples), and a small DOS whose drives are
 all the game's files with a writable layer in `build/run/state`, each
 drive with its own current directory; programs start on D:. Everything
 runs on an emulated clock (6 M instructions a second by default):
@@ -170,7 +177,7 @@ the Nth pass, input by a frame loop's passes; `-keysat ADDR FILE` for
 many), `-watch ADDR` (who writes a byte, when),
 `-dump ADDR LEN`, `-dumpevery DT` (a time series), `-trace FILE N`,
 `-dos` (every INT 21h call with its file), `-intwatch NN`, `-prof`,
-`-ram`/`-vram` (memory for memcmp.py), `-wav`, `-cdwav`, `-put GUEST HOST` (a
+`-ram`/`-vram` (memory for memcmp.py), `-wav`, `-cdwav`, `-oplwav`, `-put GUEST HOST` (a
 configuration file the set-up program would have written), `-loadfix`
 (load above 64 KB: EXEPACK's unpacker fails in a program loaded below
 it, e.g. a driver EXECed by a small program). run.py translates
@@ -184,8 +191,8 @@ got there with `-dump`/`-shot`.
 
 Not in the runner: paging and task switches (so no extender that needs
 them), VCPI/DPMI hosts, x87 instructions, EMS/XMS, a mouse driver (INT 33h),
-OPL FM synthesis (the ports answer, nothing sounds), savestates, a
-window. VESA is there as little as a program that sets a mode and then
+the PC speaker's sound, the OPL at the Sound Blaster's ports (2x8h,
+2x9h; only 388h/389h), savestates, a window. VESA is there as little as a program that sets a mode and then
 programs the card itself needs: 4F00h..4F03h, modes 100h, 101h and 103h
 in 256 colours with an SVGA card's registers (8 pixels a character
 clock, 800x600 on a 40 MHz clock), 256 KB of video memory and no bank

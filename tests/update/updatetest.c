@@ -40,7 +40,7 @@ static int wait_poll(UpdateInfo *u)
 
 static void write_file(const char *path, const char *text)
 {
-    FILE *f = fopen(path, "w");
+    FILE *f = fopen(path, "wb");        /* the bytes as given, on Windows too */
     if (f) {
         fputs(text, f);
         fclose(f);

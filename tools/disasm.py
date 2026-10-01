@@ -122,6 +122,11 @@ Hints syntax (one per line, ';' starts a comment, numbers are hex):
                                        01 00 FB VER 6A 72 at 1Ch; VER the
                                        original's byte at 1Fh); Microsoft
                                        LINK's otherwise
+    linker     tlink VER header=original   the same with the header as long
+                                       as the original's (a TLINK that
+                                       leaves room after the relocations
+                                       beyond the next 512 bytes, as 5.0
+                                       does at times: zeros)
     asm        OPTION=VALUE...         how the original's assembler encoded
                                        what has two encodings (tasm.py's
                                        defaults otherwise):
@@ -365,9 +370,9 @@ class Hints:
                 elif k == 'relocorder':
                     self.relocorder = f[1:]
                 elif k == 'linker':
-                    if f[1] != 'tlink' or len(f) != 3:
-                        raise ValueError('linker tlink VER is the only one')
-                    self.linker = ('tlink', int(f[2], 16))
+                    if f[1] != 'tlink' or len(f) not in (3, 4) or f[3:] not in ([], ['header=original']):
+                        raise ValueError('linker tlink VER [header=original] is the only one')
+                    self.linker = ('tlink', int(f[2], 16), f[3:] == ['header=original'])
                 elif k == 'asm':
                     for o in f[1:]:
                         key, val = o.split('=', 1)

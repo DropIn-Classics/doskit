@@ -195,8 +195,11 @@ uint8_t dma_read(uint16_t p);
 void sb_write(uint16_t p, uint8_t v);
 uint8_t sb_read(uint16_t p);
 void sb_tick(void);
-void opl_write(int reg, uint8_t v);
-uint8_t opl_status(void);
+void opl_io_write(int reg, uint8_t v);  /* 389h after 388h */
+uint8_t opl_io_status(void);           /* 388h read */
+void opl_wav_open(const char *path);  /* -oplwav: what the OPL played */
+void opl_wav_close(void);
+void opl_wav_tick(void);              /* the samples up to now */
 extern int sound_debug;
 
 /* ------------------------------------------------------------- output ---- */

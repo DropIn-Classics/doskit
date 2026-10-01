@@ -254,8 +254,11 @@ uint8_t io_r8(uint16_t p){
     case 0x70: return cmos_idx;
     case 0x71: return 0;
     case 0x92: return (uint8_t)(kbd_a20 ? 0x02 : 0x00);
-    case 0x201: return 0xF0;                    /* game port: nothing attached */
-    case 0x388: case 0x389: return opl_status();
+    case 0x201: return 0xFF;                    /* game port: nothing attached, the
+                                                   buttons up and the axis bits never
+                                                   falling (0 would be a stick at its
+                                                   upper left) */
+    case 0x388: case 0x389: return opl_io_status();
     }
     if(dma_is_port(p)) return dma_read(p);
     if(p>=0x3B0 && p<=0x3DF) return vga_io_r(p);
@@ -280,7 +283,7 @@ void io_w8(uint16_t p, uint8_t v){
     case 0x92: a20_set(v & 2); return;
     case 0x201: return;
     case 0x388: adlib_idx = v; return;
-    case 0x389: opl_write(adlib_idx, v); return;
+    case 0x389: opl_io_write(adlib_idx, v); return;
     }
     if(dma_is_port(p)){ dma_write(p,v); return; }
     if(p>=0x3B0 && p<=0x3DF){ vga_io_w(p,v); return; }
@@ -300,6 +303,7 @@ void dev_tick(void){
     emu_advance();
     sb_tick();
     mscdex_wav_tick();
+    opl_wav_tick();
     /* PIT channel 0 -> IRQ0.  Mode 0 is one interrupt per count written;
      * treating it as periodic gives a calibrating driver interrupts it has
      * not asked for (and it runs off the end of its event list). */

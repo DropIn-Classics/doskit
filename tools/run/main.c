@@ -44,7 +44,9 @@
  *                    (# comments), the key at the Nth pass of ADDR
  *   -watch ADDR      print each write to the byte at ADDR (one -watch: the last)
  *   -rwatch ADDR LEN which instructions read the LEN bytes at ADDR (hex):
- *                    a count per reader at the end (data reads, not fetches)
+ *                    a count per reader at the end (data reads, not
+ *                    fetches; a reader is an instruction and the first
+ *                    byte it read, up to 65536 of them)
  *   -trace FILE N    one line per instruction for N instructions, from the
  *                    first -break/-log hit on (or from the start without one)
  *   -dump ADDR LEN   print LEN bytes at ADDR at the end (repeatable)
@@ -65,6 +67,9 @@
  *                    files stay the unpacked tree (default: one data track)
  *   -cd              print the CD's tracks and every MSCDEX call and request
  *   -cdwav FILE      what the CD drive played (44.1 kHz stereo, from t=0)
+ *   -oplwav FILE     what the OPL2 (AdLib, 388h) played (49716 Hz mono,
+ *                    from t=0; runtime/opl.c's synthesis, not the chip's
+ *                    exact output)
  *   -intwatch NN     print every INT NN call (hex)
  *   -prof            the busiest CS:IP at the end
  *   -cover FILE      every linear address an instruction began at, and the
@@ -388,7 +393,7 @@ static void put_files(void){
 /* ---------------------------------------------------------------- main */
 int main(int argc, char **argv){
     const char *game = NULL, *state = "build/run/state";
-    const char *ram_file = NULL, *mem_file = NULL, *vram_file = NULL, *wav_file = NULL, *cue = NULL, *cdwav_file = NULL;
+    const char *ram_file = NULL, *mem_file = NULL, *vram_file = NULL, *wav_file = NULL, *cue = NULL, *cdwav_file = NULL, *oplwav_file = NULL;
     double until = 30.0;
     char prog[260] = "", tail[128] = "";
     const char *stop = "until";
@@ -492,6 +497,7 @@ int main(int argc, char **argv){
         else if(!strcmp(a,"-cd")) cd_log = 1;
         else if(!strcmp(a,"-cue")){ NEED(1); cue = argv[++i]; }
         else if(!strcmp(a,"-cdwav")){ NEED(1); cdwav_file = argv[++i]; }
+        else if(!strcmp(a,"-oplwav")){ NEED(1); oplwav_file = argv[++i]; }
         else if(!strcmp(a,"-loadfix")) loadfix = 1;
         else if(!strcmp(a,"-intwatch")){ NEED(1); int_watch = (int)strtol(argv[++i], NULL, 16); }
         else if(!strcmp(a,"-prof")) prof_on = 1;
@@ -528,6 +534,7 @@ int main(int argc, char **argv){
     put_files();
     if(wav_file) sound_wav_open(wav_file);
     if(cdwav_file) mscdex_wav_open(cdwav_file);
+    if(oplwav_file) opl_wav_open(oplwav_file);
 
     /* Park the CPU on a HLT in ROM with an IRET frame above it, the place a
      * program that leaves nothing to return to ends up. */
@@ -708,5 +715,6 @@ int main(int argc, char **argv){
     write_cover();
     sound_wav_close();
     mscdex_wav_close();
+    opl_wav_close();
     return 0;
 }

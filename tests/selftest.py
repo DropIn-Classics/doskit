@@ -15,6 +15,9 @@ In build/selftest (a project as a game's would be, see kit.py):
      RELMOD.REL (the linker's OFF32 fixups); tests/pmode/PMODE.ASM into
      game/PMODE/PMODE.EXE, tests/cdrom/CDROM.ASM into game/CDROM/CDROM.EXE,
      tests/vgamode/VGAMODE.ASM into game/VGAMODE/VGAMODE.EXE,
+     tests/gameport/GAMEPORT.ASM into game/GAMEPORT/GAMEPORT.EXE,
+     tests/rwatch/RWATCH.ASM into game/RWATCH/RWATCH.EXE,
+     tests/adlib/ADLIB.ASM into game/ADLIB/ADLIB.EXE,
      tests/sb16/SB16.ASM into game/SB16/SB16.EXE, tests/cdplay/CDPLAY.ASM
      into game/CDPLAY/CDPLAY.EXE, tests/multiseg/MULTISEG.ASM into
      game/MULTISEG/MULTISEG.EXE with TLINK's header and its relocations
@@ -34,6 +37,10 @@ In build/selftest (a project as a game's would be, see kit.py):
      FAR PTR call within its segment; routines in FOUR reached only
      through a ptr and a words hint), with no instruction as DB, and
      without its prefix= hints build.py stops and says the labels collide;
+     xfer.py carries MULTISEG's hints to MULTIS2 (its source with FOUR one
+     byte further on, ONE and FOUR renamed), which rebuilds from them;
+     MULTISEG with 512 more zero bytes in its header rebuilds with
+     `linker tlink 30 header=original` and not without;
      PROVENANCE.md (the template's) is there; the names headers symmap.py
      wrote (HELLO's, FLAT's) are up to date; FLAT without its raw hint rebuilds too (the
      line tasm.py refuses written as DB by build.py);
@@ -61,7 +68,15 @@ In build/selftest (a project as a game's would be, see kit.py):
      channels; VGAMODE.EXE, which checks the runner's BIOS mode set
      (modes 0Dh and 0Eh planar at A0000h, back to text; VESA 4F00h,
      4F01h, 4F02h with modes 101h and 103h, 4F03h) and says
-     "vgamode ok"; SB16.EXE, which checks the runner's
+     "vgamode ok"; GAMEPORT.EXE, which reads the game port as a PC
+     without a joystick has it (FFh, the axis bits never falling after
+     the one-shots are started) and says "gameport ok"; RWATCH.EXE, whose
+     table of 200 bytes -rwatch reports with all its 300 readers (an
+     instruction and the byte it read; more than a fixed table of 64
+     kept); ADLIB.EXE, which
+     probes the runner's OPL2 as drivers do (the timers' flags in the
+     status, masked, cleared, not set before their time) and says "adlib
+     ok"; SB16.EXE, which checks the runner's
      Sound Blaster 16 (the DSP's reset, the mixer's IRQ and DMA, a 16-bit
      transfer on DMA 5 and an 8-bit one on DMA 1, each ending in IRQ 7,
      and a 16-bit one started with DMA 5 masked, which waits for the
@@ -123,8 +138,15 @@ In build/selftest (a project as a game's would be, see kit.py):
      installation with the marker and unpacks the image, and
      catches a changed byte, leaving nothing behind.
 
-Prints `selftest ok` at the end, exit status 0 then.  Needs cc (clang
-or gcc); on Windows it is not written for MSVC yet.
+Prints `selftest ok` at the end, exit status 0 then.  Needs a C compiler:
+cc (clang or gcc; $CC names another), on Windows MSVC (cl.exe on PATH,
+or found through vcvars64.bat as tools/run/build.bat finds it) unless
+$CC is set.  What differs on Windows: the template's port is built by
+its build.bat, plat_win32.c is compiled in place of plat_sdl.c (step 5),
+update.c copies the file of a file:// address itself (curl elsewhere),
+and gog_find is checked with GOG Galaxy's folder under a
+%ProgramFiles(x86)% made here (the registry's key and X:\\GOG Games are
+the machine's own; the Linux and Mac layouts are checked there).
 """
 import lzma, os, re, shutil, struct, subprocess, sys, zlib
 
@@ -139,6 +161,88 @@ PROJ = os.path.join(KIT, 'build', 'selftest')
 CC = os.environ.get('CC', 'cc')
 CFLAGS = ['-std=c99', '-O1', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
           '-D_POSIX_C_SOURCE=200809L']
+# MSVC, taken on Windows when $CC is not set: the warnings the template's
+# build.bat asks for (/W4), as errors, and the libraries the runtime's
+# Windows parts need
+MSVC = os.name == 'nt' and 'CC' not in os.environ
+MSVC_FLAGS = ['/nologo', '/O1', '/W4', '/WX', '/D_CRT_SECURE_NO_WARNINGS']
+MSVC_LIBS = ['advapi32.lib', 'shell32.lib', 'winhttp.lib']
+EXE = '.exe' if os.name == 'nt' else ''
+_msvc_env = None
+
+
+def msvc_env():
+    """the environment with cl.exe on PATH: this one when it is there, else
+    what vcvars64.bat sets (the VS2019 Build Tools first, then whatever
+    vswhere finds, as tools/run/build.bat looks for it)"""
+    global _msvc_env
+    if _msvc_env is not None:
+        return _msvc_env
+    if shutil.which('cl'):
+        _msvc_env = dict(os.environ)
+        return _msvc_env
+    pf = os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')
+    bats = [os.path.join(pf, 'Microsoft Visual Studio', '2019', 'BuildTools', 'VC', 'Auxiliary',
+                         'Build', 'vcvars64.bat')]
+    vswhere = os.path.join(pf, 'Microsoft Visual Studio', 'Installer', 'vswhere.exe')
+    if os.path.isfile(vswhere):
+        r = subprocess.run([vswhere, '-latest', '-products', '*', '-requires',
+                            'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+                            '-property', 'installationPath'], capture_output=True, text=True)
+        bats += [os.path.join(p, 'VC', 'Auxiliary', 'Build', 'vcvars64.bat')
+                 for p in r.stdout.splitlines() if p.strip()]
+    for bat in bats:
+        if not os.path.isfile(bat):
+            continue
+        r = subprocess.run(f'"{bat}" >nul 2>&1 && set', shell=True, capture_output=True, text=True)
+        env = dict(l.split('=', 1) for l in r.stdout.splitlines() if '=' in l)
+        if r.returncode == 0 and shutil.which('cl', path=env.get('PATH', env.get('Path', ''))):
+            _msvc_env = env
+            return env
+    raise SystemExit('selftest FAILED: no C compiler (cl.exe not on PATH, no vcvars64.bat found; '
+                     'or set CC to a gcc or clang)')
+
+
+def cc(out, srcs, incs=(), defs=(), obj=False):
+    """compiles srcs into the program `out` (or, obj, the one source into
+    the object file `out`) with every warning an error; the program's path
+    comes back (with .exe on Windows)"""
+    incs = [RUNTIME] + list(incs)
+    if not MSVC:
+        cmd = [CC] + CFLAGS + list(defs)
+        for i in incs:
+            cmd += ['-I', i]
+        if obj:
+            run(cmd + ['-c'] + srcs + ['-o', out])
+            return out
+        run(cmd + ['-o', out + EXE] + srcs + ['-lm'])
+        return out + EXE
+    env = dict(msvc_env(), DOSKIT_PROJECT=PROJ)
+    # by its path: the program is looked for on this process's PATH, not env's
+    cl = shutil.which('cl', path=env.get('PATH', env.get('Path', '')))
+    cmd = [cl] + MSVC_FLAGS + ['/D' + d[2:] for d in defs if d.startswith('-D')]
+    cmd += ['/I' + i for i in incs if i] + ['/I' + d[2:] for d in defs if d.startswith('-I')]
+    if obj:
+        cmd += ['/c', '/Fo' + out] + srcs
+    else:
+        objdir = out + '.obj'
+        os.makedirs(objdir, exist_ok=True)
+        cmd += ['/Fo' + objdir + os.sep, '/Fe' + out + EXE] + srcs + MSVC_LIBS
+    r = subprocess.run(cmd, cwd=PROJ, capture_output=True, text=True, env=env)
+    if r.returncode:
+        print((r.stdout + r.stderr).strip())
+        raise SystemExit(f'selftest FAILED: cl {os.path.basename(out)}')
+    return out if obj else out + EXE
+
+
+def link_dir(target, link):
+    """`link` a folder that is `target`: a symbolic link, on Windows a
+    junction (which needs no privilege)"""
+    if os.name == 'nt':
+        import _winapi
+        _winapi.CreateJunction(target, link)
+    else:
+        os.symlink(target, link)
 
 
 def step(what):
@@ -185,6 +289,31 @@ def read_png(path):
         for i in row[1:]:
             rgb += plte[3 * i:3 * i + 3]
     return w, h, bytes(rgb)
+
+
+def check_adlib_wav(path):
+    """ADLIB.EXE's note in the runner's -oplwav: 49716 Hz mono; silence,
+    then 491.52 ms (six overflows of timer 2) and the release (release
+    rate 15, under 2 ms) of a 440 Hz sine at an operator's full scale
+    (4096), then silence for most of two more overflows."""
+    import struct
+    with open(path, 'rb') as f:
+        data = f.read()
+    rate, chans = struct.unpack('<I', data[24:28])[0], struct.unpack('<H', data[22:24])[0]
+    s = struct.unpack('<%dh' % ((len(data) - 44) // 2), data[44:])
+    loud = [i for i, x in enumerate(s) if x]
+    if rate != 49716 or chans != 1 or not loud:
+        raise SystemExit(f'selftest FAILED: ADLIB.EXE\'s -oplwav ({rate} Hz, {chans} channels, '
+                         f'{len(loud)} samples not 0)')
+    first, last = loud[0], loud[-1]
+    mid = s[first + rate // 10:last - rate // 10]
+    cross = sum(1 for a, b in zip(mid, mid[1:]) if (a < 0) != (b < 0))
+    hz = cross / 2 / (len(mid) / rate)
+    peak = max(abs(x) for x in mid)
+    dur, tail = (last - first) / rate, (len(s) - last) / rate
+    print(f'adlib.wav: {dur * 1000:.1f} ms at {hz:.1f} Hz, peak {peak}, then {tail * 1000:.0f} ms silent')
+    if not (0.485 < dur < 0.505 and 438 < hz < 442 and 4000 <= peak <= 4096 and tail > 0.14):
+        raise SystemExit('selftest FAILED: ADLIB.EXE\'s -oplwav (the note the OPL2 played)')
 
 
 def make_exe(name='HELLO'):
@@ -364,20 +493,102 @@ def make_multiseg():
     return len(exe)
 
 
+def check_xfer(py):
+    """xfer.py carries MULTISEG's hints to a sibling: its source with an
+    instruction put before FOUR's first routine (all of FOUR one byte
+    further on) and ONE and FOUR renamed UNO and QUAD; the hints into code
+    segments other than CODE and the segment names in them come across
+    mapped, and the sibling rebuilds byte for byte"""
+    with open(os.path.join(HERE, 'multiseg', 'MULTISEG.ASM')) as f:
+        text = f.read()
+    text = text.replace('\tASSUME CS:FOUR\n', '\tASSUME CS:FOUR\n\tINC DX\n')
+    text = re.sub(r'\bFOUR\b', 'QUAD', re.sub(r'\bONE\b', 'UNO', text))
+    src = os.path.join(PROJ, 'build', 'MULTIS2.ASM')
+    with open(src, 'w') as f:
+        f.write(text)
+    a = tasm.Assembler(src)
+    a.imm8_alu = {'add', 'adc', 'sbb', 'sub', 'cmp', 'xor'}
+    a.xchg_ax_short = False
+    a.assemble()
+    out = tlink.link([tlink.module_from_asm(a, 'MULTIS2')])
+    exe = tlink.write_mz(out, reloc_order=list(reversed(out.relocs)), version=0x30)
+    os.makedirs(os.path.join(PROJ, 'game', 'MULTIS2'))
+    with open(os.path.join(PROJ, 'game', 'MULTIS2', 'MULTIS2.EXE'), 'wb') as f:
+        f.write(exe)
+    # the sibling's own lines: exe, segments (renamed), linker, relocorder, asm
+    own = ['exe MULTIS2/MULTIS2.EXE']
+    with open(os.path.join(HERE, 'multiseg', 'src', 'MULTISEG.hints')) as f:
+        for line in f:
+            w = line.split()
+            if w and w[0] in ('segment', 'linker', 'relocorder', 'asm'):
+                own.append(re.sub(r'\bFOUR\b', 'QUAD', re.sub(r'\bONE\b', 'UNO', line.rstrip())))
+    dst = os.path.join(PROJ, 'src', 'MULTIS2.hints')
+    with open(dst, 'w') as f:
+        f.write('\n'.join(own) + '\n')
+    run([py, os.path.join(TOOLS, 'xfer.py'), 'src/MULTISEG.hints', 'src/MULTIS2.hints'])
+    with open(dst, 'rb') as f:
+        if b'\r' in f.read():
+            raise SystemExit('selftest FAILED: xfer.py wrote the hints with CR LF line ends')
+    with open(dst) as f:
+        carried = f.read()
+    for want in ('ptr QUAD:001F QUAD', 'name QUAD:0028 tick', 'words DATA:0015 1 QUAD',
+                 'name QUAD:0031 tock', 'name UNO:0007 first', 'name QUAD:0005 fourth'):
+        if not re.search('^' + re.escape(want) + r'\b', carried, re.M):
+            print(carried)
+            raise SystemExit(f'selftest FAILED: xfer.py did not carry {want!r}')
+    if 'not mapped' in carried:
+        print(carried)
+        raise SystemExit('selftest FAILED: xfer.py left hints of MULTISEG not mapped')
+    out = run([py, os.path.join(TOOLS, 'build.py'), 'src/MULTIS2.hints'])
+    if 'IDENTICAL' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: MULTIS2 from the carried hints')
+    out = run([py, os.path.join(TOOLS, 'xfer.py'), 'src/MULTISEG.hints', 'src/MULTIS2.hints',
+               '--check'])
+    return len(exe)
+
+
+def check_hdrpad(py):
+    """MULTISEG with 512 more zero bytes in its header (as TLINK 5.0 leaves
+    at times): rebuilt identical with `linker tlink 30 header=original`,
+    not without it"""
+    with open(os.path.join(PROJ, 'game', 'MULTISEG', 'MULTISEG.EXE'), 'rb') as f:
+        d = bytearray(f.read())
+    hdr = struct.unpack_from('<H', d, 8)[0] * 16
+    d[hdr:hdr] = bytes(512)
+    struct.pack_into('<H', d, 8, (hdr + 512) // 16)
+    struct.pack_into('<HH', d, 2, len(d) % 512, (len(d) + 511) // 512)
+    os.makedirs(os.path.join(PROJ, 'game', 'MULTIPAD'))
+    with open(os.path.join(PROJ, 'game', 'MULTIPAD', 'MULTIPAD.EXE'), 'wb') as f:
+        f.write(d)
+    with open(os.path.join(HERE, 'multiseg', 'src', 'MULTISEG.hints')) as f:
+        text = f.read().replace('exe MULTISEG/MULTISEG.EXE', 'exe MULTIPAD/MULTIPAD.EXE')
+    for opt, want in ((' header=original', 'IDENTICAL'), ('', 'differs')):
+        hints = os.path.join(PROJ, 'build', 'MULTIPAD.hints')
+        with open(hints, 'w') as f:
+            f.write(text.replace('linker tlink 30', 'linker tlink 30' + opt))
+        out = run([py, os.path.join(TOOLS, 'build.py'), hints], check=False)
+        if want not in out:
+            print(out)
+            raise SystemExit(f'selftest FAILED: MULTIPAD with "linker tlink 30{opt}" not {want}')
+    return len(d)
+
+
 def check_update(b):
     """tests/update/updatetest.c in a data folder of its own: a first start
     fetching a latest.json made here, then one the same day using the kept
     file (a fetch would fail: the address is nowhere)"""
-    if not shutil.which('curl'):
+    # curl does the fetch but on Windows (WinHTTP, and the file copied there)
+    if os.name != 'nt' and not shutil.which('curl'):
         print('curl not found: update.c\'s fetch not checked')
         return
     d = os.path.join(b, 'update')
     if os.path.isdir(d):
         shutil.rmtree(d)
     os.makedirs(os.path.join(d, 'data'))
-    exe = os.path.join(d, 'updatetest')
-    run([CC] + CFLAGS + ['-I', RUNTIME, '-o', exe, os.path.join(HERE, 'update', 'updatetest.c'),
-                         os.path.join(RUNTIME, 'update.c'), os.path.join(RUNTIME, 'sys.c')])
+    exe = cc(os.path.join(d, 'updatetest'), [os.path.join(HERE, 'update', 'updatetest.c'),
+                                             os.path.join(RUNTIME, 'update.c'),
+                                             os.path.join(RUNTIME, 'sys.c')])
     with open(os.path.join(d, 'latest.json'), 'w') as f:
         f.write('{"version": "v1.3", "page": "https://github.com/o/r/releases/tag/v1.3",\n'
                 ' "notes": "Faster.\\nFixed.", "packages": {}}\n')
@@ -398,9 +609,9 @@ def check_gogfind(b):
     if os.path.isdir(d):
         shutil.rmtree(d)
     os.makedirs(os.path.join(d, 'data'))
-    exe = os.path.join(d, 'gogfind')
-    run([CC] + CFLAGS + ['-I', RUNTIME, '-o', exe, os.path.join(HERE, 'gogfind', 'gogfind.c'),
-                         os.path.join(RUNTIME, 'cdimage.c'), os.path.join(RUNTIME, 'sys.c')])
+    exe = cc(os.path.join(d, 'gogfind'), [os.path.join(HERE, 'gogfind', 'gogfind.c'),
+                                          os.path.join(RUNTIME, 'cdimage.c'),
+                                          os.path.join(RUNTIME, 'sys.c')])
     image = os.path.join(d, 'image')
     cd_image({'HELLO/HELLO.EXE': b'MZ' + bytes(100)}, image)
     home = os.path.join(d, 'home')
@@ -429,6 +640,18 @@ def check_gogfind(b):
          '', True),
         ('nothing', None, {}, '', 'HELLO/HELLO.EXE', False),
     ]
+    if os.name == 'nt':
+        # Windows: GOG Galaxy's folder under %ProgramFiles(x86)%, which is
+        # set to the folder made here.  The registry's key of a product ID
+        # and X:\GOG Games are the machine's own and not made here.
+        galaxy = 'GOG Galaxy/Games/Test Game/game.gog'
+        cases = [
+            ('GOG Galaxy\'s folder', galaxy, {}, '', '', True),
+            ('GOG Galaxy\'s folder, with must_have', galaxy, {}, '', 'HELLO/HELLO.EXE', True),
+            ('an image without the must_have', galaxy, {}, '', 'NOPE/NOPE.EXE', False),
+            ('another game\'s folder', 'GOG Galaxy/Games/Other/game.gog', {}, '', '', False),
+            ('nothing', None, {}, '', 'HELLO/HELLO.EXE', False),
+        ]
     for what, place, files, prefix, must, ok in cases:
         if os.path.isdir(home):
             shutil.rmtree(home)
@@ -442,9 +665,11 @@ def check_gogfind(b):
                 f.write(text.format(home=home))
         env = dict(os.environ, HOME=home, DK_DATA_DIR=os.path.join(d, 'data'),
                    WINEPREFIX=prefix.format(home=home))
+        if os.name == 'nt':
+            env['ProgramFiles(x86)'] = home
         r = subprocess.run([exe, 'Test Game'] + ([must] if must else []), cwd=d,
                            capture_output=True, text=True, env=env)
-        want = os.path.join(home, place) if ok else 'not found'
+        want = os.path.normpath(os.path.join(home, place)) if ok else 'not found'
         if r.stdout.strip() != want:
             print(r.stdout + r.stderr)
             raise SystemExit(f'selftest FAILED: gog_find ({what})')
@@ -505,9 +730,8 @@ def check_inno(b):
           'more files than may be open)')
 
     # the same with the runtime's inno.c (tests/inno/innotest.c)
-    exe = os.path.join(d, 'innotest')
-    run([CC] + CFLAGS + ['-I', RUNTIME, '-o', exe, os.path.join(HERE, 'inno', 'innotest.c')] +
-        [os.path.join(RUNTIME, f) for f in ('inno.c', 'cdimage.c', 'sys.c', 'sha256.c')])
+    exe = cc(os.path.join(d, 'innotest'), [os.path.join(HERE, 'inno', 'innotest.c')] +
+             [os.path.join(RUNTIME, f) for f in ('inno.c', 'cdimage.c', 'sys.c', 'sha256.c')])
 
     def c_unpack(setup, out, must_have):
         r = subprocess.run([exe, setup, out, must_have], capture_output=True, text=True)
@@ -599,10 +823,9 @@ def check_pmem(py, b):
     START leaves them; memcmp.py --base finds no difference, and finds
     the one put into a copy."""
     base, sels = 0x11F2A0, (0x1C, 0x24)
-    exe = os.path.join(b, 'flatport')
-    run([CC] + CFLAGS + ['-I', RUNTIME, '-I', os.path.join(PROJ, 'port'), '-o', exe,
-                         os.path.join(HERE, 'flat', 'port.c')] +
-        [os.path.join(RUNTIME, f) for f in ('pmem.c', 'sys.c', 'sha256.c')])
+    exe = cc(os.path.join(b, 'flatport'), [os.path.join(HERE, 'flat', 'port.c')] +
+             [os.path.join(RUNTIME, f) for f in ('pmem.c', 'sys.c', 'sha256.c')],
+             incs=[os.path.join(PROJ, 'port')])
     port_mem = os.path.join(b, 'flatport.mem')
     print(run([exe, os.path.join(PROJ, 'build', 'files', 'FLAT.386'), '%X' % base, port_mem]))
     f = open(os.path.join(PROJ, 'build', 'files', 'FLAT.386'), 'rb').read()
@@ -729,6 +952,9 @@ def main():
     print(f'{make_exe()} bytes; FLAT.386 {make_flat()} bytes; RAWDRV.DRV {make_raw()} bytes; '
           f'RELMOD.MOD %d bytes, %d offsets; PMODE.EXE {make_exe("PMODE")} bytes; '
           f'CDROM.EXE {make_exe("CDROM")} bytes; VGAMODE.EXE {make_exe("VGAMODE")} bytes; '
+          f'GAMEPORT.EXE {make_exe("GAMEPORT")} bytes; '
+          f'RWATCH.EXE {make_exe("RWATCH")} bytes; '
+          f'ADLIB.EXE {make_exe("ADLIB")} bytes; '
           f'SB16.EXE {make_exe("SB16")} bytes; CDPLAY.EXE {make_exe("CDPLAY")} bytes; '
           f'MULTISEG.EXE {make_multiseg()} bytes'
           % make_relmod())
@@ -764,6 +990,10 @@ def main():
             raise SystemExit(f'selftest FAILED: MULTISEG.ASM has no {want!r} (ptr and words '
                              'hints into a code segment other than CODE)')
     print('MULTISEG: routines reached through pointers into FOUR, a segment not named CODE')
+    print(f'MULTIS2.EXE ({check_xfer(py)} bytes): MULTISEG\'s hints carried by xfer.py '
+          'into renamed and shifted code segments, IDENTICAL')
+    print(f'MULTIPAD.EXE ({check_hdrpad(py)} bytes, a longer header): IDENTICAL with '
+          'header=original, differs without')
     with open(os.path.join(PROJ, 'build', 'FLAT.ASM')) as f:
         text = f.read()
     for want in ('DW L00D5-C00D6', 'DW L00DE-C00D6', 'DW L00E5-C00D6', '[EDI+C00D6]'):
@@ -921,6 +1151,22 @@ def main():
         if shift != want:
             raise SystemExit(f'selftest FAILED: -keysat {lines!r} on HELLO.EXE: shift bit {shift}')
     print('-keysat: the same keys from a file')
+    # a table with more readers than the runner once kept (64): RWATCH.EXE's
+    # 200 bytes, each read by its LODSB, the first 100 by its CMP as well
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-rwatch', 'RWATCH.EXE+0004:0000', 'C8',
+               'RWATCH/RWATCH.EXE'])
+    memr = [l for l in out.splitlines() if l.startswith('[memr]')]
+    readers = [(int(l.split()[1].split('+')[1], 16), l.split()[4]) for l in memr if ' read by ' in l and 'times' in l]
+    by_ip = {}
+    for off, ip in readers:
+        by_ip.setdefault(ip, []).append(off)
+    print(f'{memr[-1]}; ' + ' '.join(l for l in out.splitlines() if l.startswith('con:')))
+    if ('con: rwatch ok' not in out or sorted(map(sorted, by_ip.values()), key=len) != [list(range(100)), list(range(200))]
+            or len(set(readers)) != 300 or any('not kept' in l for l in memr)
+            or not all(' 1 times' in l for l in memr if 'times' in l)
+            or not memr[-1].endswith('read by 300 readers')):
+        print(out)
+        raise SystemExit('selftest FAILED: -rwatch on RWATCH.EXE\'s table of 300 readers')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', 'PMODE/PMODE.EXE'])
     print('\n'.join(l for l in out.splitlines() if l.startswith(('con:', '[cpu]'))))
     if 'con: pmode ok' not in out:
@@ -944,6 +1190,18 @@ def main():
     if 'con: vgamode ok' not in out:
         print(out)
         raise SystemExit('selftest FAILED: VGAMODE.EXE (the runner\'s BIOS mode set)')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', 'GAMEPORT/GAMEPORT.EXE'])
+    print('\n'.join(l for l in out.splitlines() if l.startswith('con:')))
+    if 'con: gameport ok' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: GAMEPORT.EXE (the runner\'s game port)')
+    oplwav = os.path.join(b, 'adlib.wav')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '2', '-oplwav', oplwav, 'ADLIB/ADLIB.EXE'])
+    print('\n'.join(l for l in out.splitlines() if l.startswith('con:')))
+    if 'con: adlib ok' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: ADLIB.EXE (the runner\'s OPL2 timers)')
+    check_adlib_wav(oplwav)
     wav = os.path.join(b, 'sb16.wav')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-wav', wav, 'SB16/SB16.EXE'])
     print('\n'.join(l for l in out.splitlines() if l.startswith('con:')))
@@ -977,11 +1235,10 @@ def main():
     print('SB16.EXE with a -log on its wait loop and with a -shot: the same memory')
 
     step('4. the C port over the runtime, compared (memcmp.py)')
-    exe = os.path.join(b, 'port')
     srcs = [os.path.join(HERE, 'hello', 'port.c')] + [
         os.path.join(RUNTIME, f) for f in ('rmem.c', 'vga.c', 'sys.c', 'sha256.c', 'shot.c',
                                            'plat_null.c')]
-    run([CC] + CFLAGS + ['-I', RUNTIME, '-I', os.path.join(PROJ, 'port'), '-o', exe] + srcs)
+    exe = cc(os.path.join(b, 'port'), srcs, incs=[os.path.join(PROJ, 'port')])
     out = subprocess.run(
         [exe, os.path.join(PROJ, 'game'), os.path.join(b, 'port.ram'), os.path.join(b, 'port.vram')],
         cwd=PROJ, capture_output=True, text=True,
@@ -998,9 +1255,9 @@ def main():
     print(f'port.png: {w}x{h}, {os.path.getsize(os.path.join(b, "port.png"))} bytes, as port.ppm')
     shots = os.path.join(b, 'shots')
     os.makedirs(shots, exist_ok=True)
-    exe = os.path.join(b, 'shottest')
-    run([CC] + CFLAGS + ['-I', RUNTIME, '-o', exe, os.path.join(HERE, 'shot', 'shottest.c'),
-                         os.path.join(RUNTIME, 'shot.c'), os.path.join(RUNTIME, 'sys.c')])
+    exe = cc(os.path.join(b, 'shottest'), [os.path.join(HERE, 'shot', 'shottest.c'),
+                                           os.path.join(RUNTIME, 'shot.c'),
+                                           os.path.join(RUNTIME, 'sys.c')])
     run([exe, shots])
     for name in ('noise', 'runs', 'far', 'pattern', 'one'):
         w, h, rgb = read_png(os.path.join(shots, name + '.png'))
@@ -1010,9 +1267,8 @@ def main():
             raise SystemExit(f'selftest FAILED: shot.c\'s {name}.png')
         print(f'shot.c {name}.png: {w}x{h}, {os.path.getsize(os.path.join(shots, name + ".png"))}'
               f' bytes for {w * h} pixels')
-    exe = os.path.join(b, 'vgamodes')
-    run([CC] + CFLAGS + ['-I', RUNTIME, '-o', exe, os.path.join(HERE, 'vgamode', 'runtime.c'),
-                         os.path.join(RUNTIME, 'vga.c'), '-lm'])
+    exe = cc(os.path.join(b, 'vgamodes'), [os.path.join(HERE, 'vgamode', 'runtime.c'),
+                                           os.path.join(RUNTIME, 'vga.c')])
     out = run([exe])
     if 'vga modes ok' not in out:
         raise SystemExit('selftest FAILED: vga.c\'s 16-colour 200-line modes: ' + out)
@@ -1028,18 +1284,24 @@ def main():
     mods = [f for f in sorted(os.listdir(RUNTIME)) if f.endswith('.c')
             and f not in ('plat_sdl.c', 'plat_win32.c')]
     extra = []
-    sdl = subprocess.run(['sh', os.path.join(RUNTIME, 'sdl2-flags.sh')], capture_output=True, text=True)
-    if sdl.returncode == 0:
-        mods.append('plat_sdl.c')
-        # the compiler's options only: -I, -D and -F
-        extra = [o for o in sdl.stdout.split() if o.startswith(('-I', '-D', '-F'))]
+    if os.name == 'nt':
+        # Windows' own platform; SDL2 is not looked for there
+        mods.append('plat_win32.c')
+    else:
+        sdl = subprocess.run(['sh', os.path.join(RUNTIME, 'sdl2-flags.sh')], capture_output=True,
+                             text=True)
+        if sdl.returncode == 0:
+            mods.append('plat_sdl.c')
+            # the compiler's options only: -I, -D and -F
+            extra = [o for o in sdl.stdout.split() if o.startswith(('-I', '-D', '-F'))]
     objdir = os.path.join(b, 'obj')
     os.makedirs(objdir, exist_ok=True)
     for m in mods:
-        run([CC] + CFLAGS + extra + ['-I', RUNTIME, '-c', os.path.join(RUNTIME, m),
-                                     '-o', os.path.join(objdir, m[:-2] + '.o')])
+        cc(os.path.join(objdir, m[:-2] + ('.obj' if MSVC else '.o')), [os.path.join(RUNTIME, m)],
+           defs=extra, obj=True)
     print(f'{len(mods)} modules: {" ".join(mods)}' +
-          ('' if 'plat_sdl.c' in mods else ' (SDL2 not found: plat_sdl.c not compiled)'))
+          ('' if 'plat_sdl.c' in mods or os.name == 'nt'
+           else ' (SDL2 not found: plat_sdl.c not compiled)'))
 
     step('6. a project from the template (new_project.py)')
     new = os.path.join(KIT, 'build', 'selftest-new')
@@ -1049,18 +1311,26 @@ def main():
          '--marker', 'HELLO/HELLO.EXE', '--gog-id', '1234567890', '--no-submodule'])
     if '"1234567890",' not in open(os.path.join(new, 'port', 'src', 'main.c')).read():
         raise SystemExit('selftest FAILED: --gog-id not filled into port/src/main.c')
-    os.symlink(KIT, os.path.join(new, 'doskit'))
+    link_dir(KIT, os.path.join(new, 'doskit'))
     shutil.copytree(os.path.join(PROJ, 'game'), os.path.join(new, 'game'))
-    r = subprocess.run(['sh', os.path.join(new, 'port', 'build.sh')], capture_output=True, text=True)
-    if r.returncode or 'warning' in r.stderr:
+    if os.name == 'nt':
+        # MSVC says its warnings on the standard output
+        r = subprocess.run(['cmd', '/c', os.path.join(new, 'port', 'build.bat')],
+                           capture_output=True, text=True)
+        script = 'build.bat'
+    else:
+        r = subprocess.run(['sh', os.path.join(new, 'port', 'build.sh')], capture_output=True,
+                           text=True)
+        script = 'build.sh'
+    if r.returncode or 'warning' in r.stderr or (os.name == 'nt' and 'warning' in r.stdout):
         print(r.stdout + r.stderr)
-        raise SystemExit('selftest FAILED: the template\'s port/build.sh')
+        raise SystemExit(f'selftest FAILED: the template\'s port/{script}')
     # a data folder of its own: never the user's
     first = os.path.join(KIT, 'build', 'selftest-data')
     if os.path.isdir(first):
         shutil.rmtree(first)
     os.makedirs(first)
-    r = subprocess.run([os.path.join(new, 'port', 'build', 'testgame-headless')], cwd=new,
+    r = subprocess.run([os.path.join(new, 'port', 'build', 'testgame-headless' + EXE)], cwd=new,
                        capture_output=True, text=True,
                        env=dict(os.environ, DK_FRAMES='3', DK_DATA_DIR=first))
     if r.returncode:
@@ -1152,7 +1422,7 @@ def main():
 
     # the template's port on a player's first start: -gog with the folder,
     # with the image, with a folder not the game's, into a data folder of its own
-    exe = os.path.join(new, 'port', 'build', 'testgame-headless')
+    exe = os.path.join(new, 'port', 'build', 'testgame-headless' + EXE)
     for what, src, ok in (('folder', folder_game, True),
                           ('image', os.path.join(installed, 'CD', 'HELLO.DAT'), True),
                           ('other folder', os.path.join(gog, 'Hello Game', 'CD'), False)):

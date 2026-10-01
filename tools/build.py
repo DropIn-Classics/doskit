@@ -168,7 +168,8 @@ def build_once(hints, raw):
     else:
         rel = reloc_order(out, an)
         if an.h.linker:
-            exe = tlink.write_mz(out, reloc_order=rel, version=an.h.linker[1])
+            exe = tlink.write_mz(out, reloc_order=rel, version=an.h.linker[1],
+                                 hdr_len=len(an.p.hdr) if an.h.linker[2] else None)
         else:
             exe = write_mz(out, an.p, rel=rel)
     if an.h.keeptail:

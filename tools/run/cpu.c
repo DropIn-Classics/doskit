@@ -1217,23 +1217,63 @@ void memwatch_report(void){
  * reads through the CPU only: not instruction fetches, not the fast REP
  * MOVS path below A0000h, not the BIOS's or DOS's own reads. */
 uint32_t rwatch_lo = 0, rwatch_hi = 0;
-#define RWATCH_MAX 64
-static struct { uint16_t cs; uint32_t ip, a; unsigned long n; double t0, t1; } rw[RWATCH_MAX];
-static int rw_n = 0;
+/* A reader is an instruction and the first byte it read, so a table of
+ * records read field by field has many: they are kept in the order they
+ * came in rw[], found through the hash rw_at[] (indices + 1, 0 free),
+ * both growing up to RWATCH_MAX; reads by readers beyond that are counted
+ * and said. */
+#define RWATCH_MAX 65536
+typedef struct { uint16_t cs; uint32_t ip, a; unsigned long n; double t0, t1; } RwReader;
+static RwReader *rw = NULL;
+static uint32_t *rw_at = NULL;
+static int rw_n = 0, rw_cap = 0;
 static unsigned long rw_lost = 0;
 
+static uint32_t rw_hash(uint16_t cs, uint32_t ip, uint32_t a){
+    uint32_t h = (a * 2654435761u) ^ (ip * 40503u) ^ ((uint32_t)cs << 16);
+    return h ^ (h >> 15);
+}
+
+/* room for more readers: both tables doubled, the readers hashed anew */
+static int rw_grow(void){
+    int cap = rw_cap ? rw_cap * 2 : 256, i;
+    RwReader *r;
+    uint32_t *at;
+    if(cap > RWATCH_MAX) return 0;
+    r = realloc(rw, (size_t)cap * sizeof *r);
+    if(!r) return 0;
+    rw = r;
+    at = calloc((size_t)cap * 2, sizeof *at);
+    if(!at) return 0;
+    free(rw_at); rw_at = at; rw_cap = cap;
+    for(i = 0; i < rw_n; i++){
+        uint32_t h = rw_hash(rw[i].cs, rw[i].ip, rw[i].a) & (uint32_t)(cap * 2 - 1);
+        while(rw_at[h]) h = (h + 1) & (uint32_t)(cap * 2 - 1);
+        rw_at[h] = (uint32_t)i + 1;
+    }
+    return 1;
+}
+
 void rwatch_hit(uint32_t a, unsigned n){
-    int i;
+    uint16_t cs = cpu.sreg[S_CS];
+    uint32_t h, mask;
     if(a < rwatch_lo) a = rwatch_lo;    /* a word read that starts before the range */
     (void)n;
-    for(i = 0; i < rw_n; i++)
-        if(rw[i].ip == insn_ip && rw[i].cs == cpu.sreg[S_CS] && rw[i].a == a){
-            rw[i].n++; rw[i].t1 = emu_now(); return;
+    if(rw_cap){
+        mask = (uint32_t)(rw_cap * 2 - 1);
+        for(h = rw_hash(cs, insn_ip, a) & mask; rw_at[h]; h = (h + 1) & mask){
+            RwReader *r = &rw[rw_at[h] - 1];
+            if(r->ip == insn_ip && r->cs == cs && r->a == a){
+                r->n++; r->t1 = emu_now(); return;
+            }
         }
-    if(rw_n == RWATCH_MAX){ rw_lost++; return; }
-    rw[rw_n].cs = cpu.sreg[S_CS]; rw[rw_n].ip = insn_ip; rw[rw_n].a = a;
+    }
+    if(rw_n == rw_cap && !rw_grow()){ rw_lost++; return; }
+    mask = (uint32_t)(rw_cap * 2 - 1);
+    for(h = rw_hash(cs, insn_ip, a) & mask; rw_at[h]; h = (h + 1) & mask) ;
+    rw[rw_n].cs = cs; rw[rw_n].ip = insn_ip; rw[rw_n].a = a;
     rw[rw_n].n = 1; rw[rw_n].t0 = rw[rw_n].t1 = emu_now();
-    rw_n++;
+    rw_at[h] = (uint32_t)++rw_n;
 }
 
 void rwatch_report(void){

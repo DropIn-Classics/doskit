@@ -58,7 +58,7 @@ static uint32_t palette[256];
  * the setting and a release found; key the scancode read (-1 none) */
 static void updates(int y, int key)
 {
-    const int attr = TM_ATTR(TM_LIGHTGREY, TM_BLUE), hi = TM_ATTR(TM_YELLOW, TM_BLUE);
+    const uint8_t attr = TM_ATTR(TM_LIGHTGREY, TM_BLUE), hi = TM_ATTR(TM_YELLOW, TM_BLUE);
     char line[80];
     UpdateInfo u;
     int consent = update_consent();

@@ -81,7 +81,9 @@ docs/NEW-PROJECT.md how to start a new game.
     program it (ports, planes, Mode X, mode 12h/13h, the picture scanned
     out); `frame.h`: pacing at the mode's refresh, keys to the program's
     INT 9 handler, a tick callback, a key recorder.
-  - `modplay.h` (MOD playback, micromod), `audiofx.h` (optional EQ and a
+  - `modplay.h` (MOD playback, micromod), `opl.h` (an OPL2's FM synthesis,
+    the AdLib's chip, from the program's register writes; the runner's
+    -oplwav too), `audiofx.h` (optional EQ and a
     headphone mode), `fli.h` (FLI animations), `textmode.h` (an 80x25
     text screen, for a DOS-setup-like launcher), `pad.h` (controller
     buttons to keys), `cdimage.h` (a GOG release found and its image
@@ -107,15 +109,12 @@ docs/NEW-PROJECT.md how to start a new game.
     python3 tools/new_project.py ~/mygame "My Game" mygame   # or name it
 
 On Windows `python` for `python3`; the runner builds with MSVC
-(`tools/run/build.bat`) or cc (`build.sh`). `pip install capstone`.
-`tests/selftest.py` itself needs a Unix-style cc (its CFLAGS are gcc/clang
-flags, not MSVC's) and Unix tools (`sh`), so it does not run under plain
-Windows: use WSL (`wsl --install` once, then a distribution's Python 3
-with `pip install capstone`, its own gcc or clang, `sh` and `cc`/`make`
-already there) and run it from there (`/mnt/c/...` reaches the same
-checkout). Building the runner (`run.py`, used by `-key`/`-break`/etc.
-during analysis) also needs a working cc, so this applies whenever the
-runner is used on Windows, not only for selftest.py.
+(`tools/run/build.bat`), elsewhere with cc (`build.sh`). `pip install
+capstone`. `tests/selftest.py` runs on Windows, Linux and macOS: with cc
+(gcc or clang; `$CC` names another), on Windows with MSVC, which it
+finds as `build.bat` does (cl.exe on PATH, else vcvars64.bat of the
+Visual Studio installed); no `sh` is needed there.
+`.github/workflows/selftest.yml` runs it on the three on every push.
 
 ## Status
 
