@@ -165,7 +165,8 @@ and the report ends with hashes of memory and video memory.
 Useful options (all at the top of `tools/run/main.c`): `-key T KEY`,
 `KEY+`/`KEY-`, `-keys FILE` (key scripts); `-shot`, `-shotevery`
 (pictures); `-break ADDR[#N]` (stop at the Nth pass), `-log ADDR`
-(registers at each pass), `-watch ADDR` (who writes a byte, when),
+(registers at each pass), `-keyat ADDR[#N] KEY+` (a key down or up at
+the Nth pass, input by a frame loop's passes), `-watch ADDR` (who writes a byte, when),
 `-dump ADDR LEN`, `-dumpevery DT` (a time series), `-trace FILE N`,
 `-dos` (every INT 21h call with its file), `-intwatch NN`, `-prof`,
 `-ram`/`-vram` (memory for memcmp.py), `-wav`, `-cdwav`, `-put GUEST HOST` (a

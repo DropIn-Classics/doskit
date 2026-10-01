@@ -31,11 +31,11 @@ from kit import KIT, build_dir, game_dir, hints_files
 
 EXE = os.path.join(KIT, 'build', 'dosrun.exe' if os.name == 'nt' else 'dosrun')
 SRC = os.path.join(HERE, 'run')
-ADDR_OPTS = {'-break': 1, '-log': 1, '-watch': 1, '-rwatch': 1, '-dump': 1, '-poke': 2}
+ADDR_OPTS = {'-break': 1, '-log': 1, '-watch': 1, '-rwatch': 1, '-dump': 1, '-poke': 2, '-keyat': 1}
 # options and how many arguments they take (to find PROGRAM)
 OPTS = {'-game': 1, '-state': 1, '-put': 2, '-until': 1, '-ips': 1, '-key': 2, '-keys': 1,
         '-shot': 2, '-shotevery': 2, '-break': 1, '-log': 1, '-watch': 1, '-rwatch': 2, '-trace': 2,
-        '-dump': 2, '-poke': 3, '-dumpevery': 1, '-ram': 1, '-mem': 1, '-vram': 1, '-wav': 1, '-dos': 0, '-cd': 0, '-cue': 1, '-cdwav': 1, '-loadfix': 0, '-intwatch': 1, '-prof': 0, '-cover': 1, '-vgastate': 0,
+        '-dump': 2, '-poke': 3, '-keyat': 2, '-dumpevery': 1, '-ram': 1, '-mem': 1, '-vram': 1, '-wav': 1, '-dos': 0, '-cd': 0, '-cue': 1, '-cdwav': 1, '-loadfix': 0, '-intwatch': 1, '-prof': 0, '-cover': 1, '-vgastate': 0,
         '-sb': 0, '-v': 0}
 
 

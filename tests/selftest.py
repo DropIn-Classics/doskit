@@ -896,6 +896,19 @@ def main():
             or not memr[-1].endswith('read by 4 readers')):
         print(out)
         raise SystemExit('selftest FAILED: -rwatch on HELLO.EXE\'s counter and table')
+    # -keyat: Left Shift down at next_step's first pass (the runner's INT 9
+    # keeps the shift state in the BIOS data area, 417h bit 1), and at a
+    # third pass, which never comes
+    for spec, want in (('CODE:0018', 2), ('CODE:0018#3', 0)):
+        out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-keyat', spec, 'lshift+',
+                   '-ram', os.path.join(b, 'keyat.ram'), 'HELLO/HELLO.EXE'])
+        with open(os.path.join(b, 'keyat.ram'), 'rb') as f:
+            shift = f.read()[0x417] & 2
+        said = [l for l in out.splitlines() if l.startswith('keyat ') and ' t=' in l]
+        if shift != want or len(said) != (1 if want else 0):
+            print(out)
+            raise SystemExit(f'selftest FAILED: -keyat {spec} lshift+ on HELLO.EXE: shift bit {shift}')
+    print('-keyat: Left Shift down at the first pass of HELLO\'s loop, none at a third')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', 'PMODE/PMODE.EXE'])
     print('\n'.join(l for l in out.splitlines() if l.startswith(('con:', '[cpu]'))))
     if 'con: pmode ok' not in out:

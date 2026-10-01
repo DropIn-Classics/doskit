@@ -35,6 +35,11 @@
  *   -log ADDR        print the registers each time ADDR is reached, go on
  *   -poke ADDR[#N] TARGET HEX   when ADDR is reached (the Nth time), write
  *                    the bytes HEX ("04 00" or "0400") at TARGET, go on
+ *   -keyat ADDR[#N] KEY+|KEY-   when ADDR is reached (the Nth time), the
+ *                    key down (+) or up (-) as -key has them, go on: input
+ *                    by a program's own passes (a frame loop) rather than
+ *                    by the clock; its interrupt comes at the end of the
+ *                    batch the pass is in, as at a breakpoint's
  *   -watch ADDR      print each write to the byte at ADDR (one -watch: the last)
  *   -rwatch ADDR LEN which instructions read the LEN bytes at ADDR (hex):
  *                    a count per reader at the end (data reads, not fetches)
@@ -157,8 +162,9 @@ static double shot_every = 0.0, shot_next = 0.0;
 static char shot_prefix[260];
 static unsigned shot_index = 0;
 
-/* stop: 0 -log, 1 -break, 2 -poke (pa, pb, pn: where and what it writes) */
-typedef struct { Addr a; int stop; int count, hits; Addr pa; uint8_t pb[16]; int pn; } Brk;
+/* stop: 0 -log, 1 -break, 2 -poke (pa, pb, pn: where and what it writes),
+ * 3 -keyat (sc, down: the key event) */
+typedef struct { Addr a; int stop; int count, hits; Addr pa; uint8_t pb[16]; int pn; int sc, down; } Brk;
 static Brk brks[BRK_MAX];
 static int nbrks = 0;
 
@@ -409,6 +415,25 @@ int main(int argc, char **argv){
             }
             brk_lin[nbrks] = b->a.lin;
             nbrks++; }
+        else if(!strcmp(a,"-keyat")){ NEED(2);
+            char spec[64], k[32], *hash;
+            size_t n;
+            Brk *b = &brks[nbrks];
+            if(nbrks == BRK_MAX) die("at most %d -break/-log/-poke/-keyat", BRK_MAX);
+            snprintf(spec, sizeof(spec), "%s", argv[++i]);
+            hash = strchr(spec, '#');
+            b->count = 1;
+            if(hash){ *hash = 0; b->count = atoi(hash+1); }
+            b->a = parse_addr(spec);
+            b->stop = 3;
+            snprintf(k, sizeof(k), "%s", argv[++i]);
+            n = strlen(k);
+            if(n < 2 || (k[n-1] != '+' && k[n-1] != '-')) die("-keyat: %s wants KEY+ or KEY-", k);
+            b->down = k[n-1] == '+';
+            k[n-1] = 0;
+            b->sc = key_code(k);
+            brk_lin[nbrks] = b->a.lin;
+            nbrks++; }
         else if(!strcmp(a,"-watch")){ NEED(1); watch_addr = parse_addr(argv[++i]); have_watch = 1;
             memwatch_addr = watch_addr.lin; }
         else if(!strcmp(a,"-rwatch")){ NEED(2); rwatch_addr = parse_addr(argv[i+1]);
@@ -582,7 +607,13 @@ int main(int argc, char **argv){
                     Brk *b = &brks[i];
                     if(brk_lin[i] != lin) continue;
                     b->hits++;
-                    if(b->stop == 2){
+                    if(b->stop == 3){
+                        if(b->hits == b->count){
+                            kbd_key(b->sc, b->down);
+                            printf("keyat %s t=%.6f hit=%d %X%c\n", addr_str(&b->a), emu_now(), b->hits,
+                                   b->sc, b->down ? '+' : '-');
+                        }
+                    } else if(b->stop == 2){
                         if(b->hits == b->count){
                             int k;
                             for(k=0;k<b->pn;k++) mem_w8(b->pa.lin + k, b->pb[k]);
@@ -621,7 +652,8 @@ int main(int argc, char **argv){
     print_regs();
     dev_report();
     for(i=0;i<nbrks;i++)
-        printf("%s %s lin=%05X hits=%d\n", brks[i].stop == 1 ? "break" : brks[i].stop ? "poke" : "log",
+        printf("%s %s lin=%05X hits=%d\n", brks[i].stop == 1 ? "break" : brks[i].stop == 2 ? "poke"
+               : brks[i].stop ? "keyat" : "log",
                addr_str(&brks[i].a), brks[i].a.lin, brks[i].hits);
     print_dumps();
     memwatch_report();
