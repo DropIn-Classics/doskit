@@ -96,7 +96,9 @@ In build/selftest (a project as a game's would be, see kit.py):
      planar pixel of a narrowed line in the mode's middle) says "vga
      modes ok"; tests/launcher/launchtest.c (launcher.c: a choice,
      a key, the pages, an action by keys; the settings file written and
-     read; frame.c's keymap) says "launcher ok"; tests/cdaudio/cdatest.c
+     read; frame.c's keymap) says "launcher ok"; tests/hud/hudtest.c
+     (hud.c: the box, a letter, the bar, the size at 800x600, the
+     pictures shown) says "hud ok"; tests/cdaudio/cdatest.c
      (cdaudio.c on the cue sheet of step 3: the table, the WAVE's samples,
      the Ogg's tones by loudness, the channels, the clock) says "cdaudio
      ok"; tests/update/updatetest.c
@@ -1331,6 +1333,11 @@ def main():
     if 'launcher ok' not in out:
         raise SystemExit('selftest FAILED: launcher.c / frame.c\'s keymap: ' + out)
     print(out.strip())
+    exe = cc(os.path.join(b, 'hudtest'), [os.path.join(HERE, 'hud', 'hudtest.c'),
+                                           os.path.join(RUNTIME, 'hud.c')])
+    out = run([exe])
+    if 'hud ok' not in out:
+        raise SystemExit('selftest FAILED: hud.c: ' + out)
     print(out.strip())
     check_update(b)
     check_gogfind(b)

@@ -91,7 +91,8 @@ docs/NEW-PROJECT.md how to start a new game.
     headphone mode), `fli.h` (FLI animations), `textmode.h` (an 80x25
     text screen), `launcher.h` (a setup screen on it: pages of choices,
     keys and actions by keyboard or controller, kept in a settings
-    file), `pad.h` (controller
+    file), `hud.h` (a short box at the top of the picture: a word
+    and a bar of steps, for the volume keys in play), `pad.h` (controller
     buttons to keys), `cdimage.h` (a GOG release found and its image
     unpacked, or its installed folder copied; a cue sheet's disc, image
     and audio tracks, copied), `inno.h` (GOG's Windows
