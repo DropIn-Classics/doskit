@@ -90,13 +90,13 @@ static void centre(int y, const char *s, uint8_t attr)
     tm_text((TM_COLS - (int)strlen(s)) / 2, y, s, attr);
 }
 
-/* the title bar: the game's name and "Setup" at the left, the port's name
+/* the title bar: the game's name at the left, the port's name
  * and version at the right (left out when both do not fit) */
 static void title_bar(const LauncherApp *app, uint8_t attr)
 {
     char left[TM_COLS], right[TM_COLS];
 
-    snprintf(left, sizeof left, "%.60s Setup", app->game);
+    snprintf(left, sizeof left, "%.60s", app->game);
     if (app->version && *app->version)
         snprintf(right, sizeof right, "%.40s %.20s", app->port, app->version);
     else

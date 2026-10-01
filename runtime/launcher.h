@@ -50,7 +50,7 @@ typedef struct {
 #define LAUNCHER_QUIT (-1)          /* Esc, or the window closed */
 
 /* the names in the title bar, of the setup screen and of the dialog about
- * the game's files alike: "My Game Setup" at the left, "mygame 1.2" at
+ * the game's files alike: "My Game" at the left, "mygame 1.2" at
  * the right */
 typedef struct {
     const char *game;               /* the game's name: "My Game" */
