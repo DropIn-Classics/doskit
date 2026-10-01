@@ -10,7 +10,10 @@
  * `game`, or, installed as a folder, that folder copied there (cdimage.h);
  * not installed, GOG's Windows installer (setup_*.exe) lying about is
  * unpacked instead (inno.h).  -gog names the image, the folder or the
- * installer instead of looking for it.
+ * installer instead of looking for it.  Found by itself, the release is
+ * copied only when the player agrees (Y or Enter; N or Esc not), asked in
+ * the window; the headless build asks only in a run scripted with keys
+ * (DK_KEYS, plat_null.c) and copies without asking otherwise.
  *
  * A release build (PORT_VERSION and PORT_UPDATE_URL defined) asks once
  * whether it may look for newer releases and shows one it found
@@ -20,6 +23,7 @@
  * waits for Esc.
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "cdimage.h"
 #include "inno.h"
@@ -94,6 +98,39 @@ static void show(void)
     plat_present(pixels, TM_WIDTH, TM_HEIGHT, palette);
 }
 
+/* 1 if the player declined the copy */
+static int declined;
+
+/* asks whether `what` may be made from `from` into `to`; 1 yes.  Not
+ * asked (1) when -gog named the release, nor headless unless keys are
+ * scripted. */
+static int offer(const char *what, const char *from, const char *to, int named)
+{
+    const uint8_t attr = TM_ATTR(TM_LIGHTGREY, TM_BLUE), hi = TM_ATTR(TM_YELLOW, TM_BLUE);
+
+    if (named || (!plat_has_window() && !getenv("DK_KEYS")))
+        return 1;
+    tm_clear(' ', attr);
+    tm_text(2, 2, "{{NAME}} was found (the GOG release):", TM_ATTR(TM_WHITE, TM_BLUE));
+    tm_text(2, 3, from, hi);
+    tm_text(2, 5, what, TM_ATTR(TM_WHITE, TM_BLUE));
+    tm_text(2, 6, to, hi);
+    tm_text(2, 8, "Do that now?  Y / N", hi);
+    while (plat_pump()) {
+        int b;
+
+        while ((b = plat_read_scancode()) >= 0) {
+            if (b == 0x15 || b == 0x1C)                 /* Y, Enter */
+                return 1;
+            if (b == 0x31 || b == 0x01)                 /* N, Esc */
+                return 0;
+        }
+        show();
+        plat_sleep_ms(15);
+    }
+    return 0;
+}
+
 /* the game's files: found, or from the GOG release (its CD image
  * unpacked, its installed folder copied, or its Windows installer
  * unpacked); 1 if there */
@@ -116,6 +153,12 @@ static int get_game(const char *given, const char *gog, char *out, size_t n)
     setup = !folder && inno_is_setup(from);
     sys_data_dir(data, sizeof data);
     sys_join(out, n, data, "game");
+    if (!offer(folder ? "Its game files can be copied into the data folder's"
+                      : "Its game files can be unpacked into the data folder's",
+               from, out, gog != NULL)) {
+        declined = 1;
+        return 0;
+    }
     tm_clear(' ', TM_ATTR(TM_LIGHTGREY, TM_BLUE));
     tm_text(2, 2, folder ? "Copying the game's files from" : "Unpacking the game's files from",
             TM_ATTR(TM_WHITE, TM_BLUE));
@@ -155,8 +198,13 @@ int main(int argc, char **argv)
     if (!plat_init("{{NAME}}"))
         return 1;
     if (!get_game(given, gog, game, sizeof game)) {
-        plat_message("The game's files were not found. This program needs an installed "
-                     "copy of {{NAME}} (the GOG release), or -game with its folder.");
+        if (declined)
+            plat_message("The game's files were not copied, so nothing can be played. "
+                         "Start {{SLUG}} again to be asked again, or use -game with "
+                         "the folder of the game's files.");
+        else
+            plat_message("The game's files were not found. This program needs an installed "
+                         "copy of {{NAME}} (the GOG release), or -game with its folder.");
         plat_shutdown();
         return 1;
     }

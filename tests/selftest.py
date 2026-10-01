@@ -1524,6 +1524,19 @@ def main():
         raise SystemExit('selftest FAILED: game.gog in the data folder not found')
     print('ok   game.gog in the data folder found and unpacked')
 
+    # found by itself, the copy is offered first (asked headless only with
+    # keys): N leaves the data folder without the game, Y copies it
+    for key, ok in (('31', False), ('15', True)):
+        shutil.rmtree(os.path.join(data, 'game'), ignore_errors=True)
+        r = subprocess.run([exe], cwd=empty, capture_output=True, text=True,
+                           env=dict(os.environ, DK_FRAMES='20', DK_DATA_DIR=data,
+                                    DK_KEYS=f'2:{key}'))
+        there = os.path.isfile(got) and open(got, 'rb').read() == hello
+        if (r.returncode == 0) != ok or there != ok:
+            print(r.stdout + r.stderr)
+            raise SystemExit(f'selftest FAILED: the copy offered (key {key})')
+    print('ok   the copy offered: N declines it, Y copies')
+
     # GOG's Windows installer, where GOG sells a game for Windows only:
     # named by -gog, and found in ~/Downloads (HOME a folder of its own)
     # by its product ID without it
