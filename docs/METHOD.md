@@ -289,10 +289,11 @@ release and on the first start unpacks its CD image or, for a game
 installed as a folder, copies that folder (`sys_find_game` then finds
 it in the data folder).
 
-**Modernising.** Once equal: a launcher (setup screen: options, sound,
-controller), quality of life fixes (switchable, off in comparisons),
-skipping intros, the original's bugs fixed only where they bother,
-each such change documented as a change from the original.
+**Modernising.** Once equal: the common launcher (setup screen: options,
+sound, controller) described by docs/LAUNCHER.md, with the port supplying
+only its pages and items; quality of life fixes (switchable, off in
+comparisons), skipping intros, the original's bugs fixed only where they
+bother, each such change documented as a change from the original.
 
 **Releases.** Every port ships the same way on every platform, as
 docs/RELEASE.md says: one program to double click (on a Mac one app),

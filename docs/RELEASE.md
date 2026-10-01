@@ -27,11 +27,13 @@ a point below.
    player's GOG release (`cdimage.h`: registry, GOG's folders, the Mac
    app; on Linux GOG's Linux installer, `.sh`, with its menu entry,
    Heroic, Lutris, Minigalaxy, Bottles, Wine) and offers to copy the
-   game's files; the setup screen comes first. If it is not found, the
-   message says what to do, and the program looks where README.txt says
-   a `game.gog` can be put. The offer, the copy's progress and the
-   messages are the kit's dialog about the game's files, the same in
-   every port (`launcher.h`: `launcher_offer_copy`, `launcher_no_game`,
+   game's files; the setup screen comes first and follows the common
+   design in `docs/LAUNCHER.md`. A port supplies its pages and items to
+   `launcher.h`; it does not draw or restyle the setup screen. If the
+   game is not found, the message says what to do, and the program looks
+   where README.txt says a `game.gog` can be put. The offer, the copy's
+   progress and the messages are the kit's dialog about the game's
+   files, the same in every port (`launcher.h`: `launcher_offer_copy`, `launcher_no_game`,
    `launcher_copy_failed`, `launcher_copy_progress`; a window "The
    game's files" on the setup screen's backdrop, "Copy the files" or
    "Quit"). A port gives its names and says whether the CD's image and

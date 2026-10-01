@@ -29,6 +29,10 @@ first; this file is the rules. The method and the tools are doskit's
    with nothing left out: the packages the workflow builds, the
    player's port/dist/README.txt filled in for the game, each package
    started from a download before the release is announced.
+9. The setup screen follows doskit/docs/LAUNCHER.md. Its visual design
+   and common dialogs belong to doskit; the port supplies pages, items
+   and game-specific behaviour through launcher.h and does not redesign,
+   copy or override the launcher.
 
 ## Subagents
 

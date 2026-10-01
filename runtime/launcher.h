@@ -3,6 +3,12 @@
  * through with the arrow keys or a controller, the choices kept in a
  * settings file of `name = value` lines.
  *
+ * docs/LAUNCHER.md is its design contract.  The kit owns the complete
+ * presentation and common dialogs; a port supplies LauncherApp,
+ * LauncherPage and LauncherItem content through this interface.  It
+ * does not copy the implementation or draw, theme or rearrange the
+ * launcher itself.
+ *
  * The port describes its pages; the launcher draws them, changes the
  * values the items point to and returns when the player picks an action
  * (start the game, start a table, quit) or closes the window.

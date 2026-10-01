@@ -27,6 +27,9 @@ from template/).
 6. template/PROVENANCE.md is the text every project carries; it is
    changed only when the user changes it, and stays free of any one
    game (the game's name is the `{{NAME}}` placeholder).
+7. docs/LAUNCHER.md is the binding design contract for every port's setup
+   screen. The common launcher is changed in the kit, deliberately and
+   with its tests; it is not redesigned or copied in a game project.
 
 ## Provenance (permanent)
 
