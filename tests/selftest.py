@@ -16,6 +16,7 @@ In build/selftest (a project as a game's would be, see kit.py):
      game/PMODE/PMODE.EXE, tests/cdrom/CDROM.ASM into game/CDROM/CDROM.EXE,
      tests/vgamode/VGAMODE.ASM into game/VGAMODE/VGAMODE.EXE,
      tests/gameport/GAMEPORT.ASM into game/GAMEPORT/GAMEPORT.EXE,
+     tests/rwatch/RWATCH.ASM into game/RWATCH/RWATCH.EXE,
      tests/adlib/ADLIB.ASM into game/ADLIB/ADLIB.EXE,
      tests/sb16/SB16.ASM into game/SB16/SB16.EXE, tests/cdplay/CDPLAY.ASM
      into game/CDPLAY/CDPLAY.EXE, tests/multiseg/MULTISEG.ASM into
@@ -69,7 +70,10 @@ In build/selftest (a project as a game's would be, see kit.py):
      4F01h, 4F02h with modes 101h and 103h, 4F03h) and says
      "vgamode ok"; GAMEPORT.EXE, which reads the game port as a PC
      without a joystick has it (FFh, the axis bits never falling after
-     the one-shots are started) and says "gameport ok"; ADLIB.EXE, which
+     the one-shots are started) and says "gameport ok"; RWATCH.EXE, whose
+     table of 200 bytes -rwatch reports with all its 300 readers (an
+     instruction and the byte it read; more than a fixed table of 64
+     kept); ADLIB.EXE, which
      probes the runner's OPL2 as drivers do (the timers' flags in the
      status, masked, cleared, not set before their time) and says "adlib
      ok"; SB16.EXE, which checks the runner's
@@ -844,6 +848,7 @@ def main():
           f'RELMOD.MOD %d bytes, %d offsets; PMODE.EXE {make_exe("PMODE")} bytes; '
           f'CDROM.EXE {make_exe("CDROM")} bytes; VGAMODE.EXE {make_exe("VGAMODE")} bytes; '
           f'GAMEPORT.EXE {make_exe("GAMEPORT")} bytes; '
+          f'RWATCH.EXE {make_exe("RWATCH")} bytes; '
           f'ADLIB.EXE {make_exe("ADLIB")} bytes; '
           f'SB16.EXE {make_exe("SB16")} bytes; CDPLAY.EXE {make_exe("CDPLAY")} bytes; '
           f'MULTISEG.EXE {make_multiseg()} bytes'
@@ -1016,6 +1021,22 @@ def main():
             or not memr[-1].endswith('read by 4 readers')):
         print(out)
         raise SystemExit('selftest FAILED: -rwatch on HELLO.EXE\'s counter and table')
+    # a table with more readers than the runner once kept (64): RWATCH.EXE's
+    # 200 bytes, each read by its LODSB, the first 100 by its CMP as well
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-rwatch', 'RWATCH.EXE+0004:0000', 'C8',
+               'RWATCH/RWATCH.EXE'])
+    memr = [l for l in out.splitlines() if l.startswith('[memr]')]
+    readers = [(int(l.split()[1].split('+')[1], 16), l.split()[4]) for l in memr if ' read by ' in l and 'times' in l]
+    by_ip = {}
+    for off, ip in readers:
+        by_ip.setdefault(ip, []).append(off)
+    print(f'{memr[-1]}; ' + ' '.join(l for l in out.splitlines() if l.startswith('con:')))
+    if ('con: rwatch ok' not in out or sorted(map(sorted, by_ip.values()), key=len) != [list(range(100)), list(range(200))]
+            or len(set(readers)) != 300 or any('not kept' in l for l in memr)
+            or not all(' 1 times' in l for l in memr if 'times' in l)
+            or not memr[-1].endswith('read by 300 readers')):
+        print(out)
+        raise SystemExit('selftest FAILED: -rwatch on RWATCH.EXE\'s table of 300 readers')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', 'PMODE/PMODE.EXE'])
     print('\n'.join(l for l in out.splitlines() if l.startswith(('con:', '[cpu]'))))
     if 'con: pmode ok' not in out:

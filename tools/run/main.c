@@ -37,7 +37,9 @@
  *                    the bytes HEX ("04 00" or "0400") at TARGET, go on
  *   -watch ADDR      print each write to the byte at ADDR (one -watch: the last)
  *   -rwatch ADDR LEN which instructions read the LEN bytes at ADDR (hex):
- *                    a count per reader at the end (data reads, not fetches)
+ *                    a count per reader at the end (data reads, not
+ *                    fetches; a reader is an instruction and the first
+ *                    byte it read, up to 65536 of them)
  *   -trace FILE N    one line per instruction for N instructions, from the
  *                    first -break/-log hit on (or from the start without one)
  *   -dump ADDR LEN   print LEN bytes at ADDR at the end (repeatable)
