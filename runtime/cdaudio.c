@@ -17,6 +17,10 @@
 #include <alloca.h>
 #endif
 #if defined(_MSC_VER)
+/* the code generator's warnings (a variable perhaps used before set, in
+ * stb_vorbis_seek's search) do not follow the push below: off for the
+ * whole file */
+#pragma warning(disable: 4701 4703)
 #pragma warning(push, 1)
 #elif defined(__clang__)
 #pragma clang diagnostic push
