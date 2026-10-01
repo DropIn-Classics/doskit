@@ -11,9 +11,18 @@
  * steps it on), Tab / Page Up / Page Down the pages (a controller's
  * shoulder buttons), Enter on a key item waits for the key to give it
  * (Esc keeps the old one, Backspace none), Esc quits (LAUNCHER_QUIT).
- * The controller: pad_menu_keys and the shoulders for the pages. */
+ * The controller: pad_menu_keys and the shoulders for the pages.
+ *
+ * The dialog about the game's files (launcher_offer_copy and the others
+ * below) is the same in every port: the setup screen's backdrop, a window
+ * "The game's files" saying where the player's GOG release is and where
+ * its files would be copied, the choices below (Up/Down, Enter; Esc the
+ * last one), and a bar while copying.  A port gives its names and says
+ * what is copied; the texts are the kit's. */
 #ifndef DK_LAUNCHER_H
 #define DK_LAUNCHER_H
+
+#include <stdint.h>
 
 enum {
     LI_HEAD,        /* a heading line, not selectable */
@@ -60,5 +69,50 @@ int launcher_save(const char *path, const char *comment, LauncherPage *pages, in
 /* a key's name ("Left Shift", "Keypad Enter") for a make code as above;
  * "none" for 0, "key XXh" for one without a name */
 const char *launcher_key_name(int code);
+
+/* ---- the dialog about the game's files */
+
+/* the names on the dialog's screen: "My Game Setup" at the left of the
+ * title bar, "mygame 1.2" at the right */
+typedef struct {
+    const char *game;               /* the game's name: "My Game" */
+    const char *port;               /* the program's name: "mygame" */
+    const char *version;            /* the release's version; NULL or "": none */
+} LauncherApp;
+
+/* what is copied from the GOG release */
+enum {
+    LAUNCHER_GAME,                  /* the game's files */
+    LAUNCHER_GAME_AND_CD,           /* and the CD's image and music */
+    LAUNCHER_CD                     /* the CD's image and music only (the game's files are there) */
+};
+
+/* The copy of `what` from the release at `from` into `to` offered: "Copy
+ * the files" or "Quit" (LAUNCHER_CD, without which the game runs: "Not
+ * now").  1 to copy, 0 not (or the window was closed). */
+int launcher_offer_copy(const LauncherApp *app, int what, const char *from, const char *to);
+
+/* Neither the game's files nor a GOG release were found: said, until
+ * "Quit".  `how` ends the sentence "Install the game from GOG and start
+ * mygame again, or start it with " (the port's arguments; NULL: -gog and
+ * -game as the template has them). */
+void launcher_no_game(const LauncherApp *app, const char *how);
+
+/* the copy from `from` failed because of `why` (the copying function's
+ * err): said, until "Quit" */
+void launcher_copy_failed(const LauncherApp *app, const char *from, const char *why);
+
+/* the bar while copying: launcher_copy_progress is the `progress` of
+ * cd_unpack, gog_copy, cd_copy_disc and inno_unpack, its ctx a
+ * LauncherCopy with app and what set and the rest 0.  `closed` is 1
+ * afterwards when the player closed the window (the copy was stopped). */
+typedef struct {
+    const LauncherApp *app;
+    int what;                       /* LAUNCHER_GAME or LAUNCHER_CD */
+    uint64_t drawn;
+    int closed;
+} LauncherCopy;
+
+int launcher_copy_progress(void *ctx, const char *file, long done, long total);
 
 #endif

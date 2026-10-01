@@ -278,6 +278,237 @@ done:
     return result;
 }
 
+/* ---- the dialog about the game's files */
+
+#define D_WINDOW TM_ATTR(TM_WHITE, TM_BLUE)
+#define D_TITLE TM_ATTR(TM_YELLOW, TM_BLUE)
+#define D_LABEL TM_ATTR(TM_LIGHTGREY, TM_BLUE)
+#define D_VALUE TM_ATTR(TM_YELLOW, TM_BLUE)
+#define D_CURSOR TM_ATTR(TM_BLACK, TM_CYAN)
+#define D_BAR TM_ATTR(TM_BLACK, TM_LIGHTGREY)
+#define D_BAR_KEY TM_ATTR(TM_RED, TM_LIGHTGREY)
+
+#define D_W 70                  /* the window's width */
+#define D_TEXT (D_W - 6)        /* and its text's */
+#define D_MAX 14                /* lines of text at most */
+
+/* the window's lines: "" an empty one, one starting with a space a value
+ * (a path) */
+static char d_lines[D_MAX][D_TEXT + 1];
+static int d_n;
+
+static void d_gap(void)
+{
+    if (d_n < D_MAX)
+        d_lines[d_n++][0] = 0;
+}
+
+/* a paragraph, broken between words */
+static void d_para(const char *s)
+{
+    while (*s && d_n < D_MAX) {
+        int k = (int)strlen(s);
+
+        if (k > D_TEXT) {
+            for (k = D_TEXT; k > 0 && s[k] != ' '; k--)
+                ;
+            if (!k)
+                k = D_TEXT;
+        }
+        snprintf(d_lines[d_n++], sizeof d_lines[0], "%.*s", k, s);
+        s += k;
+        while (*s == ' ')
+            s++;
+    }
+}
+
+/* a path or a reason on a line of its own; of one too long the start is
+ * left out */
+static void d_value(const char *s)
+{
+    int len = (int)strlen(s), w = D_TEXT - 2;
+
+    if (d_n >= D_MAX)
+        return;
+    if (len <= w)
+        snprintf(d_lines[d_n++], sizeof d_lines[0], "  %s", s);
+    else
+        snprintf(d_lines[d_n++], sizeof d_lines[0], "  ...%s", s + len - (w - 3));
+}
+
+/* the blue screen with its title bar */
+static void d_backdrop(const LauncherApp *app)
+{
+    char left[TM_COLS], right[TM_COLS];
+
+    snprintf(left, sizeof left, "%.60s Setup", app->game);
+    if (app->version && *app->version)
+        snprintf(right, sizeof right, "%.40s %.20s", app->port, app->version);
+    else
+        snprintf(right, sizeof right, "%.40s", app->port);
+    tm_clear(' ', D_WINDOW);
+    tm_fill(0, 0, TM_COLS, 1, ' ', D_BAR);
+    tm_text(1, 0, left, D_BAR);
+    if ((int)(strlen(left) + strlen(right)) + 3 <= TM_COLS)
+        tm_text(TM_COLS - 1 - (int)strlen(right), 0, right, D_BAR);
+}
+
+/* a bar of "KEY text" pairs at the bottom */
+static void d_help(const char *const *parts)
+{
+    int x = 1;
+
+    tm_fill(0, TM_ROWS - 1, TM_COLS, 1, ' ', D_BAR);
+    for (; parts[0]; parts += 2) {
+        x = tm_text(x, TM_ROWS - 1, parts[0], D_BAR_KEY);
+        x = tm_text(x + 1, TM_ROWS - 1, parts[1], D_BAR) + 3;
+    }
+}
+
+/* the window of d_lines and below them the choices, `cursor` highlighted */
+static void d_window(const char *const *choices, int nchoices, int cursor)
+{
+    static const char title[] = " The game's files ";
+    int h = d_n + nchoices + 5, x = (TM_COLS - D_W) / 2, y = 2 + (20 - h) / 2, i;
+
+    tm_fill(x, y, D_W, h, ' ', D_WINDOW);
+    tm_frame(x, y, D_W, h, D_WINDOW);
+    tm_text(x + (D_W - (int)strlen(title)) / 2, y, title, D_TITLE);
+    tm_shadow(x, y, D_W, h);
+    for (i = 0; i < d_n; i++)
+        if (d_lines[i][0])
+            tm_text(x + 3, y + 2 + i, d_lines[i], d_lines[i][0] == ' ' ? D_VALUE : D_LABEL);
+    for (i = 0; i < nchoices; i++) {
+        int row = y + 3 + d_n + i;
+
+        if (i == cursor)
+            tm_fill(x + 2, row, D_W - 4, 1, ' ', D_CURSOR);
+        tm_text(x + 4, row, choices[i], i == cursor ? D_CURSOR : D_LABEL);
+    }
+}
+
+static void d_show(void)
+{
+    tm_render(pixels, palette);
+    plat_present(pixels, TM_WIDTH, TM_HEIGHT, palette);
+}
+
+/* d_lines and the choices until Enter (Esc, or the window closed: the
+ * last choice); the choice */
+static int d_ask(const LauncherApp *app, const char *const *choices, int nchoices)
+{
+    static const char *const help[] = { "\x18\x19", "Select", "Enter", "Choose", NULL };
+    const PadKeys *was = pad_set_keys(&pad_menu_keys);
+    int cursor = 0, r = -1, k;
+
+    while (r < 0) {
+        if (!plat_pump()) {
+            r = nchoices - 1;
+            break;
+        }
+        while (plat_read_control() >= 0)
+            ;
+        while (r < 0 && (k = next_key()) >= 0) {
+            if ((k == 0x48 || k == 0xC8) && cursor > 0)
+                cursor--;
+            else if ((k == 0x50 || k == 0xD0) && cursor < nchoices - 1)
+                cursor++;
+            else if (k == 0x1C || k == 0x9C || k == 0x39)
+                r = cursor;
+            else if (k == 0x01)
+                r = nchoices - 1;
+        }
+        d_backdrop(app);
+        d_window(choices, nchoices, cursor);
+        d_help(help);
+        d_show();
+        plat_sleep_ms(15);
+    }
+    pad_set_keys(was);
+    return r;
+}
+
+int launcher_offer_copy(const LauncherApp *app, int what, const char *from, const char *to)
+{
+    static const char *const copy_or_quit[] = { "Copy the files", "Quit" };
+    static const char *const copy_or_not[] = { "Copy the files", "Not now" };
+    char text[400];
+
+    d_n = 0;
+    if (what == LAUNCHER_CD)
+        snprintf(text, sizeof text, "%s plays the music of %s from a copy of your own CD. It "
+                 "is not here yet; your GOG release is:", app->port, app->game);
+    else
+        snprintf(text, sizeof text, "%s runs %s with the files of your own copy of the game. "
+                 "They are not here yet; your GOG release is:", app->port, app->game);
+    d_para(text);
+    d_value(from);
+    d_gap();
+    d_para(what == LAUNCHER_GAME ? "Its files can be copied from there into:"
+           : what == LAUNCHER_CD ? "The CD's image and music can be copied from there into:"
+           : "Its files and the CD's image and music can be copied from there into:");
+    d_value(to);
+    return d_ask(app, what == LAUNCHER_CD ? copy_or_not : copy_or_quit, 2) == 0;
+}
+
+static const char *const d_quit[] = { "Quit" };
+
+void launcher_no_game(const LauncherApp *app, const char *how)
+{
+    char text[400];
+
+    d_n = 0;
+    snprintf(text, sizeof text, "%s runs %s with the files of your own copy of the game, its "
+             "GOG release. Neither its files nor an installed GOG release were found.",
+             app->port, app->game);
+    d_para(text);
+    d_gap();
+    snprintf(text, sizeof text, "Install the game from GOG and start %s again, or start it "
+             "with %s.", app->port,
+             how ? how : "-gog FILE (the release's CD image, folder or installer) or -game "
+                         "FOLDER (the game's files)");
+    d_para(text);
+    d_ask(app, d_quit, 1);
+}
+
+void launcher_copy_failed(const LauncherApp *app, const char *from, const char *why)
+{
+    d_n = 0;
+    d_para("The files could not be copied:");
+    d_value(why);
+    d_gap();
+    d_para("From:");
+    d_value(from);
+    d_ask(app, d_quit, 1);
+}
+
+int launcher_copy_progress(void *ctx, const char *file, long done, long total)
+{
+    static const char *const help[] = { "", "Copying ...", NULL };
+    LauncherCopy *c = (LauncherCopy *)ctx;
+    int width = 50, full = total > 0 ? (int)((double)done / (double)total * width) : 0, i;
+
+    if (c->drawn && plat_micros() - c->drawn < 30000 && done < total)
+        return c->closed;
+    c->drawn = plat_micros();
+    d_n = 0;
+    d_para(c->what == LAUNCHER_CD ? "Copying the CD's image and music from your GOG release:"
+                                  : "Copying the game's files from your GOG release:");
+    d_gap();
+    for (i = 0; i < width; i++)
+        d_lines[d_n][i] = (char)(i < full ? TM_BLOCK : TM_SHADE_LIGHT);
+    d_lines[d_n++][width] = 0;
+    snprintf(d_lines[d_n++], sizeof d_lines[0], " %3d %%   %.50s",
+             total > 0 ? (int)(100.0 * (double)done / (double)total) : 0, file ? file : "");
+    d_backdrop(c->app);
+    d_window(NULL, 0, -1);
+    d_help(help);
+    d_show();
+    if (!plat_pump())
+        c->closed = 1;
+    return c->closed;
+}
+
 /* ---- the settings file */
 
 static LauncherItem *find_item(LauncherPage *pages, int npages, const char *name)

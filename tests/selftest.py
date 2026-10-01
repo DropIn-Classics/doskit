@@ -96,7 +96,10 @@ In build/selftest (a project as a game's would be, see kit.py):
      planar pixel of a narrowed line in the mode's middle) says "vga
      modes ok"; tests/launcher/launchtest.c (launcher.c: a choice,
      a key, the pages, an action by keys; the settings file written and
-     read; frame.c's keymap) says "launcher ok"; tests/hud/hudtest.c
+     read; frame.c's keymap) says "launcher ok";
+     tests/launcher/dialogtest.c (launcher.c's dialog about the game's
+     files: the copy taken, declined, the two messages, the bar) says
+     "dialog ok"; tests/hud/hudtest.c
      (hud.c: the box, a letter, the bar, the size at 800x600, the
      pictures shown) says "hud ok"; tests/cdaudio/cdatest.c
      (cdaudio.c on the cue sheet of step 3: the table, the WAVE's samples,
@@ -1333,6 +1336,13 @@ def main():
     if 'launcher ok' not in out:
         raise SystemExit('selftest FAILED: launcher.c / frame.c\'s keymap: ' + out)
     print(out.strip())
+    exe = cc(os.path.join(b, 'dialogtest'), [os.path.join(HERE, 'launcher', 'dialogtest.c')] + [
+        os.path.join(RUNTIME, f) for f in ('launcher.c', 'textmode.c', 'pad.c', 'plat_null.c',
+                                           'shot.c', 'sys.c')])
+    out = run([exe])
+    if 'dialog ok' not in out:
+        raise SystemExit('selftest FAILED: launcher.c\'s dialog about the game\'s files: ' + out)
+    print(out.strip())
     exe = cc(os.path.join(b, 'hudtest'), [os.path.join(HERE, 'hud', 'hudtest.c'),
                                            os.path.join(RUNTIME, 'hud.c')])
     out = run([exe])
@@ -1525,17 +1535,18 @@ def main():
     print('ok   game.gog in the data folder found and unpacked')
 
     # found by itself, the copy is offered first (asked headless only with
-    # keys): N leaves the data folder without the game, Y copies it
-    for key, ok in (('31', False), ('15', True)):
+    # keys) in launcher.c's dialog: Esc, or Down to "Quit" and Enter, leave
+    # the data folder without the game; Enter on "Copy the files" copies it
+    for keys, ok in (('2:01', False), ('2:E0-50 4:1C', False), ('2:1C', True)):
         shutil.rmtree(os.path.join(data, 'game'), ignore_errors=True)
         r = subprocess.run([exe], cwd=empty, capture_output=True, text=True,
                            env=dict(os.environ, DK_FRAMES='20', DK_DATA_DIR=data,
-                                    DK_KEYS=f'2:{key}'))
+                                    DK_KEYS=keys))
         there = os.path.isfile(got) and open(got, 'rb').read() == hello
         if (r.returncode == 0) != ok or there != ok:
             print(r.stdout + r.stderr)
-            raise SystemExit(f'selftest FAILED: the copy offered (key {key})')
-    print('ok   the copy offered: N declines it, Y copies')
+            raise SystemExit(f'selftest FAILED: the copy offered (keys {keys})')
+    print('ok   the copy offered: Esc and "Quit" decline it, "Copy the files" copies')
 
     # GOG's Windows installer, where GOG sells a game for Windows only:
     # named by -gog, and found in ~/Downloads (HOME a folder of its own)

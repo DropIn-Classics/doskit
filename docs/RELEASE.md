@@ -29,7 +29,13 @@ a point below.
    Heroic, Lutris, Minigalaxy, Bottles, Wine) and offers to copy the
    game's files; the setup screen comes first. If it is not found, the
    message says what to do, and the program looks where README.txt says
-   a `game.gog` can be put.
+   a `game.gog` can be put. The offer, the copy's progress and the
+   messages are the kit's dialog about the game's files, the same in
+   every port (`launcher.h`: `launcher_offer_copy`, `launcher_no_game`,
+   `launcher_copy_failed`, `launcher_copy_progress`; a window "The
+   game's files" on the setup screen's backdrop, "Copy the files" or
+   "Quit"). A port gives its names and says whether the CD's image and
+   music are copied too; it does not draw a question of its own.
 4. **Nothing written into the program's package.** Settings, saves and
    the copied game go into the user's data folder, `sys_data_dir`:
    `%LOCALAPPDATA%\NAME` on Windows, `~/.local/share/SLUG` (or
