@@ -32,12 +32,16 @@ first; this file is the rules. The method and the tools are doskit's
 
 ## Subagents
 
-`.claude/agents/` sets up two: `doskit-collector` for read-only stage
-1/2 collection (disasm.py, gaps.py, ptrscan.py, run.py, memcmp.py
-output) that the lead then interprets and writes into the hints, and
-`git-committer` for every commit and push, so the checks and the
-message stay uniform. Delegate to them instead of doing their job
-inline.
+The kit is a Claude Code plugin (`doskit/.claude-plugin/`, the agents
+in `doskit/agents/`), switched on for this project in
+`.claude/settings.json`. It brings three: `doskit:collector` for
+read-only stage 1/2 collection (disasm.py, gaps.py, ptrscan.py, run.py,
+memcmp.py output) that the lead then interprets and writes into the
+hints, `doskit:cmd-digest` for a command with long output (a build,
+check.py, the port's comparisons) of which only the result is needed,
+and `doskit:git-committer` for every commit and push, so the checks and
+the message stay uniform. Delegate to them instead of doing their job
+inline. An agent is changed in the kit, not copied here.
 
 ## Provenance (permanent)
 

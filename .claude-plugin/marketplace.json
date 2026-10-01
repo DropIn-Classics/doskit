@@ -1,0 +1,14 @@
+{
+  "name": "doskit",
+  "description": "doskit's own plugin for Claude Code, for the projects that use the kit.",
+  "owner": {
+    "name": "Richard Kaemmerer"
+  },
+  "plugins": [
+    {
+      "name": "doskit",
+      "source": "./",
+      "description": "Subagents for work in a doskit project: collector, cmd-digest, git-committer."
+    }
+  ]
+}

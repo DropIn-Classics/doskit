@@ -1,0 +1,8 @@
+{
+  "name": "doskit",
+  "description": "Subagents on a cheaper model for the repetitive parts of work in a doskit project: collecting tool output, running a noisy command and reporting only its result, committing.",
+  "author": {
+    "name": "Richard Kaemmerer"
+  },
+  "repository": "https://github.com/mindphluxnet/doskit"
+}

@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "doskit": {
+      "source": {
+        "source": "directory",
+        "path": "./"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "doskit@doskit": true
+  }
+}

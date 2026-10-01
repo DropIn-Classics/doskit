@@ -834,6 +834,38 @@ def cd_image(files, path, mode=1):
                 f.write(sync + b'\2' + bytes(8) + sectors.get(n, bytes(2048)) + bytes(280))
 
 
+def check_plugin(new):
+    """The kit as a Claude Code plugin: its manifests, its agents, and
+    the new project's settings and AGENTS.md that use them."""
+    import json
+    def load(*path):
+        with open(os.path.join(*path)) as f:
+            return json.load(f)
+    name = load(KIT, '.claude-plugin', 'plugin.json')['name']
+    market = load(KIT, '.claude-plugin', 'marketplace.json')
+    if [(p['name'], p['source']) for p in market['plugins']] != [(name, './')]:
+        raise SystemExit('selftest FAILED: marketplace.json does not offer the kit\'s plugin')
+    key = f'{name}@{market["name"]}'
+    rules = open(os.path.join(new, 'AGENTS.md')).read()
+    agents = sorted(f[:-3] for f in os.listdir(os.path.join(KIT, 'agents')) if f.endswith('.md'))
+    for agent in agents:
+        head = open(os.path.join(KIT, 'agents', agent + '.md')).read().split('---\n')[1]
+        fields = dict(l.split(': ', 1) for l in head.splitlines())
+        if fields.get('name') != agent or not fields.get('description') or 'tools' not in fields:
+            raise SystemExit(f'selftest FAILED: agents/{agent}.md: its name, description or tools')
+        if f'`{name}:{agent}`' not in rules:
+            raise SystemExit(f'selftest FAILED: the template\'s AGENTS.md does not mention {name}:{agent}')
+    # the project takes the plugin from its submodule, the kit from itself
+    for root, path in ((new, './doskit'), (KIT, './')):
+        s = load(root, '.claude', 'settings.json')
+        src = s['extraKnownMarketplaces'][market['name']]['source']
+        if src != {'source': 'directory', 'path': path} or s['enabledPlugins'].get(key) is not True:
+            raise SystemExit(f'selftest FAILED: {root}/.claude/settings.json does not switch on {key}')
+    if os.path.exists(os.path.join(new, '.claude', 'agents')):
+        raise SystemExit('selftest FAILED: the template carries a copy of the agents')
+    print(f'ok   the plugin: {", ".join(agents)}; switched on in a new project and in the kit')
+
+
 def main():
     if os.path.isdir(PROJ):
         shutil.rmtree(PROJ)
@@ -1366,12 +1398,7 @@ def main():
     print('ok   macapp.py: the bundle, its Info.plist' +
           (', its signature' if sys.platform == 'darwin' else ''))
 
-    for agent in ('doskit-collector', 'git-committer'):
-        p = os.path.join(new, '.claude', 'agents', f'{agent}.md')
-        if not os.path.isfile(p):
-            raise SystemExit(f'selftest FAILED: the template did not carry {p}')
-        if agent not in open(os.path.join(new, 'AGENTS.md')).read():
-            raise SystemExit(f'selftest FAILED: AGENTS.md does not mention {agent}')
+    check_plugin(new)
 
     step('7. Inno Setup installers (inno.py)')
     check_inno(b)

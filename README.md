@@ -94,9 +94,17 @@ docs/NEW-PROJECT.md how to start a new game.
     `update.h` (newer releases made known, on the player's say).
 - `template/`: the start of a new port's repository (rules, hook, build
   scripts, a C skeleton, the workflow that builds the releases and the
-  player's README.txt as docs/RELEASE.md says, `.claude/agents/` for Claude Code subagents such
-  as `doskit-collector`, a cheaper model for repetitive stage 1/2 data
-  collection).
+  player's README.txt as docs/RELEASE.md says, `.claude/settings.json`
+  that switches on the kit's plugin from the project's `doskit/`).
+- `.claude-plugin/`, `agents/`: the kit as a Claude Code plugin, so
+  that every project has the same subagents without a copy of them, on
+  a cheaper model for the repetitive parts: `collector` (stage 1/2 data
+  collection), `cmd-digest` (a command with long output run, only its
+  result reported), `git-committer`. In a session they are
+  `doskit:collector` and so on. A project names the kit's folder as the
+  marketplace (`"source": "directory", "path": "./doskit"`), so the
+  agents are those of its submodule's state; they are there from the
+  second session on (the first makes the marketplace known).
 - `tests/`: `selftest.py`, the whole way on a program of our own
   (`tests/hello`), no game needed; a program in many code segments
   with TLINK's header (`tests/multiseg`); the 32-bit encoder (`tests/enc32`) and

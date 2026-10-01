@@ -19,13 +19,18 @@ session uses for commit messages. Do only that; do not edit files.
 2. Refuse and report back if anything staged lies under `game/` or
    `build/`, or is a game program or data file (.exe, .dat, .ovl, .mod,
    images, sound, binary blobs). No game bytes go into the repository.
-3. Run `python3 doskit/tools/check.py`. It must print `all ok`. If it
-   does not, do not commit: report the failing lines to the caller.
+3. Run the check the repository's AGENTS.md asks for before a commit:
+   in a game's project `python3 doskit/tools/check.py`, which must
+   print `all ok`; in the kit itself `python3 tests/selftest.py`, which
+   must print `selftest ok`; elsewhere what the caller named. If it
+   does not pass, do not commit: report the failing lines to the
+   caller.
 4. Commit on `master` with a message in plain English that says what
    changed and why: a short subject line, a blank line, a body if the
    caller gave one. If the caller gave an attribution line, end the
    message with exactly that line; if not, add none. Pass the message
-   with a heredoc (`git commit -F - <<'EOF' ... EOF`).
+   as one `-m` for each paragraph (`git commit -m SUBJECT -m BODY -m
+   ATTRIBUTION`), not with a heredoc.
 5. Push (`git push`) only if the caller explicitly said to push.
 
 ## Never

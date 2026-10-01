@@ -1,5 +1,5 @@
 ---
-name: doskit-collector
+name: collector
 description: Runs repetitive doskit data-collection steps (disasm.py, gaps.py, ptrscan.py, run.py, memcmp.py output) and reports raw findings back. Use for well-specified "collect X" tasks during stage 1/2 analysis — listing gap addresses, candidate pointers, CALL/JMP targets, run.py trace output, memcmp diffs — where the caller (Opus) will interpret the results and write the hints. Does not write hints, does not interpret findings, does not touch the repository.
 tools: Bash, Read, Grep, Glob
 model: haiku
