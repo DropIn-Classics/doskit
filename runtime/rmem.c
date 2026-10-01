@@ -6,7 +6,9 @@
 #include "sha256.h"
 #include "sys.h"
 
-uint8_t mem[MEM_SIZE];
+/* initialized, so not a common symbol: macOS's ld aligns a common one of
+ * 1 MB to 32 KB, beyond its segments' 16 KB, and warns */
+uint8_t mem[MEM_SIZE] = {0};
 uint16_t rm_ds, rm_psp, rm_arena;
 
 static uint16_t sw(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }

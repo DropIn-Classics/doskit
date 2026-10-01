@@ -913,7 +913,7 @@ static File *add_file(Setup *s, const char *path)
     s->files = files;
     f = &files[s->nfiles];
     memset(f, 0, sizeof *f);
-    if (!(f->path = dup(path)))
+    if ((f->path = dup(path)) == NULL)
         return NULL;
     for (p = f->path; *p; p++)
         if (*p == '\\')
@@ -1097,7 +1097,7 @@ static int load_setup(Setup *s, const char *path)
     }
     memset(version, 0, sizeof version);
     if (SEEK64(f, header) != 0 || fread(version, 1, 64, f) != 64 ||
-        !(s->version = parse_version(version, &s->unicode))) {
+        (s->version = parse_version(version, &s->unicode)) == 0) {
         fclose(f);
         return fail(s, "The installer's version of Inno Setup is not one read here.");
     }
@@ -1210,7 +1210,7 @@ static int open_slice(Chunk *c, uint32_t k)
     if (s->data_offset) {
         if (k != 0)
             return fail(s, "The installer's data ends early.");
-        if (!(c->f = fopen(s->path, "rb")) || fseek(c->f, 0, SEEK_END) != 0)
+        if ((c->f = fopen(s->path, "rb")) == NULL || fseek(c->f, 0, SEEK_END) != 0)
             return fail(s, "The installer cannot be read.");
 #ifdef _WIN32
         c->end = (uint64_t)_ftelli64(c->f);
@@ -1238,7 +1238,7 @@ static int open_slice(Chunk *c, uint32_t k)
         snprintf(s->err, s->n, "%s is missing beside the installer.", name);
         return -1;
     }
-    if (!(c->f = fopen(path, "rb")) || fread(head, 1, 12, c->f) != 12 ||
+    if ((c->f = fopen(path, "rb")) == NULL || fread(head, 1, 12, c->f) != 12 ||
         (memcmp(head, "idska32\x1a", 8) != 0 && memcmp(head, "idska16\x1a", 8) != 0)) {
         snprintf(s->err, s->n, "%s is not one of the installer's files.", name);
         return -1;
@@ -1574,7 +1574,7 @@ static int unpack_data(Out *o, Chunk *c, Job *jobs, int njobs)
         FILE *out;
         if (out_path(o, f->path, path, sizeof path) != 0)
             return -1;
-        if (!(out = fopen(path, "wb")))
+        if ((out = fopen(path, "wb")) == NULL)
             return fail(s, "A file could not be written.");
         while (left) {
             size_t k = left < sizeof buf ? (size_t)left : sizeof buf;

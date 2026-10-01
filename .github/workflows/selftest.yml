@@ -1,0 +1,35 @@
+# The kit checks itself (tests/selftest.py) on Windows, Linux and macOS:
+# what AGENTS.md asks for before every commit, on the platforms a commit's
+# author did not have.  No game is needed: the tests make their programs.
+name: selftest
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  selftest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: capstone
+        run: python -m pip install capstone
+      - name: SDL2 (Linux)
+        # so that plat_sdl.c is compiled too (step 5); without it the
+        # selftest says so and leaves it out
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+      - name: SDL2 (macOS)
+        if: runner.os == 'macOS'
+        run: brew install sdl2
+      - name: selftest
+        run: python tests/selftest.py

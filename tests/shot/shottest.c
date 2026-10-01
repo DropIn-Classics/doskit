@@ -33,7 +33,8 @@ static int write_one(const char *dir, const char *name, const uint8_t *pix, int 
         return 0;
     }
     snprintf(path, sizeof path, "%s/%s.bin", dir, name);
-    if (!(f = fopen(path, "wb")))
+    f = fopen(path, "wb");
+    if (!f)
         return 0;
     fwrite(pix, 1, (size_t)w * (size_t)h, f);
     fclose(f);
@@ -43,7 +44,8 @@ static int write_one(const char *dir, const char *name, const uint8_t *pix, int 
         rgb[3 * i + 2] = (uint8_t)pal[i];
     }
     snprintf(path, sizeof path, "%s/%s.pal", dir, name);
-    if (!(f = fopen(path, "wb")))
+    f = fopen(path, "wb");
+    if (!f)
         return 0;
     fwrite(rgb, 1, sizeof rgb, f);
     fclose(f);
