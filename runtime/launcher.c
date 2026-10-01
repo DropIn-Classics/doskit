@@ -90,15 +90,31 @@ static void centre(int y, const char *s, uint8_t attr)
     tm_text((TM_COLS - (int)strlen(s)) / 2, y, s, attr);
 }
 
-static void draw(const char *title, const char *footer, LauncherPage *pages, int npages,
+/* the title bar: the game's name and "Setup" at the left, the port's name
+ * and version at the right (left out when both do not fit) */
+static void title_bar(const LauncherApp *app, uint8_t attr)
+{
+    char left[TM_COLS], right[TM_COLS];
+
+    snprintf(left, sizeof left, "%.60s Setup", app->game);
+    if (app->version && *app->version)
+        snprintf(right, sizeof right, "%.40s %.20s", app->port, app->version);
+    else
+        snprintf(right, sizeof right, "%.40s", app->port);
+    tm_fill(0, 0, TM_COLS, 1, ' ', attr);
+    tm_text(1, 0, left, attr);
+    if ((int)(strlen(left) + strlen(right)) + 3 <= TM_COLS)
+        tm_text(TM_COLS - 1 - (int)strlen(right), 0, right, attr);
+}
+
+static void draw(const LauncherApp *app, const char *footer, LauncherPage *pages, int npages,
                  int page, int sel, int top, int waiting)
 {
     const LauncherPage *pg = &pages[page];
     int i, x = 2;
 
     tm_clear(' ', A_TEXT);
-    tm_fill(0, 0, TM_COLS, 1, ' ', A_BAR);
-    centre(0, title, A_BAR);
+    title_bar(app, A_BAR);
     for (i = 0; i < npages; i++) {
         char t[40];
 
@@ -181,7 +197,7 @@ static int first_selectable(const LauncherPage *pg, int from, int step)
     return -1;
 }
 
-int launcher_run(const char *title, const char *footer, LauncherPage *pages, int npages,
+int launcher_run(const LauncherApp *app, const char *footer, LauncherPage *pages, int npages,
                  void (*changed)(const LauncherItem *item))
 {
     static PadKeys keys;
@@ -204,7 +220,7 @@ int launcher_run(const char *title, const char *footer, LauncherPage *pages, int
             top = sel - ROWS + 1;
         if (sel == first_selectable(pg, 0, 1))
             top = 0;
-        draw(title, footer, pages, npages, page, sel, top, waiting);
+        draw(app, footer, pages, npages, page, sel, top, waiting);
         if (!plat_pump())
             break;
         k = next_key();
@@ -339,18 +355,8 @@ static void d_value(const char *s)
 /* the blue screen with its title bar */
 static void d_backdrop(const LauncherApp *app)
 {
-    char left[TM_COLS], right[TM_COLS];
-
-    snprintf(left, sizeof left, "%.60s Setup", app->game);
-    if (app->version && *app->version)
-        snprintf(right, sizeof right, "%.40s %.20s", app->port, app->version);
-    else
-        snprintf(right, sizeof right, "%.40s", app->port);
     tm_clear(' ', D_WINDOW);
-    tm_fill(0, 0, TM_COLS, 1, ' ', D_BAR);
-    tm_text(1, 0, left, D_BAR);
-    if ((int)(strlen(left) + strlen(right)) + 3 <= TM_COLS)
-        tm_text(TM_COLS - 1 - (int)strlen(right), 0, right, D_BAR);
+    title_bar(app, D_BAR);
 }
 
 /* a bar of "KEY text" pairs at the bottom */

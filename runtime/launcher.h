@@ -49,11 +49,20 @@ typedef struct {
 
 #define LAUNCHER_QUIT (-1)          /* Esc, or the window closed */
 
+/* the names in the title bar, of the setup screen and of the dialog about
+ * the game's files alike: "My Game Setup" at the left, "mygame 1.2" at
+ * the right */
+typedef struct {
+    const char *game;               /* the game's name: "My Game" */
+    const char *port;               /* the program's name: "mygame" */
+    const char *version;            /* the release's version; NULL or "": none */
+} LauncherApp;
+
 /* The screen until an action is picked: its `action`, or LAUNCHER_QUIT.
- * `title` heads the screen, `footer` (may be NULL) is the line below it.
- * `changed` (may be NULL) is called after a value changed (for a setting
- * that shows at once: full screen, the volume). */
-int launcher_run(const char *title, const char *footer, LauncherPage *pages, int npages,
+ * `app` names the title bar, `footer` (may be NULL) is the line above the
+ * bottom bar.  `changed` (may be NULL) is called after a value changed
+ * (for a setting that shows at once: full screen, the volume). */
+int launcher_run(const LauncherApp *app, const char *footer, LauncherPage *pages, int npages,
                  void (*changed)(const LauncherItem *item));
 
 /* The values of the items with a name from the file `path` (a choice by
@@ -71,14 +80,6 @@ int launcher_save(const char *path, const char *comment, LauncherPage *pages, in
 const char *launcher_key_name(int code);
 
 /* ---- the dialog about the game's files */
-
-/* the names on the dialog's screen: "My Game Setup" at the left of the
- * title bar, "mygame 1.2" at the right */
-typedef struct {
-    const char *game;               /* the game's name: "My Game" */
-    const char *port;               /* the program's name: "mygame" */
-    const char *version;            /* the release's version; NULL or "": none */
-} LauncherApp;
 
 /* what is copied from the GOG release */
 enum {

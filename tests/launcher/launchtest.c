@@ -56,6 +56,7 @@ int main(int argc, char **argv)
         "40:E0-1D 41:E0-9D 42:39 43:B9 44:1E 45:9E";
     static unsigned char map[256];
     static const unsigned char want[] = { 0x2A, 0xAA, 0x1D, 0x9D };
+    static const LauncherApp app = { "Test", "test", "v1.0" };
     int r, i;
 
     if (argc != 2)
@@ -66,7 +67,7 @@ int main(int argc, char **argv)
     setenv("DK_KEYS", keys, 1);
 #endif
     plat_init("launchtest");
-    r = launcher_run("Test", NULL, pages, 2, NULL);
+    r = launcher_run(&app, NULL, pages, 2, NULL);
     if (r != 7 || vol != 2 || key != 0x9D || other != 1)
         return fail("launcher_run");
     if (strcmp(launcher_key_name(0x9D), "Right Ctrl") || strcmp(launcher_key_name(0), "none"))
