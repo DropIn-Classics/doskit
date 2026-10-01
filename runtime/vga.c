@@ -22,6 +22,7 @@ static struct {
     int beam;                             /* virtual scan line for 3DAh */
     int start_latch;                      /* vga_set_start_latch */
     uint8_t start_hi, start_lo;           /* CRTC 0Ch, 0Dh as taken at the retrace */
+    int vesa_w;                           /* the VESA mode's width, 0 in a VGA mode */
 } v;
 
 /* ---- helpers derived from the registers ---- */
@@ -302,11 +303,51 @@ void vga_set_mode(int mode)
     }
 }
 
+/* the runner's tables (tools/run/vga.c): 70, 60 and 60 Hz */
+static const uint8_t crtc_v100[25] = {
+    0x5F, 0x4F, 0x50, 0x82, 0x54, 0x80, 0xBF, 0x1F, 0x00, 0x40, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x9C, 0x8E, 0x8F, 0x50, 0x40, 0x96, 0xB9, 0xA3, 0xFF};
+static const uint8_t crtc_v101[25] = {
+    0x5F, 0x4F, 0x50, 0x82, 0x54, 0x80, 0x0B, 0x3E, 0x00, 0x40, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0xEA, 0x8C, 0xDF, 0x50, 0x40, 0xE7, 0x04, 0xA3, 0xFF};
+/* 800x600: 1056 x 628 dots of 40 MHz */
+static const uint8_t crtc_v103[25] = {
+    0x7F, 0x63, 0x64, 0x82, 0x69, 0x19, 0x72, 0xF0, 0x00, 0x60, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x59, 0x8D, 0x57, 0x64, 0x40, 0x58, 0x70, 0xA3, 0xFF};
+
+int vga_set_mode_vesa(int mode, int clear)
+{
+    static const uint8_t seq[5] = {0x03, 0x01, 0x0F, 0x00, 0x0E};
+    const uint8_t *crtc;
+    uint8_t misc;
+    int w, p;
+    static uint8_t mem[4][VGA_PLANE_SIZE];
+
+    switch (mode) {
+    case 0x100: crtc = crtc_v100; misc = 0x63; w = 640; break;
+    case 0x101: crtc = crtc_v101; misc = 0xE3; w = 640; break;
+    case 0x103: crtc = crtc_v103; misc = 0x2B; w = 800; break;
+    default: return 0;
+    }
+    if (!clear)
+        memcpy(mem, v.mem, sizeof mem);
+    vga_set_mode(0x13);
+    if (!clear)
+        memcpy(v.mem, mem, sizeof mem);
+    for (p = 0; p < 5; p++)
+        v.seq[p] = seq[p];
+    memcpy(v.crtc, crtc, sizeof v.crtc);
+    v.misc = misc;
+    v.vesa_w = w;
+    return 1;
+}
+
 /* ---- scan-out ---- */
 
 double vga_refresh_hz(void)
 {
-    double dotclock = (v.misc & 0x0C) == 0x04 ? 28322000.0 : 25175000.0;
+    int cs = (v.misc >> 2) & 3;
+    double dotclock = cs == 1 ? 28322000.0 : cs >= 2 && v.vesa_w ? 40000000.0 : 25175000.0;
     int chardots = (v.seq[1] & 0x01) ? 8 : 9;
     int htotal = v.crtc[0] + 5;
     int vtotal = total_scanlines();
@@ -335,7 +376,7 @@ void vga_render(VgaFrame *f)
     int dscan = (v.crtc[0x09] & 0x80) ? 2 : 1;   /* double scan */
     int repeat = per_row * dscan;                /* scan lines before the next row address */
     int c256 = (v.gc[0x05] & 0x40) != 0;         /* 256-colour shift mode */
-    int char_px = c256 ? 4 : 8;                  /* pixels a character clock */
+    int char_px = c256 && !v.vesa_w ? 4 : 8;     /* pixels a character clock */
     /* the picture ends at the horizontal display end */
     int width = (v.crtc[0x01] + 1) * char_px;
     unsigned stride = v.crtc[0x13] * 2u;         /* address counter step per row */
@@ -345,8 +386,14 @@ void vga_render(VgaFrame *f)
                                       : ((unsigned)v.crtc[0x0C] << 8 | v.crtc[0x0D]);
     int row_line = 0, in_split = 0, out_y = 0;
 
+    int left = 0;                                /* the picture's first pixel in the frame */
+
     if (width <= 0 || width > VGA_MAX_W)
         width = width <= 0 ? (v.crtc[0x01] + 1) * char_px : VGA_MAX_W;
+    if (v.vesa_w && width < v.vesa_w) {
+        left = (v.vesa_w - width) / 2;
+        width = v.vesa_w;
+    }
 
     /* one output row per row of memory (per `repeat` scan lines): the
      * picture as the game draws it */
@@ -362,8 +409,11 @@ void vga_render(VgaFrame *f)
             int pan = c256 ? (v.attr[0x13] & 7) >> 1 : (v.attr[0x13] & 7);
             int p0 = (in_split && (v.attr[0x10] & 0x20)) ? 0 : pan;
             int shown = (v.crtc[0x01] + 1) * char_px;
-            if (shown > width)
-                shown = width;
+            if (shown > width - left)
+                shown = width - left;
+            for (x = 0; x < left; x++)
+                dst[x] = v.attr[0x11];                            /* overscan */
+            dst += left;
             if (c256) {
                 for (x = 0; x < shown; x++) {
                     int px = x + p0;
@@ -383,7 +433,7 @@ void vga_render(VgaFrame *f)
                     dst[x] = (uint8_t)(attr_color(c) & v.pel_mask);
                 }
             }
-            for (x = shown; x < width; x++)
+            for (x = shown; x < width - left; x++)
                 dst[x] = v.attr[0x11];                            /* overscan */
             out_y++;
         }

@@ -16,8 +16,8 @@
 #include <stdint.h>
 
 #define VGA_PLANE_SIZE 0x10000
-#define VGA_MAX_W 640
-#define VGA_MAX_H 480
+#define VGA_MAX_W 800
+#define VGA_MAX_H 600
 
 /* I/O ports */
 void vga_outb(uint16_t port, uint8_t value);
@@ -35,6 +35,19 @@ uint8_t vga_read(uint16_t offset);
  * show 16-colour pictures in it), not for 13h, whose programs set their
  * own. */
 void vga_set_mode(int mode);
+
+/* INT 10h AX=4F02h: the VESA modes 100h (640x400), 101h (640x480) and
+ * 103h (800x600) in 256 colours, chain-4 at A000h as mode 13h, with the
+ * registers an SVGA card of the time sets (the runner's, tools/run/vga.c)
+ * and its character clock of 8 pixels in 256 colours (4 on a VGA); clock
+ * selects 2 and 3 of the misc register are its 40 MHz clock.  Only the
+ * VGA's 256 KB, no bank switching: enough for a program that sets the
+ * mode and goes planar.  The picture is the mode's width with what the
+ * CRTC displays in the middle, as a monitor shows a program that narrows
+ * the line and moves the retrace by half (presumed, not seen).  Memory
+ * cleared unless `clear` is 0 (bit 15 of BX).  1, or 0 for another
+ * mode (nothing changed). */
+int vga_set_mode_vesa(int mode, int clear);
 
 /* the picture the CRTC would show now */
 typedef struct {

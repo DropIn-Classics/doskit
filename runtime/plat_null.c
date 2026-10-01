@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "platform.h"
+#include "vga.h"
 #include "shot.h"
 
 static long frames_left = -1, picture;
@@ -28,7 +29,7 @@ static uint64_t now_us;
 static uint8_t pending[64];
 static int npending, pos_pending;
 
-static uint8_t last[640 * 480];
+static uint8_t last[VGA_MAX_W * VGA_MAX_H];
 static uint32_t last_pal[256];
 static int last_w, last_h;
 

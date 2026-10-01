@@ -2,6 +2,9 @@
  * 0Eh (selftest step 4): the picture's size, a planar pixel where it
  * belongs with the attribute controller's colour, the refresh rate.
  * The start address latched at the retrace (vga_set_start_latch).
+ * The VESA modes 101h and 103h: size and rate, then planar with a
+ * narrowed line as Pinball Illusions sets them (the picture in the
+ * middle of the mode's width).
  * Prints "vga modes ok", exit status 0, or what went wrong. */
 #include <math.h>
 #include <stdio.h>
@@ -69,9 +72,48 @@ static int check_latch(void)
     return 0;
 }
 
+/* VESA mode `mode`: w x h at `hz`; then unchained (sequencer 4 06h, CR 14h
+ * bit 6 off, CR 17h bit 6 on), CR 1 29h (42 character clocks, 336
+ * pixels; CR 11h's protection off first), CR 13h 2Ah: the picture still w wide, the 336 in its middle */
+static int check_vesa(int mode, int w, int h, double hz)
+{
+    int left = (w - 336) / 2;
+
+    if (!vga_set_mode_vesa(mode, 1)) {
+        printf("VESA %Xh: refused\n", mode);
+        return 1;
+    }
+    vga_render(&pic);
+    if (pic.width != w || pic.height != h) {
+        printf("VESA %Xh: %dx%d, not %dx%d\n", mode, pic.width, pic.height, w, h);
+        return 1;
+    }
+    if (fabs(vga_refresh_hz() - hz) > 0.2) {
+        printf("VESA %Xh: %.2f Hz, not %.2f\n", mode, vga_refresh_hz(), hz);
+        return 1;
+    }
+    vga_outw(0x3D4, (uint16_t)((vga_crtc_reg(0x11) & 0x7F) << 8 | 0x11));  /* CR 0-7 writable */
+    vga_outw(0x3C4, 0x0604);
+    vga_outw(0x3D4, 0x0014);
+    vga_outw(0x3D4, 0xE317);
+    vga_outw(0x3D4, 0x2901);
+    vga_outw(0x3D4, 0x2A13);
+    /* pixel 5 of line 1 (plane 1, byte 84 + 1) in colour 33h */
+    vga_outw(0x3C4, 0x0202);
+    vga_write(85, 0x33);
+    vga_render(&pic);
+    if (pic.width != w || pic.pixels[w + left + 5] != 0x33 || pic.pixels[w + left + 4] != 0) {
+        printf("VESA %Xh planar: %d wide, pixel %02X\n", mode, pic.width, pic.pixels[w + left + 5]);
+        return 1;
+    }
+    return 0;
+}
+
 int main(void)
 {
-    if (check(0x0D, 320) || check(0x0E, 640) || check_latch())
+    if (check(0x0D, 320) || check(0x0E, 640) || check_latch()
+        || check_vesa(0x101, 640, 480, 59.94) || check_vesa(0x103, 800, 600, 60.32)
+        || vga_set_mode_vesa(0x105, 1) || check(0x0D, 320))
         return 1;
     printf("vga modes ok\n");
     return 0;
