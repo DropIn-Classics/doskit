@@ -909,6 +909,18 @@ def main():
             print(out)
             raise SystemExit(f'selftest FAILED: -keyat {spec} lshift+ on HELLO.EXE: shift bit {shift}')
     print('-keyat: Left Shift down at the first pass of HELLO\'s loop, none at a third')
+    # -keysat: the same keys from a file
+    for lines, want in (('1 lshift+\n', 2), ('# a comment\n3 lshift+\n', 0)):
+        keys = os.path.join(b, 'keysat.txt')
+        with open(keys, 'w') as f:
+            f.write(lines)
+        run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-keysat', 'CODE:0018', keys,
+             '-ram', os.path.join(b, 'keyat.ram'), 'HELLO/HELLO.EXE'])
+        with open(os.path.join(b, 'keyat.ram'), 'rb') as f:
+            shift = f.read()[0x417] & 2
+        if shift != want:
+            raise SystemExit(f'selftest FAILED: -keysat {lines!r} on HELLO.EXE: shift bit {shift}')
+    print('-keysat: the same keys from a file')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', 'PMODE/PMODE.EXE'])
     print('\n'.join(l for l in out.splitlines() if l.startswith(('con:', '[cpu]'))))
     if 'con: pmode ok' not in out:

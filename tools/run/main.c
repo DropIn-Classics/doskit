@@ -40,6 +40,8 @@
  *                    by a program's own passes (a frame loop) rather than
  *                    by the clock; its interrupt comes at the end of the
  *                    batch the pass is in, as at a breakpoint's
+ *   -keysat ADDR FILE  as -keyat for many keys: "N KEY+" or "N KEY-" a line
+ *                    (# comments), the key at the Nth pass of ADDR
  *   -watch ADDR      print each write to the byte at ADDR (one -watch: the last)
  *   -rwatch ADDR LEN which instructions read the LEN bytes at ADDR (hex):
  *                    a count per reader at the end (data reads, not fetches)
@@ -163,10 +165,14 @@ static char shot_prefix[260];
 static unsigned shot_index = 0;
 
 /* stop: 0 -log, 1 -break, 2 -poke (pa, pb, pn: where and what it writes),
- * 3 -keyat (sc, down: the key event) */
+ * 3 -keyat (sc, down: the key event), 4 -keysat (the events in keysat[],
+ * in the order of their passes) */
 typedef struct { Addr a; int stop; int count, hits; Addr pa; uint8_t pb[16]; int pn; int sc, down; } Brk;
 static Brk brks[BRK_MAX];
 static int nbrks = 0;
+typedef struct { int pass, sc, down; } PassKey;
+static PassKey keysat[MAXEV];
+static int nkeysat = 0, keysat_pos = 0;
 
 static Addr watch_addr;
 static int have_watch = 0;
@@ -241,6 +247,38 @@ static void add_key(double t, const char *spec){
     if(nkeys + 2 > MAXEV) die("too many key events");
     if(mode != 2){ keys[nkeys].t = t; keys[nkeys].sc = key_code(k); keys[nkeys].down = 1; nkeys++; }
     if(mode != 1){ keys[nkeys].t = mode ? t : t + 0.15; keys[nkeys].sc = key_code(k); keys[nkeys].down = 0; nkeys++; }
+}
+/* KEY+ or KEY- (-keyat, -keysat): the scan code, *down 1 or 0 */
+static int key_updown(const char *spec, int *down){
+    char k[32];
+    size_t n = strlen(spec);
+    if(n < 2 || n >= sizeof(k) || (spec[n-1] != '+' && spec[n-1] != '-'))
+        die("%s: KEY+ or KEY- wanted", spec);
+    snprintf(k, sizeof(k), "%s", spec);
+    *down = k[n-1] == '+';
+    k[n-1] = 0;
+    return key_code(k);
+}
+static int passkey_cmp(const void *a, const void *b){
+    const PassKey *x = (const PassKey*)a, *y = (const PassKey*)b;
+    return x->pass - y->pass;
+}
+static void read_keysat(const char *path){
+    FILE *f = fopen(path, "r");
+    char line[256];
+    if(!f) die("cannot read %s", path);
+    while(fgets(line, sizeof(line), f)){
+        int n; char k[64];
+        char *h = strchr(line, '#');
+        if(h) *h = 0;
+        if(sscanf(line, "%d %63s", &n, k) != 2) continue;
+        if(nkeysat == MAXEV) die("too many -keysat keys");
+        keysat[nkeysat].pass = n;
+        keysat[nkeysat].sc = key_updown(k, &keysat[nkeysat].down);
+        nkeysat++;
+    }
+    fclose(f);
+    qsort(keysat, (size_t)nkeysat, sizeof(PassKey), passkey_cmp);
 }
 static int key_cmp(const void *a, const void *b){
     const KeyEv *x = (const KeyEv*)a, *y = (const KeyEv*)b;
@@ -415,9 +453,8 @@ int main(int argc, char **argv){
             }
             brk_lin[nbrks] = b->a.lin;
             nbrks++; }
-        else if(!strcmp(a,"-keyat")){ NEED(2);
-            char spec[64], k[32], *hash;
-            size_t n;
+        else if(!strcmp(a,"-keyat") || !strcmp(a,"-keysat")){ NEED(2);
+            char spec[64], *hash;
             Brk *b = &brks[nbrks];
             if(nbrks == BRK_MAX) die("at most %d -break/-log/-poke/-keyat", BRK_MAX);
             snprintf(spec, sizeof(spec), "%s", argv[++i]);
@@ -425,13 +462,11 @@ int main(int argc, char **argv){
             b->count = 1;
             if(hash){ *hash = 0; b->count = atoi(hash+1); }
             b->a = parse_addr(spec);
-            b->stop = 3;
-            snprintf(k, sizeof(k), "%s", argv[++i]);
-            n = strlen(k);
-            if(n < 2 || (k[n-1] != '+' && k[n-1] != '-')) die("-keyat: %s wants KEY+ or KEY-", k);
-            b->down = k[n-1] == '+';
-            k[n-1] = 0;
-            b->sc = key_code(k);
+            if(!strcmp(a,"-keyat")){ b->stop = 3; b->sc = key_updown(argv[++i], &b->down); }
+            else {
+                if(nkeysat) die("one -keysat");
+                b->stop = 4; read_keysat(argv[++i]);
+            }
             brk_lin[nbrks] = b->a.lin;
             nbrks++; }
         else if(!strcmp(a,"-watch")){ NEED(1); watch_addr = parse_addr(argv[++i]); have_watch = 1;
@@ -607,7 +642,11 @@ int main(int argc, char **argv){
                     Brk *b = &brks[i];
                     if(brk_lin[i] != lin) continue;
                     b->hits++;
-                    if(b->stop == 3){
+                    if(b->stop == 4){
+                        while(keysat_pos < nkeysat && keysat[keysat_pos].pass < b->hits) keysat_pos++;
+                        for(; keysat_pos < nkeysat && keysat[keysat_pos].pass == b->hits; keysat_pos++)
+                            kbd_key(keysat[keysat_pos].sc, keysat[keysat_pos].down);
+                    } else if(b->stop == 3){
                         if(b->hits == b->count){
                             kbd_key(b->sc, b->down);
                             printf("keyat %s t=%.6f hit=%d %X%c\n", addr_str(&b->a), emu_now(), b->hits,
@@ -653,7 +692,7 @@ int main(int argc, char **argv){
     dev_report();
     for(i=0;i<nbrks;i++)
         printf("%s %s lin=%05X hits=%d\n", brks[i].stop == 1 ? "break" : brks[i].stop == 2 ? "poke"
-               : brks[i].stop ? "keyat" : "log",
+               : brks[i].stop == 3 ? "keyat" : brks[i].stop ? "keysat" : "log",
                addr_str(&brks[i].a), brks[i].a.lin, brks[i].hits);
     print_dumps();
     memwatch_report();
