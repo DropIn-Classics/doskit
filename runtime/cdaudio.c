@@ -11,8 +11,16 @@
 #include "platform.h"
 #include "sys.h"
 
+/* stb_vorbis declares alloca through <alloca.h> on Linux only; a Mac's
+ * clang refuses the undeclared call */
+#if defined(__APPLE__)
+#include <alloca.h>
+#endif
 #if defined(_MSC_VER)
 #pragma warning(push, 1)
+#elif defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Weverything"
 #elif defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
@@ -24,6 +32,8 @@
 #include "../third_party/stb_vorbis/stb_vorbis.c"
 #if defined(_MSC_VER)
 #pragma warning(pop)
+#elif defined(__clang__)
+#pragma clang diagnostic pop
 #elif defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
