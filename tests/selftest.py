@@ -138,8 +138,15 @@ In build/selftest (a project as a game's would be, see kit.py):
      installation with the marker and unpacks the image, and
      catches a changed byte, leaving nothing behind.
 
-Prints `selftest ok` at the end, exit status 0 then.  Needs cc (clang
-or gcc); on Windows it is not written for MSVC yet.
+Prints `selftest ok` at the end, exit status 0 then.  Needs a C compiler:
+cc (clang or gcc; $CC names another), on Windows MSVC (cl.exe on PATH,
+or found through vcvars64.bat as tools/run/build.bat finds it) unless
+$CC is set.  What differs on Windows: the template's port is built by
+its build.bat, plat_win32.c is compiled in place of plat_sdl.c (step 5),
+update.c copies the file of a file:// address itself (curl elsewhere),
+and gog_find is checked with GOG Galaxy's folder under a
+%ProgramFiles(x86)% made here (the registry's key and X:\\GOG Games are
+the machine's own; the Linux and Mac layouts are checked there).
 """
 import lzma, os, re, shutil, struct, subprocess, sys, zlib
 
@@ -154,6 +161,88 @@ PROJ = os.path.join(KIT, 'build', 'selftest')
 CC = os.environ.get('CC', 'cc')
 CFLAGS = ['-std=c99', '-O1', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
           '-D_POSIX_C_SOURCE=200809L']
+# MSVC, taken on Windows when $CC is not set: the warnings the template's
+# build.bat asks for (/W4), as errors, and the libraries the runtime's
+# Windows parts need
+MSVC = os.name == 'nt' and 'CC' not in os.environ
+MSVC_FLAGS = ['/nologo', '/O1', '/W4', '/WX', '/D_CRT_SECURE_NO_WARNINGS']
+MSVC_LIBS = ['advapi32.lib', 'shell32.lib', 'winhttp.lib']
+EXE = '.exe' if os.name == 'nt' else ''
+_msvc_env = None
+
+
+def msvc_env():
+    """the environment with cl.exe on PATH: this one when it is there, else
+    what vcvars64.bat sets (the VS2019 Build Tools first, then whatever
+    vswhere finds, as tools/run/build.bat looks for it)"""
+    global _msvc_env
+    if _msvc_env is not None:
+        return _msvc_env
+    if shutil.which('cl'):
+        _msvc_env = dict(os.environ)
+        return _msvc_env
+    pf = os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')
+    bats = [os.path.join(pf, 'Microsoft Visual Studio', '2019', 'BuildTools', 'VC', 'Auxiliary',
+                         'Build', 'vcvars64.bat')]
+    vswhere = os.path.join(pf, 'Microsoft Visual Studio', 'Installer', 'vswhere.exe')
+    if os.path.isfile(vswhere):
+        r = subprocess.run([vswhere, '-latest', '-products', '*', '-requires',
+                            'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+                            '-property', 'installationPath'], capture_output=True, text=True)
+        bats += [os.path.join(p, 'VC', 'Auxiliary', 'Build', 'vcvars64.bat')
+                 for p in r.stdout.splitlines() if p.strip()]
+    for bat in bats:
+        if not os.path.isfile(bat):
+            continue
+        r = subprocess.run(f'"{bat}" >nul 2>&1 && set', shell=True, capture_output=True, text=True)
+        env = dict(l.split('=', 1) for l in r.stdout.splitlines() if '=' in l)
+        if r.returncode == 0 and shutil.which('cl', path=env.get('PATH', env.get('Path', ''))):
+            _msvc_env = env
+            return env
+    raise SystemExit('selftest FAILED: no C compiler (cl.exe not on PATH, no vcvars64.bat found; '
+                     'or set CC to a gcc or clang)')
+
+
+def cc(out, srcs, incs=(), defs=(), obj=False):
+    """compiles srcs into the program `out` (or, obj, the one source into
+    the object file `out`) with every warning an error; the program's path
+    comes back (with .exe on Windows)"""
+    incs = [RUNTIME] + list(incs)
+    if not MSVC:
+        cmd = [CC] + CFLAGS + list(defs)
+        for i in incs:
+            cmd += ['-I', i]
+        if obj:
+            run(cmd + ['-c'] + srcs + ['-o', out])
+            return out
+        run(cmd + ['-o', out + EXE] + srcs + ['-lm'])
+        return out + EXE
+    env = dict(msvc_env(), DOSKIT_PROJECT=PROJ)
+    # by its path: the program is looked for on this process's PATH, not env's
+    cl = shutil.which('cl', path=env.get('PATH', env.get('Path', '')))
+    cmd = [cl] + MSVC_FLAGS + ['/D' + d[2:] for d in defs if d.startswith('-D')]
+    cmd += ['/I' + i for i in incs if i] + ['/I' + d[2:] for d in defs if d.startswith('-I')]
+    if obj:
+        cmd += ['/c', '/Fo' + out] + srcs
+    else:
+        objdir = out + '.obj'
+        os.makedirs(objdir, exist_ok=True)
+        cmd += ['/Fo' + objdir + os.sep, '/Fe' + out + EXE] + srcs + MSVC_LIBS
+    r = subprocess.run(cmd, cwd=PROJ, capture_output=True, text=True, env=env)
+    if r.returncode:
+        print((r.stdout + r.stderr).strip())
+        raise SystemExit(f'selftest FAILED: cl {os.path.basename(out)}')
+    return out if obj else out + EXE
+
+
+def link_dir(target, link):
+    """`link` a folder that is `target`: a symbolic link, on Windows a
+    junction (which needs no privilege)"""
+    if os.name == 'nt':
+        import _winapi
+        _winapi.CreateJunction(target, link)
+    else:
+        os.symlink(target, link)
 
 
 def step(what):
@@ -437,6 +526,9 @@ def check_xfer(py):
     with open(dst, 'w') as f:
         f.write('\n'.join(own) + '\n')
     run([py, os.path.join(TOOLS, 'xfer.py'), 'src/MULTISEG.hints', 'src/MULTIS2.hints'])
+    with open(dst, 'rb') as f:
+        if b'\r' in f.read():
+            raise SystemExit('selftest FAILED: xfer.py wrote the hints with CR LF line ends')
     with open(dst) as f:
         carried = f.read()
     for want in ('ptr QUAD:001F QUAD', 'name QUAD:0028 tick', 'words DATA:0015 1 QUAD',
@@ -486,16 +578,17 @@ def check_update(b):
     """tests/update/updatetest.c in a data folder of its own: a first start
     fetching a latest.json made here, then one the same day using the kept
     file (a fetch would fail: the address is nowhere)"""
-    if not shutil.which('curl'):
+    # curl does the fetch but on Windows (WinHTTP, and the file copied there)
+    if os.name != 'nt' and not shutil.which('curl'):
         print('curl not found: update.c\'s fetch not checked')
         return
     d = os.path.join(b, 'update')
     if os.path.isdir(d):
         shutil.rmtree(d)
     os.makedirs(os.path.join(d, 'data'))
-    exe = os.path.join(d, 'updatetest')
-    run([CC] + CFLAGS + ['-I', RUNTIME, '-o', exe, os.path.join(HERE, 'update', 'updatetest.c'),
-                         os.path.join(RUNTIME, 'update.c'), os.path.join(RUNTIME, 'sys.c')])
+    exe = cc(os.path.join(d, 'updatetest'), [os.path.join(HERE, 'update', 'updatetest.c'),
+                                             os.path.join(RUNTIME, 'update.c'),
+                                             os.path.join(RUNTIME, 'sys.c')])
     with open(os.path.join(d, 'latest.json'), 'w') as f:
         f.write('{"version": "v1.3", "page": "https://github.com/o/r/releases/tag/v1.3",\n'
                 ' "notes": "Faster.\\nFixed.", "packages": {}}\n')
@@ -516,9 +609,9 @@ def check_gogfind(b):
     if os.path.isdir(d):
         shutil.rmtree(d)
     os.makedirs(os.path.join(d, 'data'))
-    exe = os.path.join(d, 'gogfind')
-    run([CC] + CFLAGS + ['-I', RUNTIME, '-o', exe, os.path.join(HERE, 'gogfind', 'gogfind.c'),
-                         os.path.join(RUNTIME, 'cdimage.c'), os.path.join(RUNTIME, 'sys.c')])
+    exe = cc(os.path.join(d, 'gogfind'), [os.path.join(HERE, 'gogfind', 'gogfind.c'),
+                                          os.path.join(RUNTIME, 'cdimage.c'),
+                                          os.path.join(RUNTIME, 'sys.c')])
     image = os.path.join(d, 'image')
     cd_image({'HELLO/HELLO.EXE': b'MZ' + bytes(100)}, image)
     home = os.path.join(d, 'home')
@@ -547,6 +640,18 @@ def check_gogfind(b):
          '', True),
         ('nothing', None, {}, '', 'HELLO/HELLO.EXE', False),
     ]
+    if os.name == 'nt':
+        # Windows: GOG Galaxy's folder under %ProgramFiles(x86)%, which is
+        # set to the folder made here.  The registry's key of a product ID
+        # and X:\GOG Games are the machine's own and not made here.
+        galaxy = 'GOG Galaxy/Games/Test Game/game.gog'
+        cases = [
+            ('GOG Galaxy\'s folder', galaxy, {}, '', '', True),
+            ('GOG Galaxy\'s folder, with must_have', galaxy, {}, '', 'HELLO/HELLO.EXE', True),
+            ('an image without the must_have', galaxy, {}, '', 'NOPE/NOPE.EXE', False),
+            ('another game\'s folder', 'GOG Galaxy/Games/Other/game.gog', {}, '', '', False),
+            ('nothing', None, {}, '', 'HELLO/HELLO.EXE', False),
+        ]
     for what, place, files, prefix, must, ok in cases:
         if os.path.isdir(home):
             shutil.rmtree(home)
@@ -560,9 +665,11 @@ def check_gogfind(b):
                 f.write(text.format(home=home))
         env = dict(os.environ, HOME=home, DK_DATA_DIR=os.path.join(d, 'data'),
                    WINEPREFIX=prefix.format(home=home))
+        if os.name == 'nt':
+            env['ProgramFiles(x86)'] = home
         r = subprocess.run([exe, 'Test Game'] + ([must] if must else []), cwd=d,
                            capture_output=True, text=True, env=env)
-        want = os.path.join(home, place) if ok else 'not found'
+        want = os.path.normpath(os.path.join(home, place)) if ok else 'not found'
         if r.stdout.strip() != want:
             print(r.stdout + r.stderr)
             raise SystemExit(f'selftest FAILED: gog_find ({what})')
@@ -623,9 +730,8 @@ def check_inno(b):
           'more files than may be open)')
 
     # the same with the runtime's inno.c (tests/inno/innotest.c)
-    exe = os.path.join(d, 'innotest')
-    run([CC] + CFLAGS + ['-I', RUNTIME, '-o', exe, os.path.join(HERE, 'inno', 'innotest.c')] +
-        [os.path.join(RUNTIME, f) for f in ('inno.c', 'cdimage.c', 'sys.c', 'sha256.c')])
+    exe = cc(os.path.join(d, 'innotest'), [os.path.join(HERE, 'inno', 'innotest.c')] +
+             [os.path.join(RUNTIME, f) for f in ('inno.c', 'cdimage.c', 'sys.c', 'sha256.c')])
 
     def c_unpack(setup, out, must_have):
         r = subprocess.run([exe, setup, out, must_have], capture_output=True, text=True)
@@ -717,10 +823,9 @@ def check_pmem(py, b):
     START leaves them; memcmp.py --base finds no difference, and finds
     the one put into a copy."""
     base, sels = 0x11F2A0, (0x1C, 0x24)
-    exe = os.path.join(b, 'flatport')
-    run([CC] + CFLAGS + ['-I', RUNTIME, '-I', os.path.join(PROJ, 'port'), '-o', exe,
-                         os.path.join(HERE, 'flat', 'port.c')] +
-        [os.path.join(RUNTIME, f) for f in ('pmem.c', 'sys.c', 'sha256.c')])
+    exe = cc(os.path.join(b, 'flatport'), [os.path.join(HERE, 'flat', 'port.c')] +
+             [os.path.join(RUNTIME, f) for f in ('pmem.c', 'sys.c', 'sha256.c')],
+             incs=[os.path.join(PROJ, 'port')])
     port_mem = os.path.join(b, 'flatport.mem')
     print(run([exe, os.path.join(PROJ, 'build', 'files', 'FLAT.386'), '%X' % base, port_mem]))
     f = open(os.path.join(PROJ, 'build', 'files', 'FLAT.386'), 'rb').read()
@@ -1105,11 +1210,10 @@ def main():
     print('SB16.EXE with a -log on its wait loop and with a -shot: the same memory')
 
     step('4. the C port over the runtime, compared (memcmp.py)')
-    exe = os.path.join(b, 'port')
     srcs = [os.path.join(HERE, 'hello', 'port.c')] + [
         os.path.join(RUNTIME, f) for f in ('rmem.c', 'vga.c', 'sys.c', 'sha256.c', 'shot.c',
                                            'plat_null.c')]
-    run([CC] + CFLAGS + ['-I', RUNTIME, '-I', os.path.join(PROJ, 'port'), '-o', exe] + srcs)
+    exe = cc(os.path.join(b, 'port'), srcs, incs=[os.path.join(PROJ, 'port')])
     out = subprocess.run(
         [exe, os.path.join(PROJ, 'game'), os.path.join(b, 'port.ram'), os.path.join(b, 'port.vram')],
         cwd=PROJ, capture_output=True, text=True,
@@ -1126,9 +1230,9 @@ def main():
     print(f'port.png: {w}x{h}, {os.path.getsize(os.path.join(b, "port.png"))} bytes, as port.ppm')
     shots = os.path.join(b, 'shots')
     os.makedirs(shots, exist_ok=True)
-    exe = os.path.join(b, 'shottest')
-    run([CC] + CFLAGS + ['-I', RUNTIME, '-o', exe, os.path.join(HERE, 'shot', 'shottest.c'),
-                         os.path.join(RUNTIME, 'shot.c'), os.path.join(RUNTIME, 'sys.c')])
+    exe = cc(os.path.join(b, 'shottest'), [os.path.join(HERE, 'shot', 'shottest.c'),
+                                           os.path.join(RUNTIME, 'shot.c'),
+                                           os.path.join(RUNTIME, 'sys.c')])
     run([exe, shots])
     for name in ('noise', 'runs', 'far', 'pattern', 'one'):
         w, h, rgb = read_png(os.path.join(shots, name + '.png'))
@@ -1138,9 +1242,8 @@ def main():
             raise SystemExit(f'selftest FAILED: shot.c\'s {name}.png')
         print(f'shot.c {name}.png: {w}x{h}, {os.path.getsize(os.path.join(shots, name + ".png"))}'
               f' bytes for {w * h} pixels')
-    exe = os.path.join(b, 'vgamodes')
-    run([CC] + CFLAGS + ['-I', RUNTIME, '-o', exe, os.path.join(HERE, 'vgamode', 'runtime.c'),
-                         os.path.join(RUNTIME, 'vga.c'), '-lm'])
+    exe = cc(os.path.join(b, 'vgamodes'), [os.path.join(HERE, 'vgamode', 'runtime.c'),
+                                           os.path.join(RUNTIME, 'vga.c')])
     out = run([exe])
     if 'vga modes ok' not in out:
         raise SystemExit('selftest FAILED: vga.c\'s 16-colour 200-line modes: ' + out)
@@ -1156,18 +1259,24 @@ def main():
     mods = [f for f in sorted(os.listdir(RUNTIME)) if f.endswith('.c')
             and f not in ('plat_sdl.c', 'plat_win32.c')]
     extra = []
-    sdl = subprocess.run(['sh', os.path.join(RUNTIME, 'sdl2-flags.sh')], capture_output=True, text=True)
-    if sdl.returncode == 0:
-        mods.append('plat_sdl.c')
-        # the compiler's options only: -I, -D and -F
-        extra = [o for o in sdl.stdout.split() if o.startswith(('-I', '-D', '-F'))]
+    if os.name == 'nt':
+        # Windows' own platform; SDL2 is not looked for there
+        mods.append('plat_win32.c')
+    else:
+        sdl = subprocess.run(['sh', os.path.join(RUNTIME, 'sdl2-flags.sh')], capture_output=True,
+                             text=True)
+        if sdl.returncode == 0:
+            mods.append('plat_sdl.c')
+            # the compiler's options only: -I, -D and -F
+            extra = [o for o in sdl.stdout.split() if o.startswith(('-I', '-D', '-F'))]
     objdir = os.path.join(b, 'obj')
     os.makedirs(objdir, exist_ok=True)
     for m in mods:
-        run([CC] + CFLAGS + extra + ['-I', RUNTIME, '-c', os.path.join(RUNTIME, m),
-                                     '-o', os.path.join(objdir, m[:-2] + '.o')])
+        cc(os.path.join(objdir, m[:-2] + ('.obj' if MSVC else '.o')), [os.path.join(RUNTIME, m)],
+           defs=extra, obj=True)
     print(f'{len(mods)} modules: {" ".join(mods)}' +
-          ('' if 'plat_sdl.c' in mods else ' (SDL2 not found: plat_sdl.c not compiled)'))
+          ('' if 'plat_sdl.c' in mods or os.name == 'nt'
+           else ' (SDL2 not found: plat_sdl.c not compiled)'))
 
     step('6. a project from the template (new_project.py)')
     new = os.path.join(KIT, 'build', 'selftest-new')
@@ -1177,18 +1286,26 @@ def main():
          '--marker', 'HELLO/HELLO.EXE', '--gog-id', '1234567890', '--no-submodule'])
     if '"1234567890",' not in open(os.path.join(new, 'port', 'src', 'main.c')).read():
         raise SystemExit('selftest FAILED: --gog-id not filled into port/src/main.c')
-    os.symlink(KIT, os.path.join(new, 'doskit'))
+    link_dir(KIT, os.path.join(new, 'doskit'))
     shutil.copytree(os.path.join(PROJ, 'game'), os.path.join(new, 'game'))
-    r = subprocess.run(['sh', os.path.join(new, 'port', 'build.sh')], capture_output=True, text=True)
-    if r.returncode or 'warning' in r.stderr:
+    if os.name == 'nt':
+        # MSVC says its warnings on the standard output
+        r = subprocess.run(['cmd', '/c', os.path.join(new, 'port', 'build.bat')],
+                           capture_output=True, text=True)
+        script = 'build.bat'
+    else:
+        r = subprocess.run(['sh', os.path.join(new, 'port', 'build.sh')], capture_output=True,
+                           text=True)
+        script = 'build.sh'
+    if r.returncode or 'warning' in r.stderr or (os.name == 'nt' and 'warning' in r.stdout):
         print(r.stdout + r.stderr)
-        raise SystemExit('selftest FAILED: the template\'s port/build.sh')
+        raise SystemExit(f'selftest FAILED: the template\'s port/{script}')
     # a data folder of its own: never the user's
     first = os.path.join(KIT, 'build', 'selftest-data')
     if os.path.isdir(first):
         shutil.rmtree(first)
     os.makedirs(first)
-    r = subprocess.run([os.path.join(new, 'port', 'build', 'testgame-headless')], cwd=new,
+    r = subprocess.run([os.path.join(new, 'port', 'build', 'testgame-headless' + EXE)], cwd=new,
                        capture_output=True, text=True,
                        env=dict(os.environ, DK_FRAMES='3', DK_DATA_DIR=first))
     if r.returncode:
@@ -1280,7 +1397,7 @@ def main():
 
     # the template's port on a player's first start: -gog with the folder,
     # with the image, with a folder not the game's, into a data folder of its own
-    exe = os.path.join(new, 'port', 'build', 'testgame-headless')
+    exe = os.path.join(new, 'port', 'build', 'testgame-headless' + EXE)
     for what, src, ok in (('folder', folder_game, True),
                           ('image', os.path.join(installed, 'CD', 'HELLO.DAT'), True),
                           ('other folder', os.path.join(gog, 'Hello Game', 'CD'), False)):

@@ -302,7 +302,9 @@ def main():
                   f'{args.src} {args.dst})', file=sys.stderr)
             sys.exit(1)
         return
-    open(args.dst, 'w', encoding='utf-8').write(result)
+    # LF line ends on every platform: the hints are stored so, and a file
+    # rewritten with the platform's would differ in every line
+    open(args.dst, 'w', encoding='utf-8', newline='\n').write(result)
     print(f'{n_ok} hints carried, {n_bad} not mapped -> {args.dst}', file=sys.stderr)
 
 

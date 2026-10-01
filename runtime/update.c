@@ -226,6 +226,33 @@ static char part[SYS_PATH];
 
 static volatile LONG fetch_result;      /* 0 running, 1 done, 2 failed */
 static wchar_t fetch_url[1024];
+static char fetch_file[SYS_PATH];       /* the file of a file:// address, else "" */
+
+/* file:// for the kit's test (as curl takes it elsewhere): the file
+ * copied, no more than MAX_JSON bytes of it */
+static int fetch_local(void)
+{
+    char buf[4096];
+    size_t got, total = 0;
+    FILE *in = fopen(fetch_file, "rb"), *f;
+    int ok = 1;
+
+    if (!in)
+        return 0;
+    f = fopen(part, "wb");
+    if (!f) {
+        fclose(in);
+        return 0;
+    }
+    while (ok && (got = fread(buf, 1, sizeof buf, in)) > 0) {
+        total += got;
+        ok = total <= MAX_JSON && fwrite(buf, 1, got, f) == got;
+    }
+    fclose(in);
+    if (fclose(f) != 0)
+        ok = 0;
+    return ok;
+}
 
 static DWORD WINAPI fetch_thread(LPVOID arg)
 {
@@ -238,6 +265,10 @@ static DWORD WINAPI fetch_thread(LPVOID arg)
     int ok = 0;
 
     (void)arg;
+    if (fetch_file[0]) {
+        InterlockedExchange(&fetch_result, fetch_local() ? 1 : 2);
+        return 0;
+    }
     memset(&uc, 0, sizeof uc);
     uc.dwStructSize = sizeof uc;
     uc.lpszHostName = host;
@@ -287,7 +318,14 @@ static int fetch_begin(const char *url)
 {
     HANDLE t;
 
-    if (!MultiByteToWideChar(CP_UTF8, 0, url, -1, fetch_url, sizeof fetch_url / sizeof fetch_url[0]))
+    fetch_file[0] = 0;
+    if (strncmp(url, "file://", 7) == 0) {
+        const char *p = url + 7;
+        if (p[0] == '/' && p[1] && p[2] == ':')     /* file:///C:/... */
+            p++;
+        snprintf(fetch_file, sizeof fetch_file, "%s", p);
+    } else if (!MultiByteToWideChar(CP_UTF8, 0, url, -1, fetch_url,
+                                    sizeof fetch_url / sizeof fetch_url[0]))
         return 0;
     fetch_result = 0;
     t = CreateThread(NULL, 0, fetch_thread, NULL, 0, NULL);
