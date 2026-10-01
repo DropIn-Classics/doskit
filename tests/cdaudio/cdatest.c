@@ -48,8 +48,10 @@ int main(int argc, char **argv)
     const char *cue = argc >= 2 ? argv[1] : NULL;
 
     if (argc == 3) {
-        const char *base = strrchr(cue, '/');
+        const char *base = strrchr(cue, '/'), *back = strrchr(cue, '\\');
 
+        if (back && (!base || back > base))     /* a Windows path */
+            base = back;
         if (cd_copy_disc(cue, argv[2], NULL, NULL, err, sizeof err) != 0) {
             printf("copy: %s\n", err);
             return 1;
