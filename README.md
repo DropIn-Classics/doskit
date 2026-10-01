@@ -81,7 +81,10 @@ docs/NEW-PROJECT.md how to start a new game.
     program it (ports, planes, Mode X, mode 12h/13h, the picture scanned
     out); `frame.h`: pacing at the mode's refresh, keys to the program's
     INT 9 handler, a tick callback, a key recorder.
-  - `modplay.h` (MOD playback, micromod), `opl.h` (an OPL2's FM synthesis,
+  - `modplay.h` (MOD playback, micromod), `cdaudio.h` (a CD's audio
+    tracks from GOG's cue sheet, Ogg Vorbis through stb_vorbis: the table
+    of contents, the plays an MSCDEX program asks for, mixed into the
+    port's audio), `opl.h` (an OPL2's FM synthesis,
     the AdLib's chip, from the program's register writes; the runner's
     -oplwav too), `audiofx.h` (optional EQ and a
     headphone mode), `fli.h` (FLI animations), `textmode.h` (an 80x25

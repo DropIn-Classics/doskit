@@ -92,7 +92,10 @@ In build/selftest (a project as a game's would be, see kit.py):
      tests/shot/shottest.c's PNGs (noise, long runs, far repeats) read
      back and compared with the pixels it wrote; tests/vgamode/runtime.c
      (the runtime's vga.c in modes 0Dh and 0Eh: size, a planar pixel and
-     its colour, 70 Hz) says "vga modes ok"; tests/update/updatetest.c
+     its colour, 70 Hz) says "vga modes ok"; tests/cdaudio/cdatest.c
+     (cdaudio.c on the cue sheet of step 3: the table, the WAVE's samples,
+     the Ogg's tones by loudness, the channels, the clock) says "cdaudio
+     ok"; tests/update/updatetest.c
      (update.c: versions, latest.json's fields, nothing before the
      player's yes, a latest.json made here fetched by curl as file://,
      then the kept one used the same day; sys_data_migrate) says
@@ -1304,6 +1307,12 @@ def main():
     out = run([exe])
     if 'vga modes ok' not in out:
         raise SystemExit('selftest FAILED: vga.c\'s 16-colour 200-line modes: ' + out)
+    print(out.strip())
+    exe = cc(os.path.join(b, 'cdatest'), [os.path.join(HERE, 'cdaudio', 'cdatest.c')] + [
+        os.path.join(RUNTIME, f) for f in ('cdaudio.c', 'plat_null.c', 'sys.c', 'shot.c')])
+    out = run([exe, make_cue()])
+    if 'cdaudio ok' not in out:
+        raise SystemExit('selftest FAILED: cdaudio.c: ' + out)
     print(out.strip())
     check_update(b)
     check_gogfind(b)

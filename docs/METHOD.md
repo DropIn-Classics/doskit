@@ -272,6 +272,9 @@ original's tick has in dosrun before trusting 70 Hz.
 driver's timing where the game depends on it (positions, pattern-jump
 callbacks: modplay_jump, modplay_set_jump_hook); effects as notes put
 into a channel (modplay_note). Other formats need their own player.
+CD audio (MSCDEX's plays) comes from the release's cue sheet through
+`cdaudio.c`; the port answers the program's requests from it and mixes
+it into its audio callback (cda_mix).
 
 **The platform.** `platform.h`: a window showing an indexed picture in
 the 4:3 of a VGA screen (Alt+Enter full screen; Print Screen writes the
