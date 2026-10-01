@@ -1,6 +1,7 @@
 /* runtime.c - the runtime's vga.c in the 16-colour 200-line modes 0Dh and
  * 0Eh (selftest step 4): the picture's size, a planar pixel where it
  * belongs with the attribute controller's colour, the refresh rate.
+ * The start address latched at the retrace (vga_set_start_latch).
  * Prints "vga modes ok", exit status 0, or what went wrong. */
 #include <math.h>
 #include <stdio.h>
@@ -43,9 +44,34 @@ static int check(int mode, int width)
     return 0;
 }
 
+/* vga_set_start_latch: a start address written during a picture shows
+ * from the next retrace (vga_frame_start) on, not at once */
+static int check_latch(void)
+{
+    vga_set_mode(0x0D);
+    vga_outw(0x3C4, 0x0F02);
+    vga_write(40, 0xFF);                /* line 1's first 8 pixels, colour 0Fh */
+    vga_set_start_latch(1);
+    vga_outw(0x3D4, 0x0C);              /* start address 40: line 1 on top */
+    vga_outw(0x3D4, 0x280D);
+    vga_render(&pic);
+    if (pic.pixels[0] != 0) {
+        printf("latch: the start address written showed before the retrace\n");
+        return 1;
+    }
+    vga_frame_start();
+    vga_render(&pic);
+    if (pic.pixels[0] != 0x17) {
+        printf("latch: the start address not taken at the retrace (pixel %02X)\n", pic.pixels[0]);
+        return 1;
+    }
+    vga_set_start_latch(0);
+    return 0;
+}
+
 int main(void)
 {
-    if (check(0x0D, 320) || check(0x0E, 640))
+    if (check(0x0D, 320) || check(0x0E, 640) || check_latch())
         return 1;
     printf("vga modes ok\n");
     return 0;

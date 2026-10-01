@@ -32,6 +32,14 @@ void frame_set_overlay(void (*draw)(VgaFrame *picture));
  * kept from the program.  NULL, NULL: none */
 void frame_set_hud(void (*draw)(VgaFrame *picture), void (*control)(int control));
 
+/* 1: each picture is scanned out at the end of its frame (at the next
+ * wait, before the tick), from the start address the card took at the
+ * frame's retrace (vga_set_start_latch).  For a program that draws into
+ * the page on show after the retrace, ahead of the beam, and writes the
+ * next start address during the picture.  0 (the default): scanned out
+ * at the tick, with the registers as they are then. */
+void frame_set_scanout_end(int on);
+
 /* waits for the next picture; 0 once the window was closed */
 int frame_wait(void);
 /* For a loop that waits on the keyboard alone (a wait for keys let go):

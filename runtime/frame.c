@@ -13,6 +13,7 @@ static uint64_t next_due;
 static int closed;
 static int tick_due;                    /* the keys came, the tick not yet */
 static int handed;                      /* bytes handed to the program this picture */
+static int scanout_end;                 /* frame_set_scanout_end */
 static VgaFrame picture;
 static FILE *record;
 static void (*overlay)(VgaFrame *picture);
@@ -98,20 +99,39 @@ static void hand_over(int b)
     hand_over_byte(b);
 }
 
-/* the tick, the picture shown */
-static void finish(void)
+static void show(void)
 {
-    tick_due = 0;
-    if (tick_routine)
-        tick_routine();
-    vga_frame_start();
     vga_render(&picture);
     if (overlay)
         overlay(&picture);
     if (hud_draw)
         hud_draw(&picture);
     plat_present(picture.pixels, picture.width, picture.height, picture.palette);
+}
+
+/* the tick, the picture shown: at the tick, or (scanout_end) the one that
+ * ends here, before the retrace takes the next start address */
+static void finish(void)
+{
+    tick_due = 0;
+    if (scanout_end) {
+        show();
+        vga_frame_start();
+        if (tick_routine)
+            tick_routine();
+    } else {
+        if (tick_routine)
+            tick_routine();
+        vga_frame_start();
+        show();
+    }
     frames++;
+}
+
+void frame_set_scanout_end(int on)
+{
+    scanout_end = on;
+    vga_set_start_latch(on);
 }
 
 /* the next picture's time, its keys handed over; 0 once the window was

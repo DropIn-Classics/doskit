@@ -53,6 +53,12 @@ double vga_refresh_hz(void);
  * so loops that wait for the retrace terminate. */
 void vga_frame_start(void);
 
+/* The start address (CRTC 0Ch, 0Dh) as the card uses it: taken at the
+ * retrace (vga_frame_start), so that one written during a picture shows
+ * from the next.  Off (the default): vga_render uses the registers as
+ * they are when it is called. */
+void vga_set_start_latch(int on);
+
 /* the 256 KB of video memory into the file `path`, byte 4 * offset +
  * plane, as dosrun's -vram writes it (for tools/memcmp.py); 0, or -1 if
  * it cannot be written */

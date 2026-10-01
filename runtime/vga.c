@@ -20,6 +20,8 @@ static struct {
     uint8_t pel_mask;
 
     int beam;                             /* virtual scan line for 3DAh */
+    int start_latch;                      /* vga_set_start_latch */
+    uint8_t start_hi, start_lo;           /* CRTC 0Ch, 0Dh as taken at the retrace */
 } v;
 
 /* ---- helpers derived from the registers ---- */
@@ -154,6 +156,15 @@ uint8_t vga_inb(uint16_t port)
 void vga_frame_start(void)
 {
     v.beam = 0;
+    v.start_hi = v.crtc[0x0C];
+    v.start_lo = v.crtc[0x0D];
+}
+
+void vga_set_start_latch(int on)
+{
+    v.start_latch = on;
+    v.start_hi = v.crtc[0x0C];
+    v.start_lo = v.crtc[0x0D];
 }
 
 /* ---- CPU access to A000h ---- */
@@ -330,7 +341,8 @@ void vga_render(VgaFrame *f)
     unsigned stride = v.crtc[0x13] * 2u;         /* address counter step per row */
     int shift = (v.crtc[0x14] & 0x40) ? 2 : (v.crtc[0x17] & 0x40) ? 0 : 1;
     int lc = line_compare();
-    unsigned row_addr = ((unsigned)v.crtc[0x0C] << 8) | v.crtc[0x0D];
+    unsigned row_addr = v.start_latch ? ((unsigned)v.start_hi << 8 | v.start_lo)
+                                      : ((unsigned)v.crtc[0x0C] << 8 | v.crtc[0x0D]);
     int row_line = 0, in_split = 0, out_y = 0;
 
     if (width <= 0 || width > VGA_MAX_W)
