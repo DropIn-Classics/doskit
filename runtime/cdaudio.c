@@ -1,4 +1,8 @@
-/* cdaudio.c - see cdaudio.h */
+/* cdaudio.c - see cdaudio.h.
+ *
+ * stb_vorbis.c is included here rather than compiled on its own, as
+ * modplay.c includes micromod: it stays as upstream wrote it, and its
+ * warnings (MSVC's C4244 among them) are not ours to fix. */
 #include "cdaudio.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -6,7 +10,23 @@
 #include <string.h>
 #include "platform.h"
 #include "sys.h"
+
+#if defined(_MSC_VER)
+#pragma warning(push, 1)
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wunused-value"
+#endif
 #include "../third_party/stb_vorbis/stb_vorbis.c"
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 #define CD_HZ 44100
 #define FRAME_SAMPLES 588              /* CD_HZ / 75 */
