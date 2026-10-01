@@ -23,6 +23,13 @@ void frame_set_tick(FrameCallback tick);
 /* the program's INT 9 handler, which gets each byte of port 60h */
 void frame_set_keyboard(KeyHandler handler);
 
+/* The player's own keys: map[code] is the key the program gets for the
+ * key `code` (make codes of scan code set 1, the E0 keys + 80h, as
+ * pad.h's), 0 for none; make and break alike, the E0 byte written for an
+ * E0 key.  Applied before the hud's keys are taken out and before the
+ * recording.  NULL (the default): the keys as they are.  The caller keeps
+ * the table. */
+void frame_set_keymap(const unsigned char *map);
 /* drawn into each picture after vga_render, before it is shown (what
  * video memory does not hold: a mouse driver's pointer); NULL for none */
 void frame_set_overlay(void (*draw)(VgaFrame *picture));

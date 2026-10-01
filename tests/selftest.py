@@ -94,7 +94,9 @@ In build/selftest (a project as a game's would be, see kit.py):
      (the runtime's vga.c in modes 0Dh and 0Eh: size, a planar pixel and
      its colour, 70 Hz; the VESA modes 101h and 103h: size, rate, a
      planar pixel of a narrowed line in the mode's middle) says "vga
-     modes ok"; tests/cdaudio/cdatest.c
+     modes ok"; tests/launcher/launchtest.c (launcher.c: a choice,
+     a key, the pages, an action by keys; the settings file written and
+     read; frame.c's keymap) says "launcher ok"; tests/cdaudio/cdatest.c
      (cdaudio.c on the cue sheet of step 3: the table, the WAVE's samples,
      the Ogg's tones by loudness, the channels, the clock) says "cdaudio
      ok"; tests/update/updatetest.c
@@ -1322,6 +1324,13 @@ def main():
     if 'cdaudio ok' not in out or not os.path.isfile(os.path.join(copy, 'MUSIC', 'TRACK03.OGG')):
         raise SystemExit('selftest FAILED: cdimage.c\'s cd_copy_disc: ' + out)
     print('cd_copy_disc: the disc copied, its copy read: ' + out.strip())
+    exe = cc(os.path.join(b, 'launchtest'), [os.path.join(HERE, 'launcher', 'launchtest.c')] + [
+        os.path.join(RUNTIME, f) for f in ('launcher.c', 'textmode.c', 'pad.c', 'frame.c', 'vga.c',
+                                           'plat_null.c', 'shot.c', 'sys.c')])
+    out = run([exe, os.path.join(b, 'launchtest.cfg')])
+    if 'launcher ok' not in out:
+        raise SystemExit('selftest FAILED: launcher.c / frame.c\'s keymap: ' + out)
+    print(out.strip())
     print(out.strip())
     check_update(b)
     check_gogfind(b)

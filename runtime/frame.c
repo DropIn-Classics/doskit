@@ -19,6 +19,7 @@ static FILE *record;
 static void (*overlay)(VgaFrame *picture);
 static void (*hud_draw)(VgaFrame *picture);
 static void (*hud_control)(int control);
+static const unsigned char *keymap;
 
 void frame_set_tick(FrameCallback tick)
 {
@@ -28,6 +29,11 @@ void frame_set_tick(FrameCallback tick)
 void frame_set_keyboard(KeyHandler handler)
 {
     key_handler = handler;
+}
+
+void frame_set_keymap(const unsigned char *map)
+{
+    keymap = map;
 }
 
 void frame_set_overlay(void (*draw)(VgaFrame *picture))
@@ -71,6 +77,32 @@ static void pace(void)
         now = plat_micros();
     }
     next_due += period;
+}
+
+static void hand_over(int b);
+
+/* a byte from the keyboard through the player's keymap */
+static void hand_over_mapped(int b)
+{
+    static int e0;
+    int code, to;
+
+    if (!keymap) {
+        hand_over(b);
+        return;
+    }
+    if (b == 0xE0) {
+        e0 = 1;
+        return;
+    }
+    code = (b & 0x7F) | (e0 ? 0x80 : 0);
+    e0 = 0;
+    to = keymap[code];
+    if (!to)
+        return;
+    if (to & 0x80)
+        hand_over(0xE0);
+    hand_over((to & 0x7F) | (b & 0x80));
 }
 
 /* a byte for the program: with a hud, not the keypad's + - * /, which
@@ -149,7 +181,7 @@ static int next_picture(void)
     }
     handed = 0;
     while ((b = plat_read_scancode()) >= 0)
-        hand_over(b);
+        hand_over_mapped(b);
     while ((b = plat_read_control()) >= 0)
         if (hud_control)
             hud_control(b);
