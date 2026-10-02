@@ -2,7 +2,7 @@
  * (selftest step 4), headless on plat_null.c with keys by picture:
  * from the menu a page opened, a choice stepped, a key item given Right
  * Ctrl, Esc back to the menu, a second page opened and left, an action
- * picked; Esc in the menu quits; the settings saved and read back; then frame_wait
+ * picked; Esc in the menu goes to Quit, Enter quits; the settings saved and read back; then frame_wait
  * handing keys through a keymap (one key to another, an E0 key to a
  * plain one, a key dropped).  Prints "launcher ok", exit status 0, or
  * what went wrong.
@@ -59,7 +59,7 @@ int main(int argc, char **argv)
 {
     static const char keys[] =
         "1:1C 3:E0-4D 5:E0-50 7:1C 9:E0-1D 11:01 13:E0-50 15:1C 17:E0-4D 19:01 21:E0-50 23:1C "
-        "30:01 "
+        "30:01 32:1C "
         "40:E0-1D 41:E0-9D 42:39 43:B9 44:1E 45:9E";
     static unsigned char map[256];
     static const unsigned char want[] = { 0x2A, 0xAA, 0x1D, 0x9D };
@@ -78,7 +78,7 @@ int main(int argc, char **argv)
     if (r != 7 || vol != 2 || key != 0x9D || other != 1)
         return fail("launcher_run");
     if (launcher_run(&app, NULL, pages, 3, NULL) != LAUNCHER_QUIT)
-        return fail("Esc in the menu did not quit");
+        return fail("Esc, Enter in the menu did not quit");
     if (strcmp(launcher_key_name(0x9D), "Right Ctrl") || strcmp(launcher_key_name(0), "none"))
         return fail("launcher_key_name");
     if (launcher_save(argv[1], "test", pages, 3) != 0)

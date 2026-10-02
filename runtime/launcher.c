@@ -201,7 +201,7 @@ static void layout(LauncherPage *pages, int page, const char *title, Layout *l)
 static void draw(const LauncherApp *app, const char *footer, LauncherPage *pages, int page, int sel,
                  int top, int waiting)
 {
-    static const char *const help_main[] = { "\x18\x19", "Select", "Enter", "Choose", "Esc", "Quit", NULL };
+    static const char *const help_main[] = { "\x18\x19", "Select", "Enter", "Choose", "Esc", "To Quit", NULL };
     static const char *const help_page[] = {
         "\x18\x19", "Select", "\x1B\x1A", "Change", "Enter", "Choose", "Esc", "Back", NULL
     };
@@ -330,10 +330,11 @@ int launcher_run(const LauncherApp *app, const char *footer, LauncherPage *pages
             continue;
         }
         switch (k) {
-        case 0x01:                          /* Esc: back, or quit from the main page */
+        case 0x01:                          /* Esc: back; in the menu on to "Quit" */
             if (page == 0)
-                goto done;
-            page = from[page];
+                sel[0] = first_selectable(pages, 0, item_count(pages, 0) - 1, -1);
+            else
+                page = from[page];
             break;
         case 0xC8: {                        /* Up */
             int s = sel[page] > 0 ? first_selectable(pages, page, sel[page] - 1, -1) : -1;

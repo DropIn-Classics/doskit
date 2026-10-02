@@ -23,7 +23,7 @@
  * Left/Right a choice's value (or Enter, which steps it on), Enter on
  * a page's item opens it, Enter on a key item waits for the key to give
  * it (Esc keeps the old one, Backspace none), Esc goes back from a page
- * and quits from the menu (LAUNCHER_QUIT).  The controller: pad_menu_keys.
+ * and, in the menu, to "Quit" (Enter there: LAUNCHER_QUIT).  The controller: pad_menu_keys.
  *
  * The dialog about the game's files (launcher_offer_copy and the others
  * below) is the same in every port: the setup screen's backdrop, a window
@@ -60,7 +60,7 @@ typedef struct {
     int count;
 } LauncherPage;
 
-#define LAUNCHER_QUIT (-1)          /* Esc, or the window closed */
+#define LAUNCHER_QUIT (-1)          /* "Quit" chosen, or the window closed */
 
 /* the names in the title bar, of the setup screen and of the dialog about
  * the game's files alike: "My Game" at the left, "mygame 1.2" at
