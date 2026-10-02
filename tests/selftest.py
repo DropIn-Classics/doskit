@@ -565,6 +565,17 @@ def check_xfer(py):
         raise SystemExit('selftest FAILED: MULTIS2 from the carried hints')
     out = run([py, os.path.join(TOOLS, 'xfer.py'), 'src/MULTISEG.hints', 'src/MULTIS2.hints',
                '--check'])
+    # one header for both: the names are matched though a segment is named
+    # otherwise in the sibling (FOUR is QUAD there), its frames in FRAMES
+    run([py, os.path.join(TOOLS, 'symmap.py'), 'build/multi_names.h', 'MULTI',
+         'MULTISEG=src/MULTISEG.hints', 'MULTIS2=src/MULTIS2.hints'])
+    with open(os.path.join(PROJ, 'build', 'multi_names.h')) as f:
+        names = f.read()
+    for want in ('X(FOUR, fourth, 0x0004, 0x0005)', 'X(FOUR, fourth, MULTISEG_FOUR, MULTIS2_QUAD)',
+                 'X(ONE, first, MULTISEG_ONE, MULTIS2_UNO)'):
+        if want not in names:
+            print(names)
+            raise SystemExit(f'selftest FAILED: symmap.py did not write {want!r} for the sibling')
     return len(exe)
 
 

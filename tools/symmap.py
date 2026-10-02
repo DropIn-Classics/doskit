@@ -14,7 +14,12 @@ KEY=HINTS pair each; the names are matched by name).  For each program:
     frame of each segment;
   * PREFIX_NAMES(X): X(SEG, name, address in the first program, in the
     second, ...) for every `name` and named `code` of any of the hints,
-    0xFFFF where a program has no such name.
+    0xFFFF where a program has no such name.  SEG is the segment's name
+    in the first program that has the name;
+  * with more than one program, PREFIX_FRAMES(X): X(SEG, name, frame in
+    the first program, in the second, ...), the frames of the segment each
+    program keeps the name in (the programs may name their segments
+    otherwise: a module is T2354 in one and T0559 in another).
 
 For a pMAX or raw 32-bit image (runtime/pmem.h) KEY_<SEG> is the segment's descriptor
 number and the addresses are 32-bit offsets in it; a program without a
@@ -62,14 +67,13 @@ def generate(args, prefix, progs, quiet=False):
                 seg_order.append(s.name)
     # name -> address per program; a name keeps one segment in all
     none = 0xFFFFFFFF if any(h.kind in ('pmax', 'bin') for h in hs) else 0xFFFF
-    names, seg_of = {}, {}
+    names, seg_of, segs_in = {}, {}, {}
     for i, h in enumerate(hs):
         found = [(seg, off, name) for (seg, off), name in h.names.items()]
         found += [(seg, off, name) for seg, off, name in h.code if name]
         for seg, off, name in found:
-            if name in seg_of and seg_of[name] != seg:
-                raise SystemExit(f'{name}: {seg_of[name]} in one program, {seg} in another')
-            seg_of[name] = seg
+            seg_of.setdefault(name, seg)        # the first program's segment names it
+            segs_in.setdefault(name, [None] * len(hs))[i] = seg
             names.setdefault(name, [None] * len(hs))[i] = off
     for n in sorted(names) if not quiet and len(hs) > 1 else []:
         missing = [progs[i][0] for i, a in enumerate(names[n]) if a is None]
@@ -83,6 +87,15 @@ def generate(args, prefix, progs, quiet=False):
     for n in order:
         a = ', '.join('0x%04X' % (v if v is not None else none) for v in names[n])
         out.append(f'    X({seg_of[n]}, {n}, {a}) \\')
+    if len(hs) > 1:
+        # a program may call the segment of a name otherwise (its frames
+        # are what the names' segments are in each program)
+        out += ['', f'/* X(SEG, name, {keys}): the frame of the name segment in each program */',
+                f'#define {prefix}_FRAMES(X) \\']
+        for n in order:
+            f = ', '.join(f'{k}_{sg}' if sg else '0x%04X' % none
+                          for (k, _), sg in zip(progs, segs_in[n]))
+            out.append(f'    X({seg_of[n]}, {n}, {f}) \\')
     out += ['', '#endif', '']
     return '\n'.join(out)
 
