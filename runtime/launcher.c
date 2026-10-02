@@ -7,22 +7,6 @@
 #include "platform.h"
 #include "textmode.h"
 
-#define BG TM_BLUE
-#define A_TEXT TM_ATTR(TM_LIGHTGREY, BG)
-#define A_HEAD TM_ATTR(TM_YELLOW, BG)
-#define A_SEL TM_ATTR(TM_BLACK, TM_LIGHTGREY)
-#define A_VALUE TM_ATTR(TM_WHITE, BG)
-#define A_TAB TM_ATTR(TM_LIGHTGREY, TM_BLACK)
-#define A_TAB_ON TM_ATTR(TM_BLACK, TM_CYAN)
-#define A_BAR TM_ATTR(TM_BLACK, TM_CYAN)
-
-#define WIN_X 4
-#define WIN_Y 5
-#define WIN_W 72
-#define WIN_H 15
-#define ROWS (WIN_H - 2)
-#define VALUE_X 44
-
 /* ---- key names (scan code set 1; E0 keys + 80h) */
 
 static const char *const names[128] = {
@@ -68,8 +52,44 @@ const char *launcher_key_name(int code)
 
 /* ---- the screen */
 
+/* The attributes of the design in docs/LAUNCHER.md: white on blue, a grey
+ * bar at the top and at the bottom (the keys in red), a cyan cursor. */
+#define BG TM_BLUE
+#define A_TEXT TM_ATTR(TM_WHITE, BG)
+#define A_TITLE TM_ATTR(TM_YELLOW, BG)
+#define A_HEAD TM_ATTR(TM_LIGHTCYAN, BG)
+#define A_LABEL TM_ATTR(TM_LIGHTGREY, BG)
+#define A_VALUE TM_ATTR(TM_YELLOW, BG)
+#define A_CURSOR TM_ATTR(TM_BLACK, TM_CYAN)
+#define A_BAR TM_ATTR(TM_BLACK, TM_LIGHTGREY)
+#define A_BAR_KEY TM_ATTR(TM_RED, TM_LIGHTGREY)
+
+#define MAX_PAGES 16
+#define MIN_W 40                /* a window's width, at least */
+#define MAX_W 76
+#define MAX_ROWS 15             /* items shown at once */
+#define HELP_ROW (TM_ROWS - 3)  /* the selected item's help */
+#define NOTE_ROW (TM_ROWS - 2)  /* the port's footer */
+
 static uint8_t pixels[TM_WIDTH * TM_HEIGHT];
 static uint32_t palette[256];
+
+/* what the main page ends with: a gap and Quit */
+static LauncherItem quit_items[2] = {
+    { LI_HEAD, "", NULL, NULL, NULL, 0, NULL },
+    { LI_ACTION, "Quit", NULL, NULL, NULL, LAUNCHER_QUIT, NULL },
+};
+
+/* how many items a page shows: the main page (0) has Quit added */
+static int item_count(const LauncherPage *pages, int page)
+{
+    return pages[page].count + (page == 0 ? 2 : 0);
+}
+
+static LauncherItem *item_at(LauncherPage *pages, int page, int i)
+{
+    return i < pages[page].count ? &pages[page].items[i] : &quit_items[i - pages[page].count];
+}
 
 static int selectable(const LauncherItem *it)
 {
@@ -92,7 +112,7 @@ static void centre(int y, const char *s, uint8_t attr)
 
 /* the title bar: the game's name at the left, the port's name
  * and version at the right (left out when both do not fit) */
-static void title_bar(const LauncherApp *app, uint8_t attr)
+static void title_bar(const LauncherApp *app)
 {
     char left[TM_COLS], right[TM_COLS];
 
@@ -101,98 +121,167 @@ static void title_bar(const LauncherApp *app, uint8_t attr)
         snprintf(right, sizeof right, "%.40s %.20s", app->port, app->version);
     else
         snprintf(right, sizeof right, "%.40s", app->port);
-    tm_fill(0, 0, TM_COLS, 1, ' ', attr);
-    tm_text(1, 0, left, attr);
+    tm_fill(0, 0, TM_COLS, 1, ' ', A_BAR);
+    tm_text(1, 0, left, A_BAR);
     if ((int)(strlen(left) + strlen(right)) + 3 <= TM_COLS)
-        tm_text(TM_COLS - 1 - (int)strlen(right), 0, right, attr);
+        tm_text(TM_COLS - 1 - (int)strlen(right), 0, right, A_BAR);
 }
 
-static void draw(const LauncherApp *app, const char *footer, LauncherPage *pages, int npages,
-                 int page, int sel, int top, int waiting)
+/* the bottom bar: pairs of a key (red) and what it does */
+static void help_bar(const char *const *parts)
 {
-    const LauncherPage *pg = &pages[page];
-    int i, x = 2;
+    int x = 1;
 
-    tm_clear(' ', A_TEXT);
-    title_bar(app, A_BAR);
-    for (i = 0; i < npages; i++) {
-        char t[40];
-
-        snprintf(t, sizeof t, " %s ", pages[i].title);
-        x = tm_text(x, 3, t, i == page ? A_TAB_ON : A_TAB) + 1;
-    }
-    tm_fill(WIN_X, WIN_Y, WIN_W, WIN_H, ' ', A_TEXT);
-    tm_frame(WIN_X, WIN_Y, WIN_W, WIN_H, A_TEXT);
-    tm_shadow(WIN_X, WIN_Y, WIN_W, WIN_H);
-    for (i = 0; i < ROWS && top + i < pg->count; i++) {
-        const LauncherItem *it = &pg->items[top + i];
-        int y = WIN_Y + 1 + i, on = top + i == sel;
-        uint8_t a = on ? A_SEL : it->kind == LI_HEAD ? A_HEAD : A_TEXT;
-
-        if (on)
-            tm_fill(WIN_X + 2, y, WIN_W - 4, 1, ' ', a);
-        tm_text(WIN_X + 3, y, it->label, a);
-        if (it->kind == LI_CHOICE && it->value) {
-            int n = count_values(it), v = *it->value;
-
-            tm_put(VALUE_X - 2, y, TM_LEFT_TRIANGLE, on ? a : A_VALUE);
-            tm_text(VALUE_X, y, v >= 0 && v < n ? it->values[v] : "?", on ? a : A_VALUE);
-            tm_put(WIN_X + WIN_W - 4, y, TM_RIGHT_TRIANGLE, on ? a : A_VALUE);
-        } else if (it->kind == LI_KEY && it->value) {
-            tm_text(VALUE_X, y, on && waiting ? "press a key..." : launcher_key_name(*it->value),
-                    on ? a : A_VALUE);
-        }
-    }
-    if (top > 0)
-        tm_put(WIN_X + WIN_W - 2, WIN_Y + 1, TM_UP_ARROW, A_TEXT);
-    if (top + ROWS < pg->count)
-        tm_put(WIN_X + WIN_W - 2, WIN_Y + WIN_H - 2, TM_DOWN_ARROW, A_TEXT);
-    if (sel >= 0 && sel < pg->count && pg->items[sel].help)
-        tm_text(WIN_X, WIN_Y + WIN_H + 1, pg->items[sel].help, A_VALUE);
     tm_fill(0, TM_ROWS - 1, TM_COLS, 1, ' ', A_BAR);
-    centre(TM_ROWS - 1, waiting ? "Press the key  -  Esc: keep  -  Backspace: none"
-                                : "Up/Down: item   Left/Right: change   Tab: page   Enter: choose   Esc: quit",
-           A_BAR);
-    if (footer)
-        centre(TM_ROWS - 2, footer, TM_ATTR(TM_DARKGREY, BG));
+    for (; parts[0]; parts += 2) {
+        x = tm_text(x, TM_ROWS - 1, parts[0], A_BAR_KEY);
+        x = tm_text(x + 1, TM_ROWS - 1, parts[1], A_BAR) + 3;
+    }
+}
+
+/* the blue screen with its title bar */
+static void backdrop(const LauncherApp *app)
+{
+    tm_clear(' ', A_TEXT);
+    title_bar(app);
+}
+
+static void present(void)
+{
     tm_render(pixels, palette);
     plat_present(pixels, TM_WIDTH, TM_HEIGHT, palette);
 }
 
-/* the next key pressed (make code, E0 keys + 80h); 0 when the window was
- * closed */
+/* a page's window: the label column, the value column, the width */
+typedef struct {
+    int w, x, y, h, rows, value_x;
+} Layout;
+
+static void layout(LauncherPage *pages, int page, const char *title, Layout *l)
+{
+    int i, n = item_count(pages, page), lw = 0, vw = 0, w;
+
+    for (i = 0; i < n; i++) {
+        const LauncherItem *it = item_at(pages, page, i);
+        int len = (int)strlen(it->label), v = 0, k;
+
+        if (it->kind == LI_CHOICE) {
+            for (k = 0; it->values && it->values[k]; k++)
+                if ((int)strlen(it->values[k]) > v)
+                    v = (int)strlen(it->values[k]);
+        } else if (it->kind == LI_KEY) {
+            v = 14;                         /* "press a key ..." */
+        }
+        if (v) {
+            if (len > lw)
+                lw = len;
+            if (v > vw)
+                vw = v;
+        }
+    }
+    w = 4 + lw;
+    if (vw)
+        w += 4 + vw + 4;
+    for (i = 0; i < n; i++) {
+        const LauncherItem *it = item_at(pages, page, i);
+
+        if (4 + (int)strlen(it->label) + 4 > w)
+            w = 4 + (int)strlen(it->label) + 4;
+    }
+    if ((int)strlen(title) + 8 > w)
+        w = (int)strlen(title) + 8;
+    l->w = w < MIN_W ? MIN_W : w > MAX_W ? MAX_W : w;
+    l->rows = n < MAX_ROWS ? n : MAX_ROWS;
+    l->h = l->rows + 4;
+    l->x = (TM_COLS - l->w) / 2;
+    l->y = 2 + (19 - l->h) / 2;
+    l->value_x = l->x + 4 + lw + 4;
+}
+
+static void draw(const LauncherApp *app, const char *footer, LauncherPage *pages, int page, int sel,
+                 int top, int waiting)
+{
+    static const char *const help_main[] = { "\x18\x19", "Select", "Enter", "Choose", "Esc", "Quit", NULL };
+    static const char *const help_page[] = {
+        "\x18\x19", "Select", "\x1B\x1A", "Change", "Enter", "Choose", "Esc", "Back", NULL
+    };
+    static const char *const help_key[] = { "Any key", "Set it", "Backspace", "None", "Esc", "Keep the key", NULL };
+    const char *title = page == 0 ? "Setup" : pages[page].title;
+    char buf[48];
+    Layout l;
+    int i;
+
+    layout(pages, page, title, &l);
+    backdrop(app);
+    tm_fill(l.x, l.y, l.w, l.h, ' ', A_TEXT);
+    tm_frame(l.x, l.y, l.w, l.h, A_TEXT);
+    tm_shadow(l.x, l.y, l.w, l.h);
+    snprintf(buf, sizeof buf, " %s ", title);
+    tm_text(l.x + (l.w - (int)strlen(buf)) / 2, l.y, buf, A_TITLE);
+    for (i = 0; i < l.rows; i++) {
+        const LauncherItem *it = item_at(pages, page, top + i);
+        int y = l.y + 2 + i, on = top + i == sel;
+        uint8_t a = on ? A_CURSOR : it->kind == LI_HEAD ? A_HEAD : A_LABEL;
+
+        if (on)
+            tm_fill(l.x + 2, y, l.w - 4, 1, ' ', A_CURSOR);
+        tm_text(l.x + 4, y, it->label, a);
+        if (it->kind == LI_CHOICE && it->value) {
+            int v = *it->value, n = count_values(it);
+            const char *s = v >= 0 && v < n ? it->values[v] : "?";
+
+            tm_text(l.value_x, y, s, on ? a : A_VALUE);
+            if (on) {
+                tm_put(l.value_x - 2, y, TM_LEFT_TRIANGLE, a);
+                tm_put(l.value_x + (int)strlen(s) + 1, y, TM_RIGHT_TRIANGLE, a);
+            }
+        } else if (it->kind == LI_KEY && it->value) {
+            tm_text(l.value_x, y, on && waiting ? "press a key ..." : launcher_key_name(*it->value),
+                    on ? a : A_VALUE);
+        }
+    }
+    if (top > 0)
+        tm_put(l.x + l.w - 3, l.y + 2, TM_UP_ARROW, A_TEXT);
+    if (top + l.rows < item_count(pages, page))
+        tm_put(l.x + l.w - 3, l.y + 1 + l.rows, TM_DOWN_ARROW, A_TEXT);
+    if (sel >= 0 && item_at(pages, page, sel)->help)
+        centre(HELP_ROW, item_at(pages, page, sel)->help, A_HEAD);
+    if (footer)
+        centre(NOTE_ROW, footer, TM_ATTR(TM_DARKGREY, BG));
+    help_bar(waiting ? help_key : page == 0 ? help_main : help_page);
+    present();
+}
+
+/* the next key pressed (make code, E0 keys + 80h); -1 when there is none */
 static int next_key(void)
 {
     static int e0;
+    int b;
 
-    for (;;) {
-        int b;
-
-        while ((b = plat_read_scancode()) >= 0) {
-            if (b == 0xE0) {
-                e0 = 1;
-                continue;
-            }
-            if (b & 0x80) {
-                e0 = 0;
-                continue;
-            }
-            b |= e0 ? 0x80 : 0;
-            e0 = 0;
-            if (b == 0xAA)          /* the fake shift of E0 sequences */
-                continue;
-            return b;
+    while ((b = plat_read_scancode()) >= 0) {
+        if (b == 0xE0) {
+            e0 = 1;
+            continue;
         }
-        return -1;
+        if (b & 0x80) {
+            e0 = 0;
+            continue;
+        }
+        b |= e0 ? 0x80 : 0;
+        e0 = 0;
+        if (b == 0xAA)              /* the fake shift of E0 sequences */
+            continue;
+        return b;
     }
+    return -1;
 }
 
-static int first_selectable(const LauncherPage *pg, int from, int step)
+static int first_selectable(LauncherPage *pages, int page, int from, int step)
 {
-    int i;
+    int i, n = item_count(pages, page);
 
-    for (i = from; i >= 0 && i < pg->count; i += step)
-        if (selectable(&pg->items[i]))
+    for (i = from; i >= 0 && i < n; i += step)
+        if (selectable(item_at(pages, page, i)))
             return i;
     return -1;
 }
@@ -200,29 +289,32 @@ static int first_selectable(const LauncherPage *pg, int from, int step)
 int launcher_run(const LauncherApp *app, const char *footer, LauncherPage *pages, int npages,
                  void (*changed)(const LauncherItem *item))
 {
-    static PadKeys keys;
     const PadKeys *was;
-    int page = 0, sel, top = 0, waiting = 0, result = LAUNCHER_QUIT;
+    int page = 0, from[MAX_PAGES], sel[MAX_PAGES], top[MAX_PAGES], waiting = 0, result = LAUNCHER_QUIT, i;
 
-    memcpy(keys, pad_menu_keys, sizeof keys);
-    keys[PAD_LB][0] = 0xC9;                 /* Page Up */
-    keys[PAD_RB][0] = 0xD1;                 /* Page Down */
-    was = pad_set_keys(&keys);
-    sel = first_selectable(&pages[0], 0, 1);
+    if (npages < 1 || npages > MAX_PAGES)
+        return LAUNCHER_QUIT;
+    was = pad_set_keys(&pad_menu_keys);
+    for (i = 0; i < npages; i++) {
+        from[i] = 0;
+        sel[i] = first_selectable(pages, i, 0, 1);
+        top[i] = 0;
+    }
     for (;;) {
-        LauncherPage *pg = &pages[page];
-        LauncherItem *it = sel >= 0 ? &pg->items[sel] : NULL;
-        int k, turn = 0;
+        LauncherItem *it = sel[page] >= 0 ? item_at(pages, page, sel[page]) : NULL;
+        int k, turn = 0, n = item_count(pages, page), rows = n < MAX_ROWS ? n : MAX_ROWS;
 
-        if (sel >= 0 && sel < top)
-            top = sel;
-        if (sel >= top + ROWS)
-            top = sel - ROWS + 1;
-        if (sel == first_selectable(pg, 0, 1))
-            top = 0;
-        draw(app, footer, pages, npages, page, sel, top, waiting);
+        if (sel[page] >= 0 && sel[page] < top[page])
+            top[page] = sel[page];
+        if (sel[page] >= top[page] + rows)
+            top[page] = sel[page] - rows + 1;
+        if (sel[page] == first_selectable(pages, page, 0, 1))
+            top[page] = 0;
+        draw(app, footer, pages, page, sel[page], top[page], waiting);
         if (!plat_pump())
             break;
+        while (plat_read_control() >= 0)
+            ;
         k = next_key();
         if (k < 0) {
             plat_sleep_ms(10);
@@ -238,27 +330,30 @@ int launcher_run(const LauncherApp *app, const char *footer, LauncherPage *pages
             continue;
         }
         switch (k) {
-        case 0x01:
-            goto done;
+        case 0x01:                          /* Esc: back, or quit from the main page */
+            if (page == 0)
+                goto done;
+            page = from[page];
+            break;
         case 0xC8: {                        /* Up */
-            int s = sel > 0 ? first_selectable(pg, sel - 1, -1) : -1;
+            int s = sel[page] > 0 ? first_selectable(pages, page, sel[page] - 1, -1) : -1;
+
             if (s >= 0)
-                sel = s;
-            else if (sel >= 0 && top > 0)
-                top--;
+                sel[page] = s;
             break;
         }
         case 0xD0: {                        /* Down */
-            int s = first_selectable(pg, sel + 1, 1);
+            int s = first_selectable(pages, page, sel[page] + 1, 1);
+
             if (s >= 0)
-                sel = s;
+                sel[page] = s;
             break;
         }
-        case 0x0F: case 0xD1:               /* Tab, Page Down */
-        case 0xC9:                          /* Page Up */
-            page = (page + (k == 0xC9 ? npages - 1 : 1)) % npages;
-            sel = first_selectable(&pages[page], 0, 1);
-            top = 0;
+        case 0xC7: case 0xC9:               /* Home, Page Up: the first */
+            sel[page] = first_selectable(pages, page, 0, 1);
+            break;
+        case 0xCF: case 0xD1:               /* End, Page Down: the last */
+            sel[page] = first_selectable(pages, page, n - 1, -1);
             break;
         case 0xCB:                          /* Left */
             turn = -1;
@@ -266,24 +361,30 @@ int launcher_run(const LauncherApp *app, const char *footer, LauncherPage *pages
         case 0xCD:                          /* Right */
             turn = 1;
             break;
-        case 0x1C: case 0x9C:               /* Enter */
+        case 0x1C: case 0x9C: case 0x39:    /* Enter, Space */
             if (!it)
                 break;
             if (it->kind == LI_ACTION) {
                 result = it->action;
                 goto done;
             }
-            if (it->kind == LI_KEY && it->value)
+            if (it->kind == LI_PAGE) {
+                if (it->action > 0 && it->action < npages && it->action != page) {
+                    from[it->action] = page;
+                    page = it->action;
+                }
+            } else if (it->kind == LI_KEY && it->value) {
                 waiting = 1;
-            else
+            } else {
                 turn = 1;
+            }
             break;
         }
         if (turn && it && it->kind == LI_CHOICE && it->value) {
-            int n = count_values(it);
+            int m = count_values(it);
 
-            if (n > 0) {
-                *it->value = ((*it->value + turn) % n + n) % n;
+            if (m > 0) {
+                *it->value = ((*it->value + turn) % m + m) % m;
                 if (changed)
                     changed(it);
             }
@@ -296,13 +397,11 @@ done:
 
 /* ---- the dialog about the game's files */
 
-#define D_WINDOW TM_ATTR(TM_WHITE, TM_BLUE)
-#define D_TITLE TM_ATTR(TM_YELLOW, TM_BLUE)
-#define D_LABEL TM_ATTR(TM_LIGHTGREY, TM_BLUE)
-#define D_VALUE TM_ATTR(TM_YELLOW, TM_BLUE)
-#define D_CURSOR TM_ATTR(TM_BLACK, TM_CYAN)
-#define D_BAR TM_ATTR(TM_BLACK, TM_LIGHTGREY)
-#define D_BAR_KEY TM_ATTR(TM_RED, TM_LIGHTGREY)
+#define D_WINDOW A_TEXT
+#define D_TITLE A_TITLE
+#define D_LABEL A_LABEL
+#define D_VALUE A_VALUE
+#define D_CURSOR A_CURSOR
 
 #define D_W 70                  /* the window's width */
 #define D_TEXT (D_W - 6)        /* and its text's */
@@ -352,25 +451,6 @@ static void d_value(const char *s)
         snprintf(d_lines[d_n++], sizeof d_lines[0], "  ...%s", s + len - (w - 3));
 }
 
-/* the blue screen with its title bar */
-static void d_backdrop(const LauncherApp *app)
-{
-    tm_clear(' ', D_WINDOW);
-    title_bar(app, D_BAR);
-}
-
-/* a bar of "KEY text" pairs at the bottom */
-static void d_help(const char *const *parts)
-{
-    int x = 1;
-
-    tm_fill(0, TM_ROWS - 1, TM_COLS, 1, ' ', D_BAR);
-    for (; parts[0]; parts += 2) {
-        x = tm_text(x, TM_ROWS - 1, parts[0], D_BAR_KEY);
-        x = tm_text(x + 1, TM_ROWS - 1, parts[1], D_BAR) + 3;
-    }
-}
-
 /* the window of d_lines and below them the choices, `cursor` highlighted */
 static void d_window(const char *const *choices, int nchoices, int cursor)
 {
@@ -391,12 +471,6 @@ static void d_window(const char *const *choices, int nchoices, int cursor)
             tm_fill(x + 2, row, D_W - 4, 1, ' ', D_CURSOR);
         tm_text(x + 4, row, choices[i], i == cursor ? D_CURSOR : D_LABEL);
     }
-}
-
-static void d_show(void)
-{
-    tm_render(pixels, palette);
-    plat_present(pixels, TM_WIDTH, TM_HEIGHT, palette);
 }
 
 /* d_lines and the choices until Enter (Esc, or the window closed: the
@@ -424,10 +498,10 @@ static int d_ask(const LauncherApp *app, const char *const *choices, int nchoice
             else if (k == 0x01)
                 r = nchoices - 1;
         }
-        d_backdrop(app);
+        backdrop(app);
         d_window(choices, nchoices, cursor);
-        d_help(help);
-        d_show();
+        help_bar(help);
+        present();
         plat_sleep_ms(15);
     }
     pad_set_keys(was);
@@ -506,10 +580,10 @@ int launcher_copy_progress(void *ctx, const char *file, long done, long total)
     d_lines[d_n++][width] = 0;
     snprintf(d_lines[d_n++], sizeof d_lines[0], " %3d %%   %.50s",
              total > 0 ? (int)(100.0 * (double)done / (double)total) : 0, file ? file : "");
-    d_backdrop(c->app);
+    backdrop(c->app);
     d_window(NULL, 0, -1);
-    d_help(help);
-    d_show();
+    help_bar(help);
+    present();
     if (!plat_pump())
         c->closed = 1;
     return c->closed;

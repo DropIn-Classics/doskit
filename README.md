@@ -90,7 +90,7 @@ docs/NEW-PROJECT.md how to start a new game.
     -oplwav too), `audiofx.h` (optional EQ and a
     headphone mode), `fli.h` (FLI animations), `textmode.h` (an 80x25
     text screen), `launcher.h` (the setup screen specified by
-    `docs/LAUNCHER.md`: pages of choices, keys and actions by keyboard
+    `docs/LAUNCHER.md`: a menu and pages of choices, keys and actions by keyboard
     or controller, kept in a settings file; and the dialog about the
     game's files every port shows on its first start: the copy from the
     GOG release offered, its progress, what to do when nothing was

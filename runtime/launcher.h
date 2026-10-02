@@ -1,7 +1,7 @@
 /* launcher.h - a port's setup screen before the game, in the style of a
- * DOS setup program (textmode.h): pages of settings the player steps
- * through with the arrow keys or a controller, the choices kept in a
- * settings file of `name = value` lines.
+ * DOS setup program (textmode.h): a menu, and from it pages of settings
+ * the player steps through with the arrow keys or a controller, the
+ * choices kept in a settings file of `name = value` lines.
  *
  * docs/LAUNCHER.md is its design contract.  The kit owns the complete
  * presentation and common dialogs; a port supplies LauncherApp,
@@ -13,11 +13,17 @@
  * values the items point to and returns when the player picks an action
  * (start the game, start a table, quit) or closes the window.
  *
- * Keys: Up/Down an item, Left/Right a choice's value (or Enter, which
- * steps it on), Tab / Page Up / Page Down the pages (a controller's
- * shoulder buttons), Enter on a key item waits for the key to give it
- * (Esc keeps the old one, Backspace none), Esc quits (LAUNCHER_QUIT).
- * The controller: pad_menu_keys and the shoulders for the pages.
+ * The first page is the menu: a window of actions (start the game) and
+ * of items of kind LI_PAGE that open the other pages, one window each
+ * (Esc comes back).  The launcher ends the menu with a gap and "Quit".
+ * The settings are on the other pages, a page for a group; a page
+ * holds at most about 15 items before it scrolls.  At most 16 pages.
+ *
+ * Keys: Up/Down an item, Home/End (Page Up/Down) the first and the last,
+ * Left/Right a choice's value (or Enter, which steps it on), Enter on
+ * a page's item opens it, Enter on a key item waits for the key to give
+ * it (Esc keeps the old one, Backspace none), Esc goes back from a page
+ * and quits from the menu (LAUNCHER_QUIT).  The controller: pad_menu_keys.
  *
  * The dialog about the game's files (launcher_offer_copy and the others
  * below) is the same in every port: the setup screen's backdrop, a window
@@ -34,7 +40,8 @@ enum {
     LI_HEAD,        /* a heading line, not selectable */
     LI_CHOICE,      /* *value an index into values */
     LI_KEY,         /* *value a make code (E0 keys + 80h, as pad.h's), 0 none */
-    LI_ACTION       /* Enter returns action */
+    LI_ACTION,      /* Enter returns action */
+    LI_PAGE         /* Enter opens the page numbered action (not 0) */
 };
 
 typedef struct {
@@ -48,7 +55,7 @@ typedef struct {
 } LauncherItem;
 
 typedef struct {
-    const char *title;
+    const char *title;              /* the window's title (page 0: not shown, "Setup") */
     LauncherItem *items;
     int count;
 } LauncherPage;

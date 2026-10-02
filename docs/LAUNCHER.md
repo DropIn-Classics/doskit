@@ -14,11 +14,17 @@ another launcher around that content.
 The kit owns all visual and interaction design shared by the ports:
 
 - the 80 by 25 DOS text screen, its font and CGA colours;
-- the cyan title and help bars on the blue backdrop;
+- the blue backdrop with a light grey bar at the top and one at the
+  bottom (black text, the keys in red);
 - the game name, port name and version in the title bar;
-- the page tabs, framed window and shadow;
-- the label and value columns, headings, selection highlight, arrows,
-  scrolling and contextual help line;
+- the menu: a centred window of double lines with its title in yellow,
+  the actions and the pages to open, a gap and "Quit" last, the
+  selection a cyan bar;
+- the pages of settings: one centred window each, sized by its content,
+  its title in the frame, the labels in light grey in a column, the
+  values in yellow in a second, arrows at the selected choice, headings
+  in light cyan, scrolling and the selected item's help line in light
+  cyan below the window;
 - the wording and controls shown in the bottom help bar;
 - keyboard and controller navigation; and
 - the dialogs about the game's files and their copy progress.
@@ -32,16 +38,20 @@ Their exact dimensions, attributes and rendering stay in
 A port supplies only the information that differs between games:
 
 - `LauncherApp`: the game, program and version names;
-- `LauncherPage` titles and their order;
+- `LauncherPage` titles and their order: page 0 is the menu, the others
+  are opened from it by items of kind `LI_PAGE`;
 - `LauncherItem` headings, actions, settings, key bindings, values and
   short contextual help;
 - the optional short footer; and
 - the facts required by the common game-file dialogs, through the
   functions already provided by `launcher.h`.
 
-Use the existing item kinds.  Group related settings on clearly named
-pages; put the normal way to start the game first, and keep labels and
-values short enough for the fixed columns.  A heading names a group, an
+Use the existing item kinds.  The menu holds the normal way to start the
+game first, then a gap and one `LI_PAGE` per group of settings; "Quit" is
+added by the launcher.  Group related settings on clearly named pages of
+a few items each (one window, at most 15 rows before it scrolls); keep
+labels and values short enough for the screen, and the help line to one
+line.  A heading names a group, an
 action is a verb, and help explains a consequence that is not already
 clear from the label.  Do not embed alignment spaces, box characters or
 colour codes in port strings.
@@ -52,7 +62,7 @@ A port must not:
 
 - draw its own setup screen with `textmode.h` or a platform GUI;
 - copy, fork or override `launcher.c` in the game repository;
-- replace the font, palette, backdrop, title bar, tabs, frames, shadows,
+- replace the font, palette, backdrop, bars, menu, frames, shadows,
   columns, selection style, help bar or navigation;
 - add game art, logos, decorative backgrounds or a per-game theme; or
 - redraw the common game-file questions, errors or progress display.
@@ -65,6 +75,16 @@ product decision: update this document, the implementation and its tests
 together, then review existing ports.  It is never an incidental part of
 adding one game.
 
+## Origin
+
+The design is that of pddnative's setup screen, which this document
+makes the standard: a menu of pages in place of tabs over one long page
+(the earlier design, replaced in October 2026 together with its tests;
+the ports built on it are to be rebuilt with the new kit and their pages
+split into a menu and pages: pddnative has a launcher of its own with
+this look and no code in common yet).  The title bar's left side is the
+game's name alone, the menu's window is titled "Setup".
+
 ## Review checklist
 
 Before accepting a launcher change, check that:
@@ -74,7 +94,7 @@ Before accepting a launcher change, check that:
 3. no launcher presentation constants or drawing code were added to the
    port;
 4. only game-specific content and behaviour differ from another port;
-5. the first page, every page transition, scrolling, key capture and the
-   common dialogs were exercised; and
+5. the menu, opening each page and coming back, scrolling, key capture and
+   the common dialogs were exercised; and
 6. the result still looks like `runtime/launcher.c`, because that code
    drew it.
