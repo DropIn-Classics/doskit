@@ -13,7 +13,10 @@ words inside matched pairs (a far call's segment, MOV AX,SEG) and where
 the matched code lies give the map of segment names; the memory operands
 and immediates of matched pairs vote for the map of every other segment.
 Each hint of FROM is then written for TO with its addresses and segment
-names mapped, or commented out with the reason.
+names mapped, or commented out with the reason.  The comments above a
+hint come with it; those above a hint that is not carried (the file's
+header, a block about FROM's own segments) stay behind, as they describe
+FROM and not TO.
 
 TO.hints must exist with at least exe and segment lines (and its own
 linker, relocorder, asm and keeptail lines: those are not carried); its
@@ -257,6 +260,7 @@ def main():
                 lines.append((line, 'comment'))
             continue
         if f[0] in skip:
+            lines.append((line, 'skip'))
             continue
         new = []
         for i, t in enumerate(f):
@@ -284,10 +288,15 @@ def main():
     for line, new in lines:
         if new not in (None, 'comment') and new[0][0] == 'name' and len(new[0]) > 2:
             names.setdefault(new[0][1], []).append(new[0][2])
+    pending = []                # comment lines waiting for the hint they belong to
     for line, new in lines:
         if new == 'comment':
-            out.append(line)
-        elif new is None:
+            pending.append(line)
+            continue
+        if new == 'skip':
+            pending = []
+            continue
+        if new is None:
             out.append('; (not mapped) ' + line)
             n_bad += 1
         elif new[0][0] == 'name' and len(new[0]) > 2 and len(names[new[0][1]]) > 1:
@@ -295,8 +304,10 @@ def main():
             out.append(f'; (not mapped: {w} would be {" and ".join(names[w])}) ' + line)
             n_bad += 1
         else:
+            out.extend(pending)
             out.append(' '.join(new[0]) + new[1])
             n_ok += 1
+        pending = []
     result = own + '\n' + '\n'.join(out) + '\n'
     if args.check:
         if result != text:

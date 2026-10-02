@@ -562,6 +562,13 @@ def check_xfer(py):
     if 'not mapped' in carried:
         print(carried)
         raise SystemExit('selftest FAILED: xfer.py left hints of MULTISEG not mapped')
+    # the comment above a carried hint comes along; the file's header and
+    # the comment above its asm line (not carried) describe MULTISEG and stay
+    if 'reached only through pointers' not in carried:
+        raise SystemExit('selftest FAILED: xfer.py dropped the comment of a carried hint')
+    for stale in ("the kit's test of a program", 'encoded as Borland C does'):
+        if stale in carried.split(xfer_mark)[1]:
+            raise SystemExit(f'selftest FAILED: xfer.py carried a comment about MULTISEG ({stale!r})')
     out = run([py, os.path.join(TOOLS, 'build.py'), 'src/MULTIS2.hints'])
     if 'IDENTICAL' not in out:
         print(out)
