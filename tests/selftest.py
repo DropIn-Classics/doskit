@@ -513,6 +513,9 @@ def make_multiseg():
     return len(exe)
 
 
+xfer_mark = '; ==== carried over from '
+
+
 def check_xfer(py):
     """xfer.py carries MULTISEG's hints to a sibling: its source with an
     instruction put before FOUR's first routine (all of FOUR one byte
@@ -565,6 +568,20 @@ def check_xfer(py):
         raise SystemExit('selftest FAILED: MULTIS2 from the carried hints')
     out = run([py, os.path.join(TOOLS, 'xfer.py'), 'src/MULTISEG.hints', 'src/MULTIS2.hints',
                '--check'])
+    # a name of the file's own lines is not replaced by a carried one at the
+    # same address, nor given again at another (the sibling may use that data
+    # otherwise)
+    own = os.path.join(PROJ, 'build', 'OWNNAME.hints')
+    with open(os.path.join(PROJ, 'src', 'MULTIS2.hints')) as f:
+        text = f.read()
+    with open(own, 'w') as f:
+        f.write(text.split(xfer_mark)[0] + 'name DATA:0015 mine\n' + xfer_mark +
+                text.split(xfer_mark)[1] + 'name DATA:0015 theirs\nname DATA:0016 mine\n')
+    sys.path.insert(0, TOOLS)
+    import disasm
+    names = disasm.Hints(own).names
+    if names.get(('DATA', 0x15)) != 'mine' or ('DATA', 0x16) in names:
+        raise SystemExit('selftest FAILED: a carried name replaced a name of the file itself')
     # one header for both: the names are matched though a segment is named
     # otherwise in the sibling (FOUR is QUAD there), its frames in FRAMES
     run([py, os.path.join(TOOLS, 'symmap.py'), 'build/multi_names.h', 'MULTI',

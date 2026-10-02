@@ -298,7 +298,11 @@ class Hints:
         self.noentry = False
         self.offrel, self.offflags = None, 0
         self.asm = {}             # assembler switches (see the docstring)
+        carried = False
         for n, line in enumerate(open(path, encoding='utf-8'), 1):
+            if line.startswith('; ==== carried over'):
+                carried = True      # xfer.py's block: its names do not replace the file's own
+                # (the address's, or the name's elsewhere)
             line = line.split(';', 1)[0].strip() if not line.lstrip().startswith('comment') else line.strip()
             if not line:
                 continue
@@ -344,7 +348,8 @@ class Hints:
                     else:
                         self.rwords.append((s, o, int(f[2], 16), frm))
                 elif k == 'name':
-                    self.names[self.addr(f[1])] = f[2]
+                    if not (carried and (self.addr(f[1]) in self.names or f[2] in self.names.values())):
+                        self.names[self.addr(f[1])] = f[2]
                 elif k == 'ptr':
                     self.ptr[self.addr(f[1])] = f[2]
                 elif k == 'dptr':

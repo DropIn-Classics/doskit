@@ -18,7 +18,9 @@ names mapped, or commented out with the reason.
 TO.hints must exist with at least exe and segment lines (and its own
 linker, relocorder, asm and keeptail lines: those are not carried); its
 other lines are kept and the carried ones appended after a marker
-(replacing any earlier carried block)."""
+(replacing any earlier carried block).  A name the file's own lines give an
+address stays when the carried block names it otherwise (disasm.py): data a
+sibling uses otherwise than the program the hints come from is named by hand."""
 import argparse, bisect, difflib, os, re, struct, sys
 from collections import Counter, defaultdict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
