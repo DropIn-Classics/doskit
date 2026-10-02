@@ -202,6 +202,9 @@ static void draw(const LauncherApp *app, const char *footer, LauncherPage *pages
                  int top, int waiting)
 {
     static const char *const help_main[] = { "\x18\x19", "Select", "Enter", "Choose", "Esc", "To Quit", NULL };
+    static const char *const help_main_choice[] = {
+        "\x18\x19", "Select", "\x1B\x1A", "Change", "Enter", "Choose", "Esc", "To Quit", NULL
+    };
     static const char *const help_page[] = {
         "\x18\x19", "Select", "\x1B\x1A", "Change", "Enter", "Choose", "Esc", "Back", NULL
     };
@@ -248,7 +251,9 @@ static void draw(const LauncherApp *app, const char *footer, LauncherPage *pages
         centre(HELP_ROW, item_at(pages, page, sel)->help, A_HEAD);
     if (footer)
         centre(NOTE_ROW, footer, TM_ATTR(TM_DARKGREY, BG));
-    help_bar(waiting ? help_key : page == 0 ? help_main : help_page);
+    help_bar(waiting ? help_key
+             : page == 0 ? (sel >= 0 && item_at(pages, 0, sel)->kind == LI_CHOICE ? help_main_choice : help_main)
+             : help_page);
     present();
 }
 

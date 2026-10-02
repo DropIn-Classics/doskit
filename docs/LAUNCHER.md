@@ -18,7 +18,8 @@ The kit owns all visual and interaction design shared by the ports:
   bottom (black text, the keys in red);
 - the game name, port name and version in the title bar;
 - the menu: a centred window of double lines with its title in yellow,
-  the actions and the pages to open, a gap and "Quit" last, the
+  the actions, the pages to open and, when one setting is all a group
+  has, that choice itself (not a page of one item), a gap and "Quit" last, the
   selection a cyan bar; Esc in the menu only moves the selection to
   "Quit" (Enter there leaves), it never leaves by itself;
 - the pages of settings: one centred window each, sized by its content,
