@@ -478,6 +478,7 @@ void vga_set_mode_bios(int mode){
     }
     dac_mask = 0xFF;
     vga_dirty = 1;
+    mouse_mode_changed(mode & 0x7F);
 }
 
 int vga_get_mode(void){ return bios_mode; }
@@ -518,6 +519,7 @@ int vga_set_mode_vesa(int mode, int clear){
     ext_clock = 40000000.0;
     dac_mask = 0xFF;
     vga_dirty = 1;
+    mouse_mode_changed(mode);
     return 1;
 }
 

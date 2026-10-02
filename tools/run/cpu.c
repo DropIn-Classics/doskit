@@ -131,6 +131,7 @@ static void load_seg(int s, uint16_t sel);       /* protected mode, below */
 static void cs_changed(void){
     cs_base = cpu.sbase[S_CS]; def32 = cpu.sbig[S_CS]; ipmask = def32 ? 0xFFFFFFFFu : 0xFFFFu;
 }
+void cpu_state_restored(void){ cs_changed(); }
 /* Real mode and V86 mode: the base is the selector times 16.  Real mode
  * keeps the limit and D bit the register had (as the 386 does); V86 mode
  * sets them to 64 KB, 16-bit. */

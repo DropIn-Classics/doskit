@@ -16,6 +16,7 @@ In build/selftest (a project as a game's would be, see kit.py):
      game/PMODE/PMODE.EXE, tests/cdrom/CDROM.ASM into game/CDROM/CDROM.EXE,
      tests/vgamode/VGAMODE.ASM into game/VGAMODE/VGAMODE.EXE,
      tests/gameport/GAMEPORT.ASM into game/GAMEPORT/GAMEPORT.EXE,
+     tests/mouse/MOUSE.ASM into game/MOUSE/MOUSE.EXE,
      tests/rwatch/RWATCH.ASM into game/RWATCH/RWATCH.EXE,
      tests/adlib/ADLIB.ASM into game/ADLIB/ADLIB.EXE,
      tests/sb16/SB16.ASM into game/SB16/SB16.EXE, tests/cdplay/CDPLAY.ASM
@@ -70,7 +71,10 @@ In build/selftest (a project as a game's would be, see kit.py):
      4F01h, 4F02h with modes 101h and 103h, 4F03h) and says
      "vgamode ok"; GAMEPORT.EXE, which reads the game port as a PC
      without a joystick has it (FFh, the axis bits never falling after
-     the one-shots are started) and says "gameport ok"; RWATCH.EXE, whose
+     the one-shots are started) and says "gameport ok"; MOUSE.EXE, which
+     checks the INT 33h driver's ranges, position, sensitivity, saved state,
+     movement and button callbacks from three scripted events, and its cursor
+     in a PNG; RWATCH.EXE, whose
      table of 200 bytes -rwatch reports with all its 300 readers (an
      instruction and the byte it read; more than a fixed table of 64
      kept); ADLIB.EXE, which
@@ -272,8 +276,8 @@ def run(cmd, check=True, **kw):
 
 
 def read_png(path):
-    """width, height and the RGB bytes of an 8-bit indexed PNG (shot.c's
-    kind: filter 0 on every row)"""
+    """Width, height and RGB bytes of an 8-bit indexed or RGB PNG made by
+    the kit (filter 0 on every row)."""
     data = open(path, 'rb').read()
     if data[:8] != b'\x89PNG\r\n\x1a\n':
         raise SystemExit(f'selftest FAILED: {path} is not a PNG')
@@ -285,8 +289,8 @@ def read_png(path):
             raise SystemExit(f'selftest FAILED: {path}: the CRC of {kind}')
         if kind == b'IHDR':
             w, h, depth, color = struct.unpack('>IIBB', body[:10])
-            if (depth, color) != (8, 3):
-                raise SystemExit(f'selftest FAILED: {path} is not 8-bit indexed')
+            if depth != 8 or color not in (2, 3):
+                raise SystemExit(f'selftest FAILED: {path} is not 8-bit indexed or RGB')
         elif kind == b'PLTE':
             plte = body
         elif kind == b'IDAT':
@@ -294,12 +298,16 @@ def read_png(path):
         pos += 12 + n
     raw = zlib.decompress(idat)
     rgb = bytearray()
+    rowbytes = w * (3 if color == 2 else 1)
     for y in range(h):
-        row = raw[y * (w + 1):(y + 1) * (w + 1)]
+        row = raw[y * (rowbytes + 1):(y + 1) * (rowbytes + 1)]
         if row[0] != 0:
             raise SystemExit(f'selftest FAILED: {path}: filter {row[0]}')
-        for i in row[1:]:
-            rgb += plte[3 * i:3 * i + 3]
+        if color == 2:
+            rgb += row[1:]
+        else:
+            for i in row[1:]:
+                rgb += plte[3 * i:3 * i + 3]
     return w, h, bytes(rgb)
 
 
@@ -997,6 +1005,7 @@ def main():
           f'RELMOD.MOD %d bytes, %d offsets; PMODE.EXE {make_exe("PMODE")} bytes; '
           f'CDROM.EXE {make_exe("CDROM")} bytes; VGAMODE.EXE {make_exe("VGAMODE")} bytes; '
           f'GAMEPORT.EXE {make_exe("GAMEPORT")} bytes; '
+          f'MOUSE.EXE {make_exe("MOUSE")} bytes; '
           f'RWATCH.EXE {make_exe("RWATCH")} bytes; '
           f'ADLIB.EXE {make_exe("ADLIB")} bytes; '
           f'SB16.EXE {make_exe("SB16")} bytes; CDPLAY.EXE {make_exe("CDPLAY")} bytes; '
@@ -1239,6 +1248,19 @@ def main():
     if 'con: gameport ok' not in out:
         print(out)
         raise SystemExit('selftest FAILED: GAMEPORT.EXE (the runner\'s game port)')
+    mouse_png = os.path.join(b, 'mouse.png')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1',
+               '-mouse', '0.02', '100,60,0', '-mouse', '0.04', '120,70,1',
+               '-mouse', '0.06', '120,70,0', '-shot', '0.05', mouse_png,
+               'MOUSE/MOUSE.EXE'])
+    print('\n'.join(l for l in out.splitlines() if l.startswith(('con:', 'shot '))))
+    if 'con: mouse ok' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: MOUSE.EXE (the runner\'s INT 33h driver)')
+    w, h, rgb = read_png(mouse_png)
+    lit = [(i % w, i // w) for i in range(w * h) if rgb[i*3:i*3+3] != b'\0\0\0']
+    if (w, h) != (320, 200) or not (5 <= len(lit) <= 100) or not all(115 <= x <= 138 and 58 <= y <= 80 for x, y in lit):
+        raise SystemExit(f'selftest FAILED: the mouse-cursor shot: {w}x{h}, {len(lit)} lit pixels')
     oplwav = os.path.join(b, 'adlib.wav')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '2', '-oplwav', oplwav, 'ADLIB/ADLIB.EXE'])
     print('\n'.join(l for l in out.splitlines() if l.startswith('con:')))

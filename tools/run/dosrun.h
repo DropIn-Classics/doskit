@@ -72,6 +72,7 @@ void cpu_setflags(uint32_t f);
 void set_sreg(int s, uint16_t v);      /* a selector under PE (outside V86 mode) */
 void cpu_far_jump(uint16_t sel, uint32_t off);
 void cpu_no_iret(void);
+void cpu_state_restored(void);         /* refresh decoder state after replacing cpu */
 extern void (*cb_table[256])(void);
 extern uint32_t insn_ip;               /* IP of the instruction being executed */
 
@@ -147,6 +148,14 @@ extern uint8_t vga_dac[256][3];
 extern int vga_dirty;
 extern unsigned long vsync_edges;
 extern const uint8_t bios_font8x8[128*8];
+
+/* ------------------------------------------------------------- mouse ---- */
+/* A resident Microsoft-compatible mouse driver (INT 33h).  The headless
+ * runner feeds it absolute virtual coordinates and a three-button mask. */
+void mouse_init(void);
+void mouse_mode_changed(int mode);
+void mouse_input(uint16_t x, uint16_t y, uint16_t buttons);
+void mouse_overlay(uint32_t *pixels, int w, int h);
 
 /* ---------------------------------------------------------------- BIOS --- */
 void bios_init(void);

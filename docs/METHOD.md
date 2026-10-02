@@ -157,7 +157,8 @@ run or marked as read from the code ("presumably", "not checked").
 in `dosrun`: a 386 CPU (real mode; protected mode without paging and
 task switches, V86 mode; see the top of "protected mode" in
 tools/run/cpu.c; INT 15h AH=87h/88h/89h), VGA (planar, chain-4, Mode X, the
-retrace), PIT/PIC/keyboard, BIOS, both 8237 DMA controllers and a Sound Blaster 16
+retrace), PIT/PIC/keyboard, a Microsoft-compatible INT 33h mouse, BIOS,
+both 8237 DMA controllers and a Sound Blaster 16
 (DSP and mixer configuration, so the game's own sound drivers run; `-wav`
 writes what it played, `-sb` its transfers), an OPL2 at 388h (its timers,
 so that a driver's probe finds an AdLib; `-oplwav` writes what it played,
@@ -170,7 +171,9 @@ nothing reads the host's clock, the same arguments give the same run,
 and the report ends with hashes of memory and video memory.
 
 Useful options (all at the top of `tools/run/main.c`): `-key T KEY`,
-`KEY+`/`KEY-`, `-keys FILE` (key scripts); `-shot`, `-shotevery`
+`KEY+`/`KEY-`, `-keys FILE` (key scripts); `-mouse T X,Y,B`, `-mice FILE`
+(absolute virtual coordinates and a left/right/middle button mask; events,
+button counts and callbacks happen on the emulated clock); `-shot`, `-shotevery`
 (pictures); `-break ADDR[#N]` (stop at the Nth pass), `-log ADDR`
 (registers at each pass), `-keyat ADDR[#N] KEY+` (a key down or up at
 the Nth pass, input by a frame loop's passes; `-keysat ADDR FILE` for
@@ -190,7 +193,7 @@ event): key scripts with random presses, many seeds in parallel, a
 got there with `-dump`/`-shot`.
 
 Not in the runner: paging and task switches (so no extender that needs
-them), VCPI/DPMI hosts, x87 instructions, EMS/XMS, a mouse driver (INT 33h),
+them), VCPI/DPMI hosts, x87 instructions, EMS/XMS,
 the PC speaker's sound, the OPL at the Sound Blaster's ports (2x8h,
 2x9h; only 388h/389h), savestates, a window. VESA is there as little as a program that sets a mode and then
 programs the card itself needs: 4F00h..4F03h, modes 100h, 101h and 103h

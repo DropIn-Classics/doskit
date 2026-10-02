@@ -29,6 +29,9 @@
  *                    left, right, a..z, 0..9, tab, backspace) or a hex
  *                    scancode (E0xx for the extended keys)
  *   -keys FILE       key events from a file, "T KEY" a line, # comments
+ *   -mouse T X,Y,B   put the mouse at virtual coordinates X,Y with button
+ *                    mask B (bits 0 left, 1 right, 2 middle)
+ *   -mice FILE       mouse events from a file, "T X,Y,B" a line, # comments
  *   -shot T FILE     the screen at T as PNG
  *   -shotevery DT PREFIX   the screen every DT seconds, PREFIX_NNNNN.png
  *   -break ADDR[#N]  stop before the instruction at ADDR (the Nth time)
@@ -161,6 +164,10 @@ static void resolve(Addr *a, const char *prog, uint16_t load){
 typedef struct { double t; int sc, down; } KeyEv;
 static KeyEv keys[MAXEV];
 static int nkeys = 0, key_pos = 0;
+
+typedef struct { double t; uint16_t x, y, buttons; } MouseEv;
+static MouseEv mice[MAXEV];
+static int nmice = 0, mouse_pos = 0;
 
 typedef struct { double t; char file[260]; } Shot;
 static Shot shots[256];
@@ -302,11 +309,38 @@ static void read_keys(const char *path){
     fclose(f);
 }
 
+/* -------------------------------------------------------------- mouse */
+static void add_mouse(double t, const char *spec){
+    unsigned x, y, b; char tail;
+    if(sscanf(spec, "%u,%u,%u%c", &x, &y, &b, &tail) != 3 || x > 0xFFFF || y > 0xFFFF || b > 7)
+        die("bad mouse event %s (X,Y,B wanted)", spec);
+    if(nmice == MAXEV) die("too many mouse events");
+    mice[nmice].t = t; mice[nmice].x = (uint16_t)x; mice[nmice].y = (uint16_t)y;
+    mice[nmice].buttons = (uint16_t)b; nmice++;
+}
+static int mouse_cmp(const void *a, const void *b){
+    const MouseEv *x = (const MouseEv*)a, *y = (const MouseEv*)b;
+    return x->t < y->t ? -1 : x->t > y->t ? 1 : 0;
+}
+static void read_mice(const char *path){
+    FILE *f = fopen(path, "r");
+    char line[256];
+    if(!f) die("cannot read %s", path);
+    while(fgets(line, sizeof(line), f)){
+        double t; char event[96];
+        char *h = strchr(line, '#');
+        if(h) *h = 0;
+        if(sscanf(line, "%lf %95s", &t, event) == 2) add_mouse(t, event);
+    }
+    fclose(f);
+}
+
 /* --------------------------------------------------------------- output */
 static uint32_t fb[1024*1024];
 static void shot(const char *path){
     int w, h;
     vga_render(fb, &w, &h);
+    mouse_overlay(fb, w, h);
     if(!save_png(path, fb, w, h)) fprintf(stderr, "dosrun: cannot write %s\n", path);
     else printf("shot %s %dx%d t=%.6f\n", path, w, h, emu_now());
 }
@@ -418,6 +452,8 @@ int main(int argc, char **argv){
         else if(!strcmp(a,"-ips")){ NEED(1); emu_ips = atof(argv[++i]); }
         else if(!strcmp(a,"-key")){ NEED(2); add_key(atof(argv[i+1]), argv[i+2]); i += 2; }
         else if(!strcmp(a,"-keys")){ NEED(1); read_keys(argv[++i]); }
+        else if(!strcmp(a,"-mouse")){ NEED(2); add_mouse(atof(argv[i+1]), argv[i+2]); i += 2; }
+        else if(!strcmp(a,"-mice")){ NEED(1); read_mice(argv[++i]); }
         else if(!strcmp(a,"-shot")){ NEED(2);
             if(nshots == 256) die("too many -shot");
             shots[nshots].t = atof(argv[i+1]);
@@ -514,6 +550,7 @@ int main(int argc, char **argv){
     if(emu_ips < 100000.0) die("-ips too small");
     emu_inv_ips = 1.0 / emu_ips;
     qsort(keys, (size_t)nkeys, sizeof(KeyEv), key_cmp);
+    qsort(mice, (size_t)nmice, sizeof(MouseEv), mouse_cmp);
     shot_next = 0.0;                 /* picture n is at n*DT */
 
     ram = (uint8_t*)calloc(RAM_ALLOC, 1);
@@ -522,6 +559,7 @@ int main(int argc, char **argv){
     vga_init();
     dev_init();
     bios_init();
+    mouse_init();
     dos_init(game, state);
     mscdex_init();
     if(cue){
@@ -582,6 +620,10 @@ int main(int argc, char **argv){
             while(!cut_end && key_pos < nkeys && keys[key_pos].t <= now){
                 kbd_key(keys[key_pos].sc, keys[key_pos].down); key_pos++;
             }
+            while(!cut_end && mouse_pos < nmice && mice[mouse_pos].t <= now){
+                mouse_input(mice[mouse_pos].x, mice[mouse_pos].y, mice[mouse_pos].buttons);
+                mouse_pos++;
+            }
             while(shot_pos < nshots && shots[shot_pos].t <= now){
                 shot(shots[shot_pos].file); shot_pos++;
             }
@@ -603,6 +645,7 @@ int main(int argc, char **argv){
             {
                 double next = until;
                 if(key_pos < nkeys && keys[key_pos].t < next) next = keys[key_pos].t;
+                if(mouse_pos < nmice && mice[mouse_pos].t < next) next = mice[mouse_pos].t;
                 until_c = cpu.cycles + (uint64_t)((next - now) * emu_ips) + 1;
             }
             if(cpu.halted){
