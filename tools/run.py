@@ -6,19 +6,28 @@ build/dosrun[.exe]) with addresses given by their names in the hints.
     run.py -until 20 -key 3 f1 -break CODE:1251 -dump DATA:9AA0 2 GAME/GAME.EXE 1
 
 PROGRAM is a path in the game's files (GAME/GAME.EXE); the project's hints
-file whose `exe` is that program gives the names.  The options are the
+file whose `exe` is that program gives the names: a loader and the image
+it loads share their base name (LOADER.EXE and its `pmax` IMAGE.386), so
+the image's hints are found for the loader too.  The options are the
 runner's (see the top of tools/run/main.c); run.py only
   * finds the game's files as the other tools do (kit.py) and passes -game,
     and the project's build/run/state as -state,
   * builds the runner when it is missing or older than its sources,
+  * takes -base LIN, run.py's own option (not the runner's): the linear
+    address a `pmax` or `bin` image is loaded at, for the translation
+    below (the runner only resolves an MZ program's load segment; an
+    image's base is fixed by the emulated loader, e.g. 100F30h),
   * translates the ADDR of -break, -log, -watch, -rwatch, -dump and -poke (both
       of its addresses) when it is
       SEG:OFF   with SEG a segment of the hints (CODE:4CEE, DATA:8A8A),
       a label   of the generated source (L4CEE, D8A8A, C4F05) or a `name`
                 or `code` name of the hints,
-    optionally with +N (hex) added: DATA:9A9A+4.  EXE:ADDR takes the
+    optionally with +N (hex) added: DATA:9A9A+4.  PROG:ADDR takes the
     names of another program's hints, one PROGRAM starts (a menu that
-    runs the game: GAME.EXE:main_loop#100).  An address in the runner's
+    runs the game: GAME.EXE:main_loop#100).  Names of a `pmax` or `bin`
+    image translate to -base LIN plus the offset; without -base run.py
+    says so instead of passing the name on to the runner's "bad address".
+    An address in the runner's
     own form (a linear address, SEG:OFF with a hex segment, PROG+SEG:OFF)
     is passed on as it is.
 """
@@ -58,34 +67,51 @@ def build():
         raise SystemExit('run.py: the runner did not build')
 
 
+def same_program(exe, program):
+    """the hints' program is this program: the same path, or the same base
+    name without its extension (a loader and the image it loads,
+    LOADER.EXE and its `pmax` IMAGE.386)"""
+    exe = exe.replace('\\', '/').upper()
+    want = program.replace('\\', '/').upper()
+    if exe == want:
+        return True
+    return os.path.splitext(os.path.basename(exe))[0] == os.path.splitext(os.path.basename(want))[0]
+
+
 def hints_for(program, base_only=False):
     """The hints file whose `exe` is this program (or, base_only, whose
-    exe has this base name), or None."""
-    want = program.replace('\\', '/').upper()
+    exe has this base name), or None.  A loader finds its image's hints
+    too (see same_program)."""
     for f in hints_files():
         h = Hints(f)
         exe = (h.exe or '').replace('\\', '/').upper()
-        if exe and (exe == want or base_only and os.path.basename(exe) == want):
+        if exe and (exe == program.replace('\\', '/').upper() or
+                    base_only and os.path.basename(exe) == os.path.basename(program.replace('\\', '/').upper())):
+            return h
+    for f in hints_files():
+        h = Hints(f)
+        if (h.exe or '') and same_program(h.exe, program):
             return h
     return None
 
 
-def translate(names, t):
-    """ADDR or EXE:ADDR -> the runner's form"""
-    m = re.fullmatch(r'(\w+\.EXE):(.+)', t, re.I)
+def translate(names, t, base=None):
+    """ADDR or PROG:ADDR -> the runner's form"""
+    m = re.fullmatch(r'(\w+\.\w+):(.+)', t, re.I)
     if m:
         h = hints_for(m.group(1), base_only=True)
         if h:
-            return Names(h, h.exe).translate(m.group(2))
+            return Names(h, h.exe, base).translate(m.group(2))
     return names.translate(t) if names else t
 
 
 class Names:
     """Resolves a name of the hints or the generated source to (segment, offset)."""
 
-    def __init__(self, hints, program):
+    def __init__(self, hints, program, base=None):
         self.h = hints
         self.base = os.path.basename(program.replace('\\', '/')).upper()
+        self.image_base = base    # -base LIN: where a `pmax`/`bin` image is loaded
         self.segs = {s.name: s for s in hints.segs}
         self.byname = {}
         for key, name in hints.names.items():
@@ -129,11 +155,24 @@ class Names:
         if r is None:
             return t + count
         seg, off = r
-        return f'{self.base}+{self.segs[seg].frame:04X}:{(off + add) & 0xFFFF:04X}{count}'
+        if self.h.kind == 'mz':
+            return f'{self.base}+{self.segs[seg].frame:04X}:{(off + add) & 0xFFFF:04X}{count}'
+        if self.image_base is None:
+            raise SystemExit(f'run.py: {t} is in {self.h.path} (a {self.h.kind} image, '
+                             f'loaded at no fixed address): pass a linear address, or -base LIN')
+        return f'{(self.image_base + off + add):X}{count}'
 
 
 def main():
     args = sys.argv[1:]
+    base = None
+    if '-base' in args:           # run.py's own, not the runner's (so not in OPTS)
+        i = args.index('-base')
+        try:
+            base = int(args[i + 1], 16)
+        except (IndexError, ValueError):
+            raise SystemExit('run.py: -base takes a hex address (the image\'s linear base)')
+        del args[i:i + 2]
     # find PROGRAM: the first argument that is not an option or an option's argument
     i, prog, pi = 0, None, len(args)
     while i < len(args):
@@ -146,7 +185,7 @@ def main():
     if prog is None:
         raise SystemExit(__doc__)
     hints = hints_for(prog)
-    names = Names(hints, prog) if hints else None
+    names = Names(hints, prog, base) if hints else None
     out = []
     i = 0
     while i < len(args):
@@ -156,7 +195,7 @@ def main():
             vals = args[i+1:i+1+n]
             if a in ADDR_OPTS:
                 for k in range(ADDR_OPTS[a]):
-                    vals[k] = translate(names, vals[k])
+                    vals[k] = translate(names, vals[k], base)
             out += [a] + vals
             i += 1 + n
         else:

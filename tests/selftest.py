@@ -38,6 +38,8 @@ In build/selftest (a project as a game's would be, see kit.py):
      FAR PTR call within its segment; routines in FOUR reached only
      through a ptr and a words hint), with no instruction as DB, and
      without its prefix= hints build.py stops and says the labels collide;
+     HELLO with a name at two addresses is refused (disasm.py's check
+     for a name given twice);
      xfer.py carries MULTISEG's hints to MULTIS2 (its source with FOUR one
      byte further on, ONE and FOUR renamed), which rebuilds from them;
      MULTISEG with 512 more zero bytes in its header rebuilds with
@@ -1157,6 +1159,23 @@ def main():
         print(out)
         raise SystemExit('selftest FAILED: MULTISEG without prefix= hints')
     print('MULTISEG without its prefix= hints: build.py says the labels collide')
+    hints = os.path.join(PROJ, 'src', 'HELLO.hints')
+    with open(hints) as f:
+        whole = f.read()
+    with open(os.path.join(PROJ, 'build', 'DUPNAME.hints'), 'w') as f:
+        # next_step at another address too: a name given twice is refused
+        f.write(whole + 'name CODE:002B next_step\n')
+    out = run([py, os.path.join(TOOLS, 'build.py'), os.path.join(PROJ, 'build', 'DUPNAME.hints')], check=False)
+    if 'name next_step given twice (CODE:18 and CODE:2B)' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: HELLO with a name given twice')
+    print('HELLO with a name given twice: build.py refuses it')
+    import disasm as disasm_py
+    with open(os.path.join(PROJ, 'build', 'SAMENAME.hints'), 'w') as f:
+        # the same name at the same address again: still fine
+        f.write(whole + 'name CODE:0018 next_step\n')
+    disasm_py.Hints(os.path.join(PROJ, 'build', 'SAMENAME.hints'))
+    print('HELLO with a name repeated at its own address: taken')
 
     step('3. run in the runner (run.py)')
     import run as run_py
@@ -1171,7 +1190,31 @@ def main():
     if got != [('TWO', 0xC), ('THREE', 0x23), ('ONE', 6), ('THREE', 0xC)]:
         raise SystemExit(f'selftest FAILED: run.py\'s names of segments with prefix=: {got}')
     print('run.py finds the labels of segments with their own prefix')
+    for a, b, want in (('GAME/GAME.EXE', 'GAME.EXE', True),
+                       ('build/files/IMAGE.386', 'IMAGE.EXE', True),
+                       ('build/files/IMAGE.386', 'OTHER.EXE', False),
+                       ('GAME/GAME.EXE', 'GAME/GAME.EXE', True)):
+        if run_py.same_program(a, b) != want:
+            raise SystemExit(f'selftest FAILED: run.py matches {a} with {b} as {not want}')
+    print('run.py matches a loader with the image it loads')
     b = os.path.join(PROJ, 'build')
+    with open(os.path.join(b, 'IMAGE.hints'), 'w') as f:
+        f.write('pmax build/files/IMAGE.386\nsegment CODE 0 CODE\n'
+                'code CODE:9D83 PLAY\nname CODE:02A3 ENTRY\n')
+    img = disasm.Hints(os.path.join(b, 'IMAGE.hints'))
+    got = [run_py.Names(img, 'IMAGE.EXE', 0x100F30).translate(t)
+           for t in ('CODE:9D83', 'PLAY', 'ENTRY+4', 'PLAY#3')]
+    if got != ['10ACB3', '10ACB3', '1011D7', '10ACB3#3']:
+        raise SystemExit(f'selftest FAILED: run.py translates no image address with -base: {got}')
+    print("run.py translates an image's names with -base")
+    try:
+        run_py.Names(img, 'IMAGE.EXE').translate('PLAY')
+    except SystemExit as e:
+        if 'no fixed address' not in str(e):
+            raise SystemExit(f'selftest FAILED: run.py says the wrong thing without -base: {e}')
+    else:
+        raise SystemExit('selftest FAILED: run.py translates an image address without -base')
+    print('run.py refuses an image address without -base')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-break', 'CODE:0026',
                '-dump', 'counter', '2', '-ram', os.path.join(b, 'orig.ram'),
                '-mem', os.path.join(b, 'orig.mem'),

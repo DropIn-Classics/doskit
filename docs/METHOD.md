@@ -185,7 +185,10 @@ configuration file the set-up program would have written), `-loadfix`
 (load above 64 KB: EXEPACK's unpacker fails in a program loaded below
 it, e.g. a driver EXECed by a small program). run.py translates
 addresses by the hints' names (`CODE:1387`, `DATA:9AA0+4`, `L13B2`, a
-`name`, `EXE:name` for another program's hints).
+`name`, `PROG:name` for another program's hints); a loader shares its
+base name with the image it loads, whose addresses translate with
+run.py's own `-base LIN` (the image's linear base, e.g. where the
+emulated loader put it).
 
 To get the game somewhere without a window (a place in a level, a rare
 event): key scripts with random presses, many seeds in parallel, a

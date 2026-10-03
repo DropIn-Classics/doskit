@@ -85,7 +85,8 @@ Hints syntax (one per line, ';' starts a comment, numbers are hex):
                                        the same with one offset every N bytes
                                        (a field of records, the bytes between
                                        as data), counted from SEG:OFF
-    name       SEG:OFF NAME            a label's name
+    name       SEG:OFF NAME            a label's name (each name once: a
+                                        name given twice is refused)
     ptr        SEG:OFF TARGETSEG       the immediate of the instruction at
                                        SEG:OFF is an offset in TARGETSEG, code
                                        there if its class is CODE (without
@@ -299,6 +300,16 @@ class Hints:
         self.offrel, self.offflags = None, 0
         self.asm = {}             # assembler switches (see the docstring)
         carried = False
+        named = {}                  # name -> (seg, off): a name given twice
+                                    # (at another address) is refused, so a
+                                    # misnamed address cannot pass unnoticed
+
+        def take_name(name, s, o):
+            if name in named and named[name] != (s, o):
+                was = named[name]
+                raise ValueError(f'name {name} given twice ({was[0]}:{was[1]:X} and {s}:{o:X})')
+            named[name] = (s, o)
+
         for n, line in enumerate(open(path, encoding='utf-8'), 1):
             if line.startswith('; ==== carried over'):
                 carried = True      # xfer.py's block: its names do not replace the file's own
@@ -327,6 +338,7 @@ class Hints:
                     s, o = self.addr(f[1])
                     self.code.append((s, o, f[2] if len(f) > 2 else None))
                     if len(f) > 2:
+                        take_name(f[2], s, o)
                         self.names.setdefault((s, o), f[2])
                 elif k == 'words':
                     s, o = self.addr(f[1])
@@ -348,8 +360,10 @@ class Hints:
                     else:
                         self.rwords.append((s, o, int(f[2], 16), frm))
                 elif k == 'name':
-                    if not (carried and (self.addr(f[1]) in self.names or f[2] in self.names.values())):
-                        self.names[self.addr(f[1])] = f[2]
+                    if not (carried and (self.addr(f[1]) in self.names or f[2] in named)):
+                        s, o = self.addr(f[1])
+                        take_name(f[2], s, o)
+                        self.names[(s, o)] = f[2]
                 elif k == 'ptr':
                     self.ptr[self.addr(f[1])] = f[2]
                 elif k == 'dptr':
