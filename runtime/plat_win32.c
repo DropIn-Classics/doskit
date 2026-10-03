@@ -353,8 +353,11 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 shot_save(NULL, NULL, 0);
             return 0;
         }
-        if (code)
+        if (code) {
+            if (!up)
+                pad_keyboard();
             push_key(code, ext, up);
+        }
         return 0;                       /* no menu on Alt or F10 */
     }
     }

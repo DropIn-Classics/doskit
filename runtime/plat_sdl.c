@@ -385,8 +385,11 @@ int plat_pump(void)
                 break;
             }
             code = (unsigned)sc < SDL_NUM_SCANCODES ? set1[sc] : 0;
-            if (code)
+            if (code) {
+                if (!up)
+                    pad_keyboard();
                 push_key(code & 0x7F, code & 0x100, up);
+            }
             break;
         }
         }

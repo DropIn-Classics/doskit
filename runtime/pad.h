@@ -40,6 +40,12 @@ void pad_button(int button, int down, void (*key)(int code, int up));
 /* 1 while some controller holds the button */
 int pad_held(int button);
 
+/* 1 when the player's last press was a controller's button, 0 after a
+ * key typed (the platforms call pad_keyboard for each key that goes
+ * down), and at the start: for texts that name the buttons or the keys */
+int pad_in_use(void);
+void pad_keyboard(void);
+
 /* the button's name for a settings file: a lower case word ("a",
  * "leftshoulder", "up"), as SDL's game controller API names it */
 const char *pad_button_name(int button);

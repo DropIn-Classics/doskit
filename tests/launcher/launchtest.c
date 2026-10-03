@@ -14,6 +14,7 @@
 #include <string.h>
 #include "frame.h"
 #include "launcher.h"
+#include "pad.h"
 #include "platform.h"
 #include "vga.h"
 
@@ -53,6 +54,11 @@ static int fail(const char *what)
 {
     printf("%s (volume %d, key %02X, other %d)\n", what, vol, key, other);
     return 1;
+}
+
+static void pad_ignore(int code, int up)
+{
+    (void)code, (void)up;
 }
 
 int main(int argc, char **argv)
@@ -105,6 +111,17 @@ int main(int argc, char **argv)
         printf("\n");
         return 1;
     }
+    /* pad.h: a button pressed makes the controller the one in use, a key
+     * typed the keyboard again */
+    if (pad_in_use())
+        return fail("pad_in_use at the start");
+    pad_button(PAD_A, 1, pad_ignore);
+    pad_button(PAD_A, 0, pad_ignore);
+    if (!pad_in_use())
+        return fail("pad_in_use after a button");
+    pad_keyboard();
+    if (pad_in_use())
+        return fail("pad_in_use after a key");
     printf("launcher ok\n");
     return 0;
 }

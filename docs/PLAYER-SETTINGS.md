@@ -135,6 +135,16 @@ port sets its own:
 
 The D-pad and the left stick are the same buttons (`PAD_UP` ...).
 
+### Texts that name a key
+
+A game's own texts name its keys ("QUIT THE GAME ? (Y)").  A player on a
+controller should read the button instead.  `pad_in_use()` is 1 when
+the last press was a button (a key typed sets it back to 0): then look
+up which button sends the key in the port's table and show a text of
+the port's with that button's name ("QUIT THE GAME ? (START)"), drawn
+the way the game draws the original.  With the keyboard, and headless,
+the original text stays.
+
 ## The order at the start
 
 1. `pad_names()`, `launcher_load(cfg, ...)`, the sound's settings

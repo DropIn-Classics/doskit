@@ -11,6 +11,7 @@ static const PadKeys *table = &pad_menu_keys;
 static int presses[PAD_BUTTONS];        /* controllers holding the button */
 static int pressed[PAD_BUTTONS][2];     /* the keys it put down, 0: none */
 static int key_holds[256];              /* buttons holding the key */
+static int in_use;                      /* the last press a button's */
 
 static const char *const names[PAD_BUTTONS] = {
     "a", "b", "x", "y", "back", "start", "leftstick", "rightstick",
@@ -37,6 +38,7 @@ void pad_button(int button, int down, void (*key)(int code, int up))
     if (button < 0 || button >= PAD_BUTTONS)
         return;
     if (down) {
+        in_use = 1;
         if (presses[button]++)
             return;                     /* another controller holds it already */
         for (i = 0; i < 2; i++) {
@@ -55,6 +57,16 @@ void pad_button(int button, int down, void (*key)(int code, int up))
             key(c, 1);
         pressed[button][i] = 0;
     }
+}
+
+int pad_in_use(void)
+{
+    return in_use;
+}
+
+void pad_keyboard(void)
+{
+    in_use = 0;
 }
 
 const char *pad_button_name(int button)
