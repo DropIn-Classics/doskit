@@ -20,7 +20,7 @@ The analysis:
   * data: the bytes nothing decoded as code, as DB lines (text as
     strings), cut at every label.
 
-Three kinds of program:
+Kinds of program:
   * an MZ program (`exe`), 16-bit real mode;
   * a pMAX flat image (`pmax`), the 32-bit protected-mode program of the
     pMAX DOS extender: its descriptors are the segments, its selector
@@ -28,6 +28,9 @@ Three kinds of program:
     The source has USE32 segments; offsets, near pointers and `words`
     tables are 32 bits wide.  With one segment (a flat program) DS holds
     CODE too.
+  * a little-endian LE image (`le`), often embedded in a DOS/4GW MZ file;
+    objects are segments, with uncompressed pages and internal selector
+    fixups.
   * a raw 32-bit image (`bin`): the file is the image, offsets from 0,
     entered at 0, no header and no relocations (a driver a program loads
     into a segment of its own and calls); one segment, number 0, the
@@ -43,6 +46,7 @@ Three kinds of program:
 Hints syntax (one per line, ';' starts a comment, numbers are hex):
     exe        GAME/GAME.EXE           an MZ program
     pmax       GAME/GAME.386           a pMAX image
+    le         GAME/GAME.EXE           an LE image
     bin        GAME/GAME.DRV [noentry] a raw 32-bit image
     offrel     GAME/GAME.REL [flags=MASK]   the image's offset relocations:
                                        little-endian 32-bit image offsets,
@@ -52,8 +56,9 @@ Hints syntax (one per line, ';' starts a comment, numbers are hex):
                                        (written DD label+FLAGS)
     segment    NAME FRAME CLASS [stack] [size=N] [start=N] [prefix=P]
                                        in image order; in a pMAX image FRAME
-                                       is the descriptor's number (base and
-                                       size are its own).  start=N: the
+                                       is the descriptor's number, in LE it
+                                       is the object number minus one (base
+                                       and size come from the image). start=N: the
                                        segment's first byte is at offset N
                                        (below 10h) of its frame, as a BYTE-
                                        or WORD-aligned segment the linker put
@@ -73,7 +78,7 @@ Hints syntax (one per line, ';' starts a comment, numbers are hex):
     words      SEG:OFF COUNT TARGETSEG a table of near pointers into TARGETSEG
                                        (a TARGETSEG of class CODE also seeds
                                        code there); 32-bit
-                                       ones in a pMAX image
+                                       ones in a pMAX or LE image
     words      SEG:OFF COUNT TARGETSEG stride=N
                                        COUNT pointers N bytes apart (a field
                                        of records), the bytes between as data
@@ -245,6 +250,186 @@ class PmaxProgram:
         raise SystemExit(f'entry point {self.ip:X} in no segment')
 
 
+class LEProgram(PmaxProgram):
+    """LE objects mapped into a flat image. This first implementation
+    accepts little-endian LE files with legal, zero-filled or invalid pages;
+    other page encodings are rejected explicitly."""
+    kind, bits = 'le', 32
+
+    @staticmethod
+    def valid_header(d, h):
+        if h < 0 or h + 0xb0 > len(d) or d[h:h + 2] != b'LE' or d[h + 2:h + 4] != b'\0\0':
+            return False
+        try:
+            pages, page_size = struct.unpack_from('<II', d, h + 0x14)[0], struct.unpack_from('<I', d, h + 0x28)[0]
+            object_off, objects = struct.unpack_from('<II', d, h + 0x40)
+            page_map = struct.unpack_from('<I', d, h + 0x48)[0]
+        except struct.error:
+            return False
+        return (0 < pages < 1_000_000 and 0 < objects < 256 and
+                0 < page_size <= 65536 and not page_size & (page_size - 1) and
+                object_off + objects * 24 <= len(d) - h and
+                page_map + pages * 4 <= len(d) - h)
+
+    def __init__(self, path):
+        d = open(path, 'rb').read()
+        self.file = d
+        off = None
+        if len(d) >= 0x40:
+            candidate = struct.unpack_from('<I', d, 0x3c)[0]
+            if self.valid_header(d, candidate):
+                off = candidate
+        if off is None:
+            hits = [i for i in range(len(d) - 0xb0 + 1)
+                    if d[i:i + 2] == b'LE' and self.valid_header(d, i)]
+            if len(hits) != 1:
+                raise SystemExit(f'{path}: expected one valid embedded LE header, found {len(hits)}')
+            off = hits[0]
+        self.leoff = off
+        h = off
+        u32 = lambda x: struct.unpack_from('<I', d, h + x)[0]
+        if d[h + 2:h + 4] != b'\0\0':
+            raise SystemExit(f'{path}: LE byte/word order is unsupported')
+        self.npages = u32(0x14)
+        self.entry_object, self.ip = u32(0x18), u32(0x1c)
+        self.stack_object, self.esp = u32(0x20), u32(0x24)
+        self.page_size, self.last_page = u32(0x28), u32(0x2c)
+        object_off, nobjects, page_map = u32(0x40), u32(0x44), u32(0x48)
+        self.fixup_page_off, self.fixup_rec_off = u32(0x68), u32(0x6c)
+        self.data_off = u32(0x80)
+        if self.data_off >= len(d):
+            raise SystemExit(f'{path}: LE data pages start beyond the file')
+        self.descs, self.object_flags, self.object_pages = [], [], []
+        for i in range(nobjects):
+            q = h + object_off + i * 24
+            size, base, flags, first, count, reserved = struct.unpack_from('<6I', d, q)
+            if reserved:
+                raise SystemExit(f'{path}: LE object {i + 1} has a nonzero reserved field')
+            self.descs.append((base, size))
+            self.object_flags.append(flags)
+            self.object_pages.append((first, count))
+        total = max((base + size for base, size in self.descs), default=0)
+        if total > 0x10000000:
+            raise SystemExit(f'{path}: LE objects need an unreasonable {total:X} bytes')
+        image = bytearray(total)
+        self.pages, self.logical = [], {}
+        for oi, ((base, size), (first, count)) in enumerate(zip(self.descs, self.object_pages)):
+            if first == 0 and count:
+                raise SystemExit(f'{path}: LE object {oi + 1} has a zero page-table index')
+            if count > (size + self.page_size - 1) // self.page_size:
+                raise SystemExit(f'{path}: LE object {oi + 1} has more pages than its virtual size')
+            for j in range(count):
+                logical = first - 1 + j
+                if logical >= self.npages or logical in self.logical:
+                    raise SystemExit(f'{path}: invalid or overlapping LE page index in object {oi + 1}')
+                raw = d[h + page_map + logical * 4:h + page_map + logical * 4 + 4]
+                if len(raw) != 4:
+                    raise SystemExit(f'{path}: truncated LE object page table')
+                disk_page, kind = int.from_bytes(raw[:3], 'big'), raw[3]
+                self.logical[logical] = (oi, j)
+                self.pages.append((logical, oi, j, disk_page, kind))
+                start = base + j * self.page_size
+                n = min(self.page_size, max(0, size - j * self.page_size))
+                if kind == 0:
+                    if disk_page == 0:
+                        raise SystemExit(f'{path}: LE page {logical + 1} has no file page')
+                    file_at = self.data_off + (disk_page - 1) * self.page_size
+                    physical_n = self.last_page if disk_page == self.npages and self.last_page else self.page_size
+                    take = min(n, physical_n)
+                    if file_at + take > len(d):
+                        raise SystemExit(f'{path}: truncated LE data page {disk_page}')
+                    image[start:start + take] = d[file_at:file_at + take]
+                elif kind not in (2, 3):
+                    raise SystemExit(f'{path}: LE page kind {kind} is not supported yet')
+        self.img = bytes(image)
+        self.relocs, self.relsites = [], {}
+        self.selector_sites = {}
+        self._read_fixups(d, h)
+        self.offsites, self.tail = None, b''
+
+    @staticmethod
+    def _field(d, p, n):
+        if p + n > len(d):
+            raise ValueError('truncated field')
+        return int.from_bytes(d[p:p + n], 'little'), p + n
+
+    def _read_fixups(self, d, h):
+        fixup_size = struct.unpack_from('<I', d, h + 0x30)[0]
+        if not self.fixup_page_off and not self.fixup_rec_off and not fixup_size:
+            return
+        if not self.fixup_page_off or not self.fixup_rec_off:
+            raise SystemExit('incomplete LE fixup table offsets')
+        page_table = h + self.fixup_page_off
+        if page_table + 4 * (self.npages + 1) > len(d):
+            raise SystemExit('truncated LE fixup page table')
+        starts = [struct.unpack_from('<I', d, page_table + 4 * i)[0]
+                  for i in range(self.npages + 1)]
+        if starts != sorted(starts) or starts[-1] > fixup_size:
+            raise SystemExit('invalid LE fixup page table')
+        table = h + self.fixup_rec_off
+        if table + starts[-1] > len(d):
+            raise SystemExit('truncated LE fixup record table')
+        for page, (begin, end) in enumerate(zip(starts, starts[1:])):
+            pos, stop = table + begin, table + end
+            loc = self.logical.get(page)
+            if loc is None:
+                if begin != end:
+                    raise SystemExit(f'LE fixups for unmapped page {page + 1}')
+                continue
+            obj, page_in_obj = loc
+            while pos < stop:
+                src, flags = d[pos], d[pos + 1]
+                pos += 2
+                stype, listmode = src & 0x0f, bool(src & 0x20)
+                source, pos = self._field(d, pos, 1 if listmode else 2)
+                target = flags & 3
+                obj_width = 2 if flags & 0x40 else 1
+                val_width = 4 if flags & 0x10 else 2
+                target_obj = None
+                if target == 0:
+                    target_obj, pos = self._field(d, pos, obj_width)
+                    if stype != 2:
+                        _, pos = self._field(d, pos, val_width)
+                elif target in (1, 2):
+                    _, pos = self._field(d, pos, obj_width)
+                    ordinal_width = 1 if target == 1 and flags & 0x80 else val_width
+                    _, pos = self._field(d, pos, ordinal_width)
+                elif target == 3:
+                    _, pos = self._field(d, pos, obj_width)
+                if flags & 4:
+                    _, pos = self._field(d, pos, 4 if flags & 0x20 else 2)
+                sources = []
+                if listmode:
+                    for _ in range(source):
+                        v, pos = self._field(d, pos, 2)
+                        sources.append(v - 0x10000 if v & 0x8000 else v)
+                else:
+                    sources.append(source - 0x10000 if source & 0x8000 else source)
+                if pos > stop:
+                    raise SystemExit(f'LE fixup record runs past page {page + 1}')
+                selector_delta = {2: 0, 3: 2, 6: 4}.get(stype)
+                if selector_delta is not None:
+                    for source in sources:
+                        site = self.descs[obj][0] + page_in_obj * self.page_size + source + selector_delta
+                        if site < self.descs[obj][0] or site + 2 > self.descs[obj][0] + self.descs[obj][1]:
+                            raise SystemExit(f'LE selector fixup is outside object {obj + 1}')
+                        if target == 0 and target_obj and target_obj > len(self.descs):
+                            raise SystemExit(f'LE fixup names missing object {target_obj}')
+                        target_index = target_obj - 1 if target == 0 and target_obj else -1
+                        self.selector_sites[site] = target_index
+                        self.relsites[site] = target_index
+                        if target_index >= 0:
+                            self.relocs.append((site, target_index))
+            if pos != stop:
+                raise SystemExit(f'malformed LE fixups on page {page + 1}')
+
+    def entry(self, byframe):
+        ix = self.entry_object - 1
+        if ix < 0 or ix not in byframe:
+            raise SystemExit(f'LE entry object {self.entry_object} is missing from hints')
+        return byframe[ix].name, self.ip
+
+
 class RawProgram(PmaxProgram):
     """A raw 32-bit image: the file itself, one descriptor (base 0, the
     file's size), entered at 0, no relocations."""
@@ -320,7 +505,7 @@ class Hints:
             f = line.split()
             k = f[0]
             try:
-                if k in ('exe', 'pmax', 'bin'):
+                if k in ('exe', 'pmax', 'bin', 'le'):
                     self.exe, self.kind = f[1], 'mz' if k == 'exe' else k
                     self.noentry = 'noentry' in f[2:]
                 elif k == 'offrel':
@@ -1379,7 +1564,7 @@ def load_program(h):
                           program_path(h.offrel) if h.offrel else None)
     if h.offrel or h.noentry:
         raise SystemExit('offrel and noentry are for a raw image (bin)')
-    return {'pmax': PmaxProgram}.get(h.kind, Program)(program_path(h.exe))
+    return {'pmax': PmaxProgram, 'le': LEProgram}.get(h.kind, Program)(program_path(h.exe))
 
 
 def generate(hints_path, raw_extra=()):

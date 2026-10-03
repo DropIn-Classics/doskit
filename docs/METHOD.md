@@ -329,13 +329,21 @@ linked by Microsoft LINK, 186/386 instructions in 16-bit code. Not tried:
   program's loadable driver; tests/raw; with `offrel` a module the host
   relocates by adding its base to the dwords of a list, which then says
   exactly where the offsets are and build.py checks it; tests/relmod),
-  not DOS/4GW's LE/LX or other
-  extenders' formats. The runner
+  and little-endian LE images (`le` in the hints), including LE images
+  embedded in an MZ/DOS/4GW file. LE objects and uncompressed legal,
+  zero-filled and invalid pages are mapped; fixup records are preserved,
+  and internal selector fixups are used by the analysis. Iterated and
+  compressed LE pages are refused. The analysis locates an embedded LE
+  header by validating its tables when the MZ extended-header pointer is
+  not usable. The runner
   emulates the 386's protected mode (tests/pmode: the BIOS's way in, a
   fault, an interrupt, ring 3, a call gate, V86 mode) for an extender
   that switches by itself; no real extender run through yet. The port's
   side is `pmem.h` (tests/flat/port.c, compared with memory made by the
-  test, not with a run: dosrun does not load a pMAX image by itself). A 32-bit instruction with a 16-bit address and no
+  test, not with a run: dosrun does not load a pMAX image by itself). LE
+  has a selftest image with multiple objects and selector fixups; the
+  real DOS/4GW image has been parsed, but its reconstructed hints have
+  not yet been built. A 32-bit instruction with a 16-bit address and no
   register (67h) is written with TASM's address-size operator,
   `DS:[SMALL 27H]` (tasm.py takes it; tests/enc32, tests/relmod);
 - other linkers' header layouts (`build.py`'s write_mz is Microsoft

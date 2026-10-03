@@ -66,7 +66,7 @@ def generate(args, prefix, progs, quiet=False):
             if s.name not in seg_order:
                 seg_order.append(s.name)
     # name -> address per program; a name keeps one segment in all
-    none = 0xFFFFFFFF if any(h.kind in ('pmax', 'bin') for h in hs) else 0xFFFF
+    none = 0xFFFFFFFF if any(h.kind in ('pmax', 'bin', 'le') for h in hs) else 0xFFFF
     names, seg_of, segs_in = {}, {}, {}
     for i, h in enumerate(hs):
         found = [(seg, off, name) for (seg, off), name in h.names.items()]

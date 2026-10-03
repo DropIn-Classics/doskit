@@ -5,7 +5,7 @@ compare the result with the shipped program.
     build.py HINTS [--rounds N]
 
 Writes build/NAME.ASM and build/NAME.EXE (in the project, see kit.py;
-for a pMAX image NAME with the program's own extension).
+for a pMAX, LE or raw image NAME with the program's own extension).
 Every line of the source knows the address it came from, so the
 comparison works line by line: an instruction the assembler encodes
 differently (tasm.py and the original's assembler do not always agree)
@@ -14,7 +14,8 @@ differs is a bug of disasm.py.  Ends with the byte comparison of the
 whole file.  The EXE header is laid out as Microsoft LINK lays it out
 (write_mz), or as Borland's TLINK does (`linker tlink`, tlink.write_mz);
 a program linked otherwise needs its own layout there.  A
-pMAX image is written by write_pmax.  A line tasm.py cannot assemble is
+pMAX images are written by write_pmax; LE pages are replaced inside their
+original container by write_le. A line tasm.py cannot assemble is
 written as DB in the next round too.
 """
 import argparse, os, struct, sys, time
@@ -91,6 +92,65 @@ def write_pmax(out, segs):
     return h + bytes(img) + b''.join(struct.pack('<IB', a, d) for a, d in rel)
 
 
+def write_le(out, an):
+    """Replace LE physical pages with assembled object bytes, retaining the
+    DOS/4GW wrapper, page maps, fixup records and other metadata unchanged."""
+    image = bytearray(an.p.file)
+    by_object = {s.frame: s for s in an.segs}
+    expected = set()
+    for address, target in an.p.selector_sites.items():
+        if target >= 0:
+            obj = next((i for i, (base, size) in enumerate(an.p.descs)
+                        if base <= address < base + size), None)
+            if obj is None:
+                raise SystemExit(f'LE selector fixup at {address:X} is outside its objects')
+            expected.add((obj, address - an.p.descs[obj][0]))
+    actual = set()
+    for address, _, _ in out.relocs:
+        for obj, seg_hint in by_object.items():
+            seg = out.byname.get(seg_hint.name)
+            if not seg:
+                continue
+            start = seg['pieces'][0].base
+            if start <= address < start + seg['end'] - seg['start']:
+                actual.add((obj, address - start))
+                break
+    if actual != expected:
+        missing, extra = sorted(expected - actual), sorted(actual - expected)
+        raise SystemExit(f'LE selector fixups differ: {len(missing)} missing, {len(extra)} extra')
+    page_writes = {}
+    for _, obj, page_in_obj, disk_page, kind in an.p.pages:
+        base, size = an.p.descs[obj]
+        offset = page_in_obj * an.p.page_size
+        n = min(an.p.page_size, max(0, size - offset))
+        if not n:
+            continue
+        seg_hint = by_object.get(obj)
+        if seg_hint is None:
+            raise SystemExit(f'LE object {obj + 1} is missing from hints')
+        linked = out.byname[seg_hint.name]['pieces'][0].base
+        data = bytearray(out.img[linked + offset:linked + offset + n])
+        if len(data) != n:
+            raise SystemExit(f'LE object {obj + 1} output is shorter than its virtual size')
+        for object_no, site in expected:
+            if object_no == obj and site < offset + n and site + 2 > offset:
+                lo, hi = max(site, offset) - offset, min(site + 2, offset + n) - offset
+                data[lo:hi] = bytes(hi - lo)
+        if kind == 0:
+            file_at = an.p.data_off + (disk_page - 1) * an.p.page_size
+            take = an.p.last_page if disk_page == an.p.npages and an.p.last_page else an.p.page_size
+            take = min(take, n)
+            if disk_page in page_writes and page_writes[disk_page] != bytes(data[:take]):
+                raise SystemExit(f'LE physical page {disk_page} maps different object data')
+            page_writes[disk_page] = bytes(data[:take])
+            image[file_at:file_at + take] = data[:take]
+            if any(data[take:]):
+                raise SystemExit(f'LE object {obj + 1} has bytes beyond its final physical page')
+        elif any(data):
+            raise SystemExit(f'LE object {obj + 1} contains bytes in a zero/invalid page')
+    return bytes(image)
+
+
 def assemble(asm_path, an, em):
     """tasm.py on the source; the lines it refuses are returned as the
     addresses they came from, to be written as DB"""
@@ -159,7 +219,9 @@ def build_once(hints, raw):
                 continue
             if any(got[k] != want[k] for k in range(n) if k not in mask):
                 bad.append((s, off, 'bytes', f'{text.strip()}  got {got.hex()} want {want.hex()}'))
-    if an.p.kind == 'pmax':
+    if an.p.kind == 'le':
+        exe = write_le(out, an)
+    elif an.p.kind == 'pmax':
         exe = write_pmax(out, an.segs)
     elif an.p.kind == 'bin':
         if out.relocs:
@@ -197,7 +259,7 @@ def main():
         raw |= new
     if exe is None:
         sys.exit(f'lines tasm.py refuses are left after {args.rounds} rounds')
-    ext = os.path.splitext(an.h.exe)[1] if an.p.kind in ('pmax', 'bin') else '.EXE'
+    ext = os.path.splitext(an.h.exe)[1] if an.p.kind in ('pmax', 'bin', 'le') else '.EXE'
     path = build_dir(name + ext)
     open(path, 'wb').write(exe)
     ref = an.p.file

@@ -14,7 +14,7 @@ runner's (see the top of tools/run/main.c); run.py only
     and the project's build/run/state as -state,
   * builds the runner when it is missing or older than its sources,
   * takes -base LIN, run.py's own option (not the runner's): the linear
-    address a `pmax` or `bin` image is loaded at, for the translation
+    address a `pmax`, `le` or `bin` image is loaded at, for the translation
     below (the runner only resolves an MZ program's load segment; an
     image's base is fixed by the emulated loader, e.g. 100F30h),
   * translates the ADDR of -break, -log, -watch, -rwatch, -dump and -poke (both
@@ -23,10 +23,11 @@ runner's (see the top of tools/run/main.c); run.py only
       a label   of the generated source (L4CEE, D8A8A, C4F05) or a `name`
                 or `code` name of the hints,
     optionally with +N (hex) added: DATA:9A9A+4.  PROG:ADDR takes the
-    names of another program's hints, one PROGRAM starts (a menu that
-    runs the game: GAME.EXE:main_loop#100).  Names of a `pmax` or `bin`
-    image translate to -base LIN plus the offset; without -base run.py
-    says so instead of passing the name on to the runner's "bad address".
+      names of another program's hints, one PROGRAM starts (a menu that
+      runs the game: GAME.EXE:main_loop#100). LE image names translate to
+      -base LIN plus the object's base and offset; pMAX and raw image names
+      translate to -base LIN plus their offset. Without -base run.py says
+      so instead of passing the name on to the runner's "bad address".
     An address in the runner's
     own form (a linear address, SEG:OFF with a hex segment, PROG+SEG:OFF)
     is passed on as it is.
@@ -35,7 +36,7 @@ import os, re, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from disasm import Hints
+from disasm import Hints, load_program
 from kit import KIT, build_dir, game_dir, hints_files
 
 EXE = os.path.join(KIT, 'build', 'dosrun.exe' if os.name == 'nt' else 'dosrun')
@@ -111,7 +112,11 @@ class Names:
     def __init__(self, hints, program, base=None):
         self.h = hints
         self.base = os.path.basename(program.replace('\\', '/')).upper()
-        self.image_base = base    # -base LIN: where a `pmax`/`bin` image is loaded
+        self.image_base = base    # -base LIN: where a flat image is loaded
+        self.object_bases = {}
+        if hints.kind == 'le':
+            image = load_program(hints)
+            self.object_bases = {s.frame: image.descs[s.frame][0] for s in hints.segs}
         self.segs = {s.name: s for s in hints.segs}
         self.byname = {}
         for key, name in hints.names.items():
@@ -160,7 +165,8 @@ class Names:
         if self.image_base is None:
             raise SystemExit(f'run.py: {t} is in {self.h.path} (a {self.h.kind} image, '
                              f'loaded at no fixed address): pass a linear address, or -base LIN')
-        return f'{(self.image_base + off + add):X}{count}'
+        object_base = self.object_bases.get(self.segs[seg].frame, 0)
+        return f'{(self.image_base + object_base + off + add):X}{count}'
 
 
 def main():

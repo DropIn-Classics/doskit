@@ -9,7 +9,8 @@ In build/selftest (a project as a game's would be, see kit.py):
   1. HELLO.ASM assembled and linked with tasm.py and tlink.py into
      game/HELLO/HELLO.EXE (the "shipped program"); tests/flat/FLAT.ASM,
      32-bit, the same way into a pMAX image, build/files/FLAT.386 (as a
-     project's tool would unpack it), tests/raw/RAWDRV.ASM into a raw
+     project's tool would unpack it) and an LE image with page maps and
+     selector fixups, build/files/LE.EXE; tests/raw/RAWDRV.ASM into a raw
      32-bit image, build/files/RAWDRV.DRV, tests/relmod/RELMOD.ASM into a
      relocatable one, build/files/RELMOD.MOD with its offrel list
      RELMOD.REL (the linker's OFF32 fixups); tests/pmode/PMODE.ASM into
@@ -465,6 +466,95 @@ def make_flat():
     with open(os.path.join(PROJ, 'build', 'files', 'FLAT.386'), 'wb') as f:
         f.write(img)
     return len(img)
+
+
+def make_le():
+    """Wrap FLAT's two objects in a small, page based LE executable. The
+    generated image includes internal selector fixups and an MZ pointer to
+    the LE header, exercising both ordinary and DOS/4GW-style discovery."""
+    import math
+    a = tasm.Assembler(os.path.join(HERE, 'flat', 'FLAT.ASM'))
+    a.assemble()
+    out = tlink.link([tlink.module_from_asm(a, 'LE')])
+    names = list(a.segorder)
+    segs = [out.byname[n] for n in names]
+    page_size = 4096
+    objects = []
+    first = 1
+    for i, (name, sg) in enumerate(zip(names, segs)):
+        size = sg['end'] - sg['start']
+        count = math.ceil(size / page_size)
+        objects.append((name, 0x10000 + i * 0x10000, size, 0x2005 if i == 0 else 0x2003,
+                        first, count, sg['pieces'][0].base))
+        first += count
+    npages = first - 1
+    fixups = [[] for _ in range(npages)]
+    for address, source_frame, _ in out.relocs:
+        source_obj = next(i for i, x in enumerate(objects)
+                          if x[6] <= address < x[6] + x[2])
+        name, _, _, _, page_first, _, base = objects[source_obj]
+        local = address - base
+        page = page_first - 1 + local // page_size
+        target_frame = struct.unpack_from('<H', out.img, address)[0]
+        target_obj = next(i for i, x in enumerate(objects) if out.byname[x[0]]['frame'] == target_frame)
+        fixups[page].append(struct.pack('<BBHB', 2, 0, local % page_size, target_obj + 1))
+    fixup_data, fixup_offsets = bytearray(), [0]
+    for records in fixups:
+        records.sort(key=lambda x: struct.unpack_from('<H', x, 2)[0])
+        fixup_data.extend(b''.join(records))
+        fixup_offsets.append(len(fixup_data))
+    leoff = 0x40
+    object_off = 0xb0
+    map_off = object_off + 24 * len(objects)
+    fix_page_off = map_off + 4 * npages
+    fix_rec_off = fix_page_off + 4 * (npages + 1)
+    data_off = (leoff + fix_rec_off + len(fixup_data) + page_size - 1) // page_size * page_size
+    entry_obj = next(i for i, x in enumerate(objects) if out.byname[x[0]]['frame'] == out.cs) + 1
+    header = bytearray(0xb0)
+    header[:2] = b'LE'
+    struct.pack_into('<IIIII', header, 0x14, npages, entry_obj, out.ip, 0, 0)
+    struct.pack_into('<II', header, 0x28, page_size, page_size)
+    struct.pack_into('<I', header, 0x30, len(fixup_data))
+    struct.pack_into('<II', header, 0x40, object_off, len(objects))
+    struct.pack_into('<I', header, 0x48, map_off)
+    struct.pack_into('<II', header, 0x68, fix_page_off, fix_rec_off)
+    struct.pack_into('<I', header, 0x80, data_off)
+    wrapper = bytearray(leoff)
+    wrapper[:2] = b'MZ'
+    struct.pack_into('<I', wrapper, 0x3c, leoff)
+    result = wrapper + header
+    for _, base, size, flags, page_first, count, _ in objects:
+        result.extend(struct.pack('<6I', size, base, flags, page_first, count, 0))
+    for page in range(npages):
+        result.extend((page + 1).to_bytes(3, 'big') + b'\0')
+    result.extend(b''.join(struct.pack('<I', x) for x in fixup_offsets))
+    result.extend(fixup_data)
+    result.extend(bytes(data_off - len(result)))
+    logical = 0
+    for _, _, size, _, _, count, linked in objects:
+        segment = out.img[linked:linked + size]
+        segment = bytearray(segment)
+        for page in range(count):
+            pageoff = page * page_size
+            take = min(page_size, size - pageoff)
+            for rec in fixups[logical + page]:
+                source_off = struct.unpack_from('<H', rec, 2)[0]
+                segment[pageoff + source_off:pageoff + source_off + 2] = b'\0\0'
+            result.extend(segment[pageoff:pageoff + take])
+            result.extend(bytes(page_size - take))
+        logical += count
+    path = os.path.join(PROJ, 'build', 'files', 'LE.EXE')
+    with open(path, 'wb') as f:
+        f.write(result)
+    fallback = bytearray(result)
+    struct.pack_into('<I', fallback, 0x3c, 0xffffffff)
+    fallback_path = os.path.join(PROJ, 'build', 'files', 'LE_FALLBACK.EXE')
+    with open(fallback_path, 'wb') as f:
+        f.write(fallback)
+    from disasm import LEProgram
+    if LEProgram(fallback_path).leoff != leoff:
+        raise SystemExit('selftest FAILED: LE header discovery without a valid MZ pointer')
+    return len(result)
 
 
 def make_raw():
@@ -1074,7 +1164,8 @@ def main():
     print(f'{check_enc32()} lines as capstone reads them')
 
     step('1. HELLO.EXE assembled and linked')
-    print(f'{make_exe()} bytes; FLAT.386 {make_flat()} bytes; RAWDRV.DRV {make_raw()} bytes; '
+    print(f'{make_exe()} bytes; FLAT.386 {make_flat()} bytes; LE.EXE {make_le()} bytes; '
+          f'RAWDRV.DRV {make_raw()} bytes; '
           f'RELMOD.MOD %d bytes, %d offsets; PMODE.EXE {make_exe("PMODE")} bytes; '
           f'CDROM.EXE {make_exe("CDROM")} bytes; VGAMODE.EXE {make_exe("VGAMODE")} bytes; '
           f'GAMEPORT.EXE {make_exe("GAMEPORT")} bytes; '
@@ -1088,6 +1179,10 @@ def main():
           % make_relmod())
     shutil.copy(os.path.join(HERE, 'hello', 'src', 'HELLO.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'flat', 'src', 'FLAT.hints'), os.path.join(PROJ, 'src'))
+    flat_hints = open(os.path.join(HERE, 'flat', 'src', 'FLAT.hints'), encoding='utf-8').read()
+    flat_hints = flat_hints.replace('pmax       build/files/FLAT.386', 'le        build/files/LE.EXE')
+    with open(os.path.join(PROJ, 'src', 'LE.hints'), 'w', encoding='utf-8') as f:
+        f.write(flat_hints)
     shutil.copy(os.path.join(HERE, 'raw', 'src', 'RAWDRV.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'relmod', 'src', 'RELMOD.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'multiseg', 'src', 'MULTISEG.hints'), os.path.join(PROJ, 'src'))
@@ -1243,6 +1338,21 @@ def main():
     if got != ['10ACB3', '10ACB3', '1011D7', '10ACB3#3']:
         raise SystemExit(f'selftest FAILED: run.py translates no image address with -base: {got}')
     print("run.py translates an image's names with -base")
+    le_hints = disasm.Hints(os.path.join(PROJ, 'src', 'LE.hints'))
+    previous_project = os.environ.get('DOSKIT_PROJECT')
+    os.environ['DOSKIT_PROJECT'] = PROJ
+    try:
+        le = disasm.load_program(le_hints)
+        expected = 0x100000 + le.descs[1][0] + 4
+        got = run_py.Names(le_hints, 'LE.EXE', 0x100000).translate('OTHER')
+    finally:
+        if previous_project is None:
+            os.environ.pop('DOSKIT_PROJECT', None)
+        else:
+            os.environ['DOSKIT_PROJECT'] = previous_project
+    if got != f'{expected:X}':
+        raise SystemExit(f'selftest FAILED: run.py omitted the LE object base: {got}')
+    print('run.py translates LE names with the object base and -base')
     try:
         run_py.Names(img, 'IMAGE.EXE').translate('PLAY')
     except SystemExit as e:

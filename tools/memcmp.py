@@ -54,7 +54,7 @@ def main():
     load = int(args.load, 16)
     segs = h.segs
     descs = None
-    if h.kind in ('pmax', 'bin'):
+    if h.kind in ('pmax', 'bin', 'le'):
         if args.base is None:
             raise SystemExit('memcmp.py: a 32-bit image wants --base')
         descs = load_program(h).descs
