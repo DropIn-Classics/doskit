@@ -854,10 +854,10 @@ static void dos_critical_error(void){
     cb_table[CRITRET_CB] = dos_critical_return;
     /* Entry state of a disk error as documented: AH bit 7 clear, Fail,
      * Retry and Ignore allowed (bits 5-3), AL the drive, DI the error with
-     * 19..31 shifted down to 0..12, as DOS does; others are reported as
-     * general failure (0Ch), a guess.  BP:SI (device header) is not set. */
+     * 19..31 shifted down to 0..12 (main.c admits only those errors).
+     * BP:SI (device header) is not set. */
     criterr_di = REG16(R_EDI);
-    REG16(R_EDI) = (criterr_code >= 19 && criterr_code <= 31) ? criterr_code - 19 : 0x0C;
+    REG16(R_EDI) = criterr_code - 19;
     AX = (uint16_t)(0x3800 | cur_drive);
     cpu_interrupt(0x24, 0);
     sp = cpu.sbase[S_SS] + REG16(R_ESP);

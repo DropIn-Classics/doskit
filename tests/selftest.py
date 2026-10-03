@@ -1266,7 +1266,7 @@ def main():
     if 'con: int24 no fault ok' not in out:
         print(out)
         raise SystemExit('selftest FAILED: INT24.EXE without a critical error')
-    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-criterr', '3d', 'c', 'INT24/INT24.EXE'])
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-criterr', '3d', '15', 'INT24/INT24.EXE'])
     if 'con: int24 ok' not in out:
         print(out)
         raise SystemExit('selftest FAILED: -criterr through INT 24')

@@ -77,7 +77,7 @@
  *   -requirements    at exit, summarize devices and memory interfaces used,
  *                    plus unsupported CPU, port, BIOS and DOS requests
  *   -criterr AH ERR  make the next INT 21h service AH enter its INT 24h
- *                    handler with DOS error ERR (hex); AL=3 (Fail) returns
+ *                    handler with DOS error ERR (hex, 13h..1Fh); AL=3 (Fail) returns
  *                    that error in AX with CF set to its caller
  *   -prof            the busiest CS:IP at the end
  *   -cover FILE      every linear address an instruction began at, and the
@@ -598,7 +598,7 @@ int main(int argc, char **argv){
         else if(!strcmp(a,"-criterr")){ unsigned ah, error; NEED(2);
             ah = (unsigned)strtoul(argv[++i], NULL, 16);
             error = (unsigned)strtoul(argv[++i], NULL, 16);
-            if(ah > 0xFF || error > 0xFFFF) die("-criterr: AH and ERR are hex bytes/words");
+            if(ah > 0xFF || error < 0x13 || error > 0x1F) die("-criterr: AH is a hex byte, ERR a DOS error 13h..1Fh (the ones that raise INT 24h)");
             dos_critical_error_on((int)ah, (uint16_t)error); }
         else if(!strcmp(a,"-prof")) prof_on = 1;
         else if(!strcmp(a,"-cover")){ NEED(1); cover_file = argv[++i]; }
