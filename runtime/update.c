@@ -750,12 +750,12 @@ static int update_parent(const char *dir, char *parent, size_t n)
 
 int update_install(const UpdateInfo *info)
 {
+#ifndef __APPLE__
     char url[2048], data[SYS_PATH], package[SYS_PATH], exe[SYS_PATH],
          dir[SYS_PATH], script[SYS_PATH];
-#ifndef __APPLE__
     char parent[SYS_PATH];
-#endif
     FILE *f;
+#endif
 
     if (!info)
         return 0;
