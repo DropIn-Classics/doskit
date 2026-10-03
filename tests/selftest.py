@@ -1044,6 +1044,7 @@ def main():
           f'RWATCH.EXE {make_exe("RWATCH")} bytes; '
           f'ADLIB.EXE {make_exe("ADLIB")} bytes; '
           f'SB16.EXE {make_exe("SB16")} bytes; CDPLAY.EXE {make_exe("CDPLAY")} bytes; '
+          f'INT24.EXE {make_exe("INT24")} bytes; '
           f'MULTISEG.EXE {make_multiseg()} bytes'
           % make_relmod())
     shutil.copy(os.path.join(HERE, 'hello', 'src', 'HELLO.hints'), os.path.join(PROJ, 'src'))
@@ -1260,6 +1261,15 @@ def main():
     if 'con: pmode ok' not in out:
         print(out)
         raise SystemExit('selftest FAILED: PMODE.EXE (the runner\'s protected mode)')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', 'INT24/INT24.EXE'])
+    if 'con: int24 no fault ok' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: INT24.EXE without a critical error')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-criterr', '3d', 'c', 'INT24/INT24.EXE'])
+    if 'con: int24 ok' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: -criterr through INT 24')
+    print('-criterr: INT 24 returns Fail and its INT 21 caller gets the injected error')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', 'CDROM/CDROM.EXE'])
     print('\n'.join(l for l in out.splitlines() if l.startswith('con:')))
     if 'con: cdrom ok' not in out:

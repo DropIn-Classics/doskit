@@ -826,6 +826,37 @@ static void block_for_key(void){
 }
 
 /* ------------------------------------------------------------- INT 21h  */
+/* A runner-injected critical error returns from the guest's INT 24 handler
+ * through this callback, then from the suspended INT 21 frame.  DOS's Fail
+ * response is AL=3; the injector deliberately implements that response. */
+#define CRITRET_CB 0xFE
+static int criterr_ah = -1;
+static uint16_t criterr_code;
+
+void dos_critical_error_on(int ah, uint16_t error){
+    criterr_ah = ah;
+    criterr_code = error;
+}
+
+static void dos_critical_return(void){
+    cb_table[CRITRET_CB] = NULL;
+    if(AL != 3) trc("[dos] INT 24 returned AL=%02X; treating as Fail\n", AL);
+    AX = criterr_code;
+    bios_set_cf(1);
+}
+
+static void dos_critical_error(void){
+    uint32_t sp;
+    /* cpu_interrupt makes an INT 24 frame above the suspended INT 21 one.
+     * Send its IRET to a runner callback, which finishes the outer service. */
+    cb_table[CRITRET_CB] = dos_critical_return;
+    cpu_interrupt(0x24, 0);
+    sp = cpu.sbase[S_SS] + REG16(R_ESP);
+    mem_w16(sp, (uint16_t)(0x1000 + CRITRET_CB*4));
+    mem_w16(sp+2, 0xF000);
+    cpu_no_iret();
+}
+
 static void dos_int21(void){
     if(dos_log){
         uint32_t sp = cpu.sbase[S_SS] + REG16(R_ESP);
@@ -835,6 +866,12 @@ static void dos_int21(void){
         printf("int21 AX=%04X BX=%04X CX=%04X DX=%04X DS=%04X ES=%04X from %04X:%04X t=%.6f %s\n",
                AX,BX,CX,DX,cpu.sreg[S_DS],cpu.sreg[S_ES],
                mem_r16(sp+2), mem_r16(sp), emu_now(), s);
+    }
+    if(AH == criterr_ah){
+        criterr_ah = -1;
+        trc("[dos] critical error %04X on INT 21h/AH=%02X\n", criterr_code, AH);
+        dos_critical_error();
+        return;
     }
     switch(AH){
     case 0x00: dos_terminate2(0, -1); return;

@@ -74,6 +74,9 @@
  *                    from t=0; runtime/opl.c's synthesis, not the chip's
  *                    exact output)
  *   -intwatch NN     print every INT NN call (hex)
+ *   -criterr AH ERR  make the next INT 21h service AH enter its INT 24h
+ *                    handler with DOS error ERR (hex); AL=3 (Fail) returns
+ *                    that error in AX with CF set to its caller
  *   -prof            the busiest CS:IP at the end
  *   -cover FILE      every linear address an instruction began at, and the
  *                    programs' load segments, at the end (tools/gaps.py
@@ -536,6 +539,11 @@ int main(int argc, char **argv){
         else if(!strcmp(a,"-oplwav")){ NEED(1); oplwav_file = argv[++i]; }
         else if(!strcmp(a,"-loadfix")) loadfix = 1;
         else if(!strcmp(a,"-intwatch")){ NEED(1); int_watch = (int)strtol(argv[++i], NULL, 16); }
+        else if(!strcmp(a,"-criterr")){ unsigned ah, error; NEED(2);
+            ah = (unsigned)strtoul(argv[++i], NULL, 16);
+            error = (unsigned)strtoul(argv[++i], NULL, 16);
+            if(ah > 0xFF || error > 0xFFFF) die("-criterr: AH and ERR are hex bytes/words");
+            dos_critical_error_on((int)ah, (uint16_t)error); }
         else if(!strcmp(a,"-prof")) prof_on = 1;
         else if(!strcmp(a,"-cover")){ NEED(1); cover_file = argv[++i]; }
         else if(!strcmp(a,"-vgastate")) vga_state = 1;
