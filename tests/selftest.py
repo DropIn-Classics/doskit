@@ -1171,7 +1171,31 @@ def main():
     if got != [('TWO', 0xC), ('THREE', 0x23), ('ONE', 6), ('THREE', 0xC)]:
         raise SystemExit(f'selftest FAILED: run.py\'s names of segments with prefix=: {got}')
     print('run.py finds the labels of segments with their own prefix')
+    for a, b, want in (('GAME/GAME.EXE', 'GAME.EXE', True),
+                       ('build/files/IMAGE.386', 'IMAGE.EXE', True),
+                       ('build/files/IMAGE.386', 'OTHER.EXE', False),
+                       ('GAME/GAME.EXE', 'GAME/GAME.EXE', True)):
+        if run_py.same_program(a, b) != want:
+            raise SystemExit(f'selftest FAILED: run.py matches {a} with {b} as {not want}')
+    print('run.py matches a loader with the image it loads')
     b = os.path.join(PROJ, 'build')
+    with open(os.path.join(b, 'IMAGE.hints'), 'w') as f:
+        f.write('pmax build/files/IMAGE.386\nsegment CODE 0 CODE\n'
+                'code CODE:9D83 PLAY\nname CODE:02A3 ENTRY\n')
+    img = disasm.Hints(os.path.join(b, 'IMAGE.hints'))
+    got = [run_py.Names(img, 'IMAGE.EXE', 0x100F30).translate(t)
+           for t in ('CODE:9D83', 'PLAY', 'ENTRY+4', 'PLAY#3')]
+    if got != ['10ACB3', '10ACB3', '1011D7', '10ACB3#3']:
+        raise SystemExit(f'selftest FAILED: run.py translates no image address with -base: {got}')
+    print("run.py translates an image's names with -base")
+    try:
+        run_py.Names(img, 'IMAGE.EXE').translate('PLAY')
+    except SystemExit as e:
+        if 'no fixed address' not in str(e):
+            raise SystemExit(f'selftest FAILED: run.py says the wrong thing without -base: {e}')
+    else:
+        raise SystemExit('selftest FAILED: run.py translates an image address without -base')
+    print('run.py refuses an image address without -base')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-break', 'CODE:0026',
                '-dump', 'counter', '2', '-ram', os.path.join(b, 'orig.ram'),
                '-mem', os.path.join(b, 'orig.mem'),
