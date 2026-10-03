@@ -134,8 +134,8 @@ def write_le(out, an):
             raise SystemExit(f'LE object {obj + 1} output is shorter than its virtual size')
         for object_no, site in expected:
             if object_no == obj and site < offset + n and site + 2 > offset:
-                lo, hi = max(site, offset) - offset, min(site + 2, offset + n) - offset
-                data[lo:hi] = bytes(hi - lo)
+                lo, hi = max(site, offset), min(site + 2, offset + n)
+                data[lo - offset:hi - offset] = an.p.img[base + lo:base + hi]
         if kind == 0:
             file_at = an.p.data_off + (disk_page - 1) * an.p.page_size
             take = an.p.last_page if disk_page == an.p.npages and an.p.last_page else an.p.page_size

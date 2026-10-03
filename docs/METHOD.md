@@ -332,7 +332,8 @@ linked by Microsoft LINK, 186/386 instructions in 16-bit code. Not tried:
   and little-endian LE images (`le` in the hints), including LE images
   embedded in an MZ/DOS/4GW file. LE objects and uncompressed legal,
   zero-filled and invalid pages are mapped; fixup records are preserved,
-  and internal selector fixups are used by the analysis. Iterated and
+  internal selector fixups are used by the analysis, and the LE writer
+  preserves the original bytes in selector-fixup fields. Iterated and
   compressed LE pages are refused. The analysis locates an embedded LE
   header by validating its tables when the MZ extended-header pointer is
   not usable. The runner
@@ -341,7 +342,8 @@ linked by Microsoft LINK, 186/386 instructions in 16-bit code. Not tried:
   that switches by itself; no real extender run through yet. The port's
   side is `pmem.h` (tests/flat/port.c, compared with memory made by the
   test, not with a run: dosrun does not load a pMAX image by itself). LE
-  has a selftest image with multiple objects and selector fixups; the
+  has a selftest image with multiple objects and nonzero selector-fixup
+  fields; the
   real DOS/4GW image has been parsed, but its reconstructed hints have
   not yet been built. A 32-bit instruction with a 16-bit address and no
   register (67h) is written with TASM's address-size operator,

@@ -539,7 +539,11 @@ def make_le():
             take = min(page_size, size - pageoff)
             for rec in fixups[logical + page]:
                 source_off = struct.unpack_from('<H', rec, 2)[0]
-                segment[pageoff + source_off:pageoff + source_off + 2] = b'\0\0'
+                target_obj = rec[4]
+                # LE selector fixup slots can contain a nonzero saved word;
+                # the writer must preserve it while retaining the fixup.
+                struct.pack_into('<H', segment, pageoff + source_off,
+                                 0xA500 | target_obj)
             result.extend(segment[pageoff:pageoff + take])
             result.extend(bytes(page_size - take))
         logical += count
