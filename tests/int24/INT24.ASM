@@ -1,6 +1,7 @@
 ; INT24.EXE - runner test: an INT 24 handler may return Fail (AL=3) to
 ; a forced INT 21h/AH=3Dh critical error.  Without forcing, the ordinary
-; missing-file result must not enter the handler.
+; missing-file result must not enter the handler.  The handler checks its
+; entry registers (AH=38h, DI=0Ch); DI survives and AH=59h gives the error.
 .186
 CODE SEGMENT PARA PUBLIC 'CODE'
 	ASSUME CS:CODE,DS:DATA,SS:STACK
@@ -15,6 +16,7 @@ start:
 	MOV AX,DATA
 	MOV DS,AX
 	MOV DX,OFFSET missing
+	MOV DI,1234H
 	MOV AX,3D00H
 	INT 21H
 	JNC failed
@@ -29,6 +31,15 @@ injected:
 	JNE failed
 	CMP AX,0CH
 	JNE failed
+	CMP DI,1234H
+	JNE failed
+	CMP WORD PTR bad,0
+	JNE failed
+	MOV AH,59H
+	XOR BX,BX
+	INT 21H
+	CMP AX,0CH
+	JNE failed
 	MOV DX,OFFSET passed
 print:
 	MOV AH,9
@@ -41,9 +52,18 @@ failed:
 
 critical:
 	PUSH DS
+	PUSH AX
 	MOV AX,DATA
 	MOV DS,AX
+	POP AX
 	INC WORD PTR hits
+	CMP AH,38H
+	JNE entry_bad
+	CMP DI,0CH
+	JE entry_ok
+entry_bad:
+	INC WORD PTR bad
+entry_ok:
 	POP DS
 	MOV AL,3
 	IRET
@@ -51,6 +71,7 @@ CODE ENDS
 
 DATA SEGMENT PARA PUBLIC 'DATA'
 hits DW 0
+bad DW 0
 missing DB 'MISSING.DAT',0
 no_fault DB 'int24 no fault ok',13,10,'$'
 passed DB 'int24 ok',13,10,'$'

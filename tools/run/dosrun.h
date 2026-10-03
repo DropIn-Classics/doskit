@@ -110,6 +110,7 @@ extern uint8_t *cover_map;             /* -cover: RAM_SIZE bits, instruction sta
 
 /* -requirements: compact summary of interfaces a run actually used or
  * asked for but the runner does not implement. */
+extern int requirements;            /* -requirements given */
 enum { REQ_PIC, REQ_PIT, REQ_KBD, REQ_CMOS, REQ_A20, REQ_GAMEPORT,
        REQ_OPL, REQ_DMA, REQ_VGA, REQ_SB, REQ_NDEV };
 void req_device(int kind);

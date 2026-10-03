@@ -92,14 +92,14 @@
 
 uint8_t *ram;
 int trace_level = 0;
-static int requirements = 0;
+int requirements = 0;
 static unsigned char req_devices[REQ_NDEV];
 static unsigned char req_mem_vga, req_mem_vga_w;
 static unsigned char req_ports[65536/8], req_dos_ah[256];
 static struct { uint8_t inum, ah, al; } req_bios_calls[32];
-static int req_bios_n;
+static int req_bios_n, req_bios_more;
 static const char *req_cpu_calls[32];
-static int req_cpu_n;
+static int req_cpu_n, req_cpu_more;
 void trc(const char *fmt, ...){
     va_list ap;
     if(!trace_level) return;
@@ -120,13 +120,14 @@ void req_bios(uint8_t inum, uint8_t ah, uint8_t al){
         req_bios_calls[req_bios_n].ah = ah;
         req_bios_calls[req_bios_n].al = al;
         req_bios_n++;
-    }
+    } else req_bios_more = 1;
 }
 void req_cpu(const char *what){
     int i;
     if(!requirements) return;
     for(i=0;i<req_cpu_n;i++) if(!strcmp(req_cpu_calls[i],what)) return;
     if(req_cpu_n < (int)(sizeof(req_cpu_calls)/sizeof(req_cpu_calls[0]))) req_cpu_calls[req_cpu_n++] = what;
+    else req_cpu_more = 1;
 }
 void req_report(void){
     static const char *const names[] = {"PIC","PIT","keyboard","CMOS","A20","game port","OPL2","DMA","VGA","Sound Blaster"};
@@ -144,8 +145,10 @@ void req_report(void){
     first=1; for(i=0;i<256;i++) if(req_dos_ah[i]){ if(first) printf("  unimplemented DOS:"); printf(" AH=%02X",i); first=0; any=1; }
     if(!first) printf("\n");
     for(i=0;i<req_bios_n;i++){ if(i==0) printf("  unimplemented BIOS:"); printf(" INT %02Xh/AH=%02X AL=%02X", req_bios_calls[i].inum, req_bios_calls[i].ah, req_bios_calls[i].al); any=1; }
+    if(req_bios_more) printf(" ... (more, list full)");
     if(req_bios_n) printf("\n");
     for(i=0;i<req_cpu_n;i++){ if(i==0) printf("  unsupported CPU:"); printf(" %s", req_cpu_calls[i]); any=1; }
+    if(req_cpu_more) printf(" ... (more, list full)");
     if(req_cpu_n) printf("\n");
     if(!any) printf("  no unmet requirements observed\n");
 }

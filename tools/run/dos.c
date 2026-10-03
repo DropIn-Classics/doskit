@@ -832,6 +832,7 @@ static void block_for_key(void){
 #define CRITRET_CB 0xFE
 static int criterr_ah = -1;
 static uint16_t criterr_code;
+static uint16_t criterr_di, ext_error;
 
 void dos_critical_error_on(int ah, uint16_t error){
     criterr_ah = ah;
@@ -841,7 +842,8 @@ void dos_critical_error_on(int ah, uint16_t error){
 static void dos_critical_return(void){
     cb_table[CRITRET_CB] = NULL;
     if(AL != 3) trc("[dos] INT 24 returned AL=%02X; treating as Fail\n", AL);
-    AX = criterr_code;
+    REG16(R_EDI) = criterr_di;
+    AX = ext_error = criterr_code;
     bios_set_cf(1);
 }
 
@@ -850,6 +852,13 @@ static void dos_critical_error(void){
     /* cpu_interrupt makes an INT 24 frame above the suspended INT 21 one.
      * Send its IRET to a runner callback, which finishes the outer service. */
     cb_table[CRITRET_CB] = dos_critical_return;
+    /* Entry state of a disk error as documented: AH bit 7 clear, Fail,
+     * Retry and Ignore allowed (bits 5-3), AL the drive, DI the error with
+     * 19..31 shifted down to 0..12, as DOS does; others are reported as
+     * general failure (0Ch), a guess.  BP:SI (device header) is not set. */
+    criterr_di = REG16(R_EDI);
+    REG16(R_EDI) = (criterr_code >= 19 && criterr_code <= 31) ? criterr_code - 19 : 0x0C;
+    AX = (uint16_t)(0x3800 | cur_drive);
     cpu_interrupt(0x24, 0);
     sp = cpu.sbase[S_SS] + REG16(R_ESP);
     mem_w16(sp, (uint16_t)(0x1000 + CRITRET_CB*4));
@@ -1110,7 +1119,7 @@ static void dos_int21(void){
         default:   AX = 1; bios_set_cf(1); break;
         }
         break;
-    case 0x59: AX = 0; break;
+    case 0x59: AX = ext_error; BX = 0; CX = 0; break;   /* only an injected error is kept */
     default:
         req_dos(AH, AL);
         printf("dos: unimplemented INT 21h AH=%02X AL=%02X at t=%.6f\n", AH, AL, emu_now());

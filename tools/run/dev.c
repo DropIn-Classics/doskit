@@ -246,7 +246,7 @@ static void req_port(uint16_t p){
 }
 
 uint8_t io_r8(uint16_t p){
-    req_port(p);
+    if(requirements) req_port(p);
     switch(p){
     case 0x20: case 0x21: return pic_read(0, p&1);
     case 0xA0: case 0xA1: return pic_read(1, p&1);
@@ -283,7 +283,7 @@ uint8_t io_r8(uint16_t p){
 }
 
 void io_w8(uint16_t p, uint8_t v){
-    req_port(p);
+    if(requirements) req_port(p);
     switch(p){
     case 0x20: case 0x21: pic_write(0, p&1, v); return;
     case 0xA0: case 0xA1: pic_write(1, p&1, v); return;
