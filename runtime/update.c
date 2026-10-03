@@ -169,6 +169,7 @@ static int json_string(const char *json, const char *key, char *out, size_t n)
 }
 
 /* Copy a flat JSON object value (used for the selected platform's asset). */
+#ifndef __APPLE__
 static int json_object(const char *json, const char *key, char *out, size_t n)
 {
     char pat[40];
@@ -205,17 +206,22 @@ static int json_object(const char *json, const char *key, char *out, size_t n)
     }
     return 0;
 }
+#endif
 
+#ifndef __APPLE__
 static int ends_with(const char *s, const char *suffix)
 {
     size_t n = strlen(s), m = strlen(suffix);
     return n >= m && !strcmp(s + n - m, suffix);
 }
+#endif
 
 int update_parse(const char *json, UpdateInfo *info)
 {
+#ifndef __APPLE__
     char hash[256];
     size_t i;
+#endif
 
     memset(info, 0, sizeof *info);
     if (!json_string(json, "version", info->version, sizeof info->version) ||
@@ -225,11 +231,10 @@ int update_parse(const char *json, UpdateInfo *info)
         strncmp(info->page, "https://", 8) != 0)
         info->page[0] = 0;
     json_string(json, "notes", info->notes, sizeof info->notes);
+#ifndef __APPLE__
 #if defined(_WIN32)
     if (json_object(json, "windows-x64", hash, sizeof hash)) {
         const char *suffix = "-windows-x64.zip";
-#elif defined(__APPLE__)
-    if (0) {
 #else
     if (json_object(json, "linux-x64", hash, sizeof hash)) {
         const char *suffix = "-linux-x64.tar.gz";
@@ -247,10 +252,8 @@ int update_parse(const char *json, UpdateInfo *info)
                   info->package[i] == '.' || info->package[i] == '_' ||
                   info->package[i] == '-'))
                 return 0;
-#if !defined(__APPLE__)
         if (!ends_with(info->package, suffix))
             return 0;
-#endif
         if (strlen(info->sha256) != 64)
             return 0;
         for (i = 0; i < 64; i++)
@@ -259,6 +262,7 @@ int update_parse(const char *json, UpdateInfo *info)
                   (info->sha256[i] >= 'A' && info->sha256[i] <= 'F')))
                 return 0;
     }
+#endif
     return 1;
 }
 
@@ -541,6 +545,7 @@ int update_poll(UpdateInfo *info)
 
 #define MAX_PACKAGE (512u * 1024u * 1024u)
 
+#ifndef __APPLE__
 static int download_package(const char *url, const char *path)
 {
 #ifdef _WIN32
@@ -660,6 +665,7 @@ static int make_package_url(const UpdateInfo *info, char *url, size_t n)
         return wrote >= 0 && (size_t)wrote < n;
     }
 }
+#endif
 
 #ifndef __APPLE__
 static int shell_quote(char *out, size_t n, const char *s)
