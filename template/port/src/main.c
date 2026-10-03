@@ -60,23 +60,25 @@ static const char *const old_files[] = { "game", NULL };
 
 static uint8_t pixels[TM_WIDTH * TM_HEIGHT];
 static uint32_t palette[256];
+static void show(void);
 
 /* the lines about newer releases, from row y: the question, once, or
  * the setting and a release found; key the scancode read (-1 none) */
-static void updates(int y, int key)
+static int updates(int y, int key)
 {
     const uint8_t attr = TM_ATTR(TM_LIGHTGREY, TM_BLUE), hi = TM_ATTR(TM_YELLOW, TM_BLUE);
     char line[80];
     UpdateInfo u;
     int consent = update_consent();
+    int failed = 0;
 
     if (!*PORT_VERSION || !*PORT_UPDATE_URL)
-        return;
+        return 0;
     if (consent < 0) {
         if (key == 0x15 || key == 0x31)                 /* Y, N */
             update_set_consent(key == 0x15);
         tm_text(3, y, "Look for new versions of this port on GitHub, once a day?  Y / N", hi);
-        return;
+        return 0;
     }
     if (key == 0x3C)                                    /* F2 */
         update_set_consent(!consent);
@@ -84,15 +86,36 @@ static void updates(int y, int key)
     snprintf(line, sizeof line, "F2: look for new versions: %s", update_consent() ? "on" : "off");
     tm_text(3, y, line, attr);
     if (update_poll(&u)) {
-        if (key == 0x16)                                /* U */
+        if (key == 0x16) {                              /* U: explicit install choice */
+#ifdef __APPLE__
             update_open(u.page);
+#else
+            int action;
+            tm_text(3, y + 1, "Downloading and checking the update...", hi);
+            show();
+            action = update_install(&u);
+            if (action == 1)
+                return 1;
+            failed = action == 0;
+#endif
+        }
+#ifdef __APPLE__
         snprintf(line, sizeof line, "%s is out (this is %s).  U opens its page.", u.version,
                  PORT_VERSION);
-        tm_text(3, y + 1, line, hi);
+#else
+        if (!failed)
+            snprintf(line, sizeof line, "%s is ready (this is %s).  U installs it; any key later.",
+                     u.version, PORT_VERSION);
+#endif
+        if (failed)
+            tm_text(3, y + 1, "Update failed; this version is still installed.", hi);
+        else
+            tm_text(3, y + 1, line, hi);
         snprintf(line, sizeof line, "%.74s", u.notes);
         line[strcspn(line, "\n")] = 0;                /* the notes' first line */
         tm_text(3, y + 2, line, attr);
     }
+    return 0;
 }
 
 static void show(void)
@@ -189,7 +212,8 @@ int main(int argc, char **argv)
         if (key == 0x01)
             break;
         tm_fill(0, 10, TM_WIDTH, 3, ' ', TM_ATTR(TM_LIGHTGREY, TM_BLUE));
-        updates(10, key);
+        if (updates(10, key))
+            break;
         show();
         plat_sleep_ms(15);
     }

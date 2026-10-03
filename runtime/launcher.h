@@ -77,6 +77,10 @@ typedef struct {
  * (for a setting that shows at once: full screen, the volume). */
 int launcher_run(const LauncherApp *app, const char *footer, LauncherPage *pages, int npages,
                  void (*changed)(const LauncherItem *item));
+/* As launcher_run, with `tick(ctx)` called each loop before input and draw. */
+int launcher_run_hook(const LauncherApp *app, const char *footer, LauncherPage *pages, int npages,
+                      void (*changed)(const LauncherItem *item), void (*tick)(void *ctx),
+                      void *ctx);
 
 /* The values of the items with a name from the file `path` (a choice by
  * its text or its index, a key by its make code in hex); lines that are
@@ -105,6 +109,14 @@ enum {
  * the files" or "Quit" (LAUNCHER_CD, without which the game runs: "Not
  * now").  1 to copy, 0 not (or the window was closed). */
 int launcher_offer_copy(const LauncherApp *app, int what, const char *from, const char *to);
+
+/* A newer port release is ready.  The player chooses Install or Later;
+ * Esc/window close means Later.  `notes` may be empty. */
+int launcher_offer_update(const LauncherApp *app, const char *version, const char *notes);
+/* Ask once whether the port may check for updates. */
+int launcher_ask_updates(const LauncherApp *app);
+/* Explain that a chosen update could not be downloaded, checked or started. */
+void launcher_update_failed(const LauncherApp *app);
 
 /* Neither the game's files nor a GOG release were found: said, until
  * "Quit".  `how` ends the sentence "Install the game from GOG and start

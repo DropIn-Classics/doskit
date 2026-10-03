@@ -13,6 +13,8 @@ void sys_set_app(const char *name, const char *unix_name);
 
 /* the directory the program runs from, without a trailing separator */
 void sys_exe_dir(char *out, size_t n);
+/* The full path to the running executable, or an empty string if unknown. */
+void sys_exe_path(char *out, size_t n);
 
 /* where settings, saves and imported game files go, made if missing:
  * $DK_DATA_DIR if set, else the user's data folder, named by sys_set_app:

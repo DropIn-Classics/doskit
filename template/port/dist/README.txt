@@ -65,13 +65,15 @@ game.
 New versions
 ------------
 
-On the first start the setup screen asks whether {{SLUG}} may look for
-new versions; the answer can be changed there later (F2). With a yes it
-fetches one small file from GitHub that names this port's newest
-release, at most once a day, and sends nothing. When a newer version is
-out, the setup screen says so, and a key opens its page in the browser.
-Download the package there and put its folder in place of this one:
-the settings, saves and the game's files stay in the data folder.
+On the first start {{SLUG}} asks whether it may check for new versions;
+F2 turns checks on or off later. With a yes it checks GitHub at most
+once a day and sends nothing. When a newer version is ready, the setup
+shows it and its notes. Press U to confirm installation on Windows or
+Linux: the package is downloaded and verified, then the program closes,
+replaces its folder and starts again. Any other key defers it until the
+next run. On macOS, U opens the release page; download and open the app
+yourself so Gatekeeper can check it. The settings, saves and the game's
+files stay in the data folder.
 
 Keys
 ----

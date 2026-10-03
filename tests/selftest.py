@@ -645,6 +645,7 @@ def check_update(b):
     os.makedirs(os.path.join(d, 'data'))
     exe = cc(os.path.join(d, 'updatetest'), [os.path.join(HERE, 'update', 'updatetest.c'),
                                              os.path.join(RUNTIME, 'update.c'),
+                                             os.path.join(RUNTIME, 'sha256.c'),
                                              os.path.join(RUNTIME, 'sys.c')])
     with open(os.path.join(d, 'latest.json'), 'w') as f:
         f.write('{"version": "v1.3", "page": "https://github.com/o/r/releases/tag/v1.3",\n'

@@ -291,8 +291,9 @@ static int first_selectable(LauncherPage *pages, int page, int from, int step)
     return -1;
 }
 
-int launcher_run(const LauncherApp *app, const char *footer, LauncherPage *pages, int npages,
-                 void (*changed)(const LauncherItem *item))
+int launcher_run_hook(const LauncherApp *app, const char *footer, LauncherPage *pages, int npages,
+                      void (*changed)(const LauncherItem *item), void (*tick)(void *ctx),
+                      void *ctx)
 {
     const PadKeys *was;
     int page = 0, from[MAX_PAGES], sel[MAX_PAGES], top[MAX_PAGES], waiting = 0, result = LAUNCHER_QUIT, i;
@@ -306,6 +307,8 @@ int launcher_run(const LauncherApp *app, const char *footer, LauncherPage *pages
         top[i] = 0;
     }
     for (;;) {
+        if (tick)
+            tick(ctx);
         LauncherItem *it = sel[page] >= 0 ? item_at(pages, page, sel[page]) : NULL;
         int k, turn = 0, n = item_count(pages, page), rows = n < MAX_ROWS ? n : MAX_ROWS;
 
@@ -401,6 +404,12 @@ done:
     return result;
 }
 
+int launcher_run(const LauncherApp *app, const char *footer, LauncherPage *pages, int npages,
+                 void (*changed)(const LauncherItem *item))
+{
+    return launcher_run_hook(app, footer, pages, npages, changed, NULL, NULL);
+}
+
 /* ---- the dialog about the game's files */
 
 #define D_WINDOW A_TEXT
@@ -417,6 +426,7 @@ done:
  * (a path) */
 static char d_lines[D_MAX][D_TEXT + 1];
 static int d_n;
+static const char *d_title = " The game's files ";
 
 static void d_gap(void)
 {
@@ -460,12 +470,11 @@ static void d_value(const char *s)
 /* the window of d_lines and below them the choices, `cursor` highlighted */
 static void d_window(const char *const *choices, int nchoices, int cursor)
 {
-    static const char title[] = " The game's files ";
     int h = d_n + nchoices + 5, x = (TM_COLS - D_W) / 2, y = 2 + (20 - h) / 2, i;
 
     tm_fill(x, y, D_W, h, ' ', D_WINDOW);
     tm_frame(x, y, D_W, h, D_WINDOW);
-    tm_text(x + (D_W - (int)strlen(title)) / 2, y, title, D_TITLE);
+    tm_text(x + (D_W - (int)strlen(d_title)) / 2, y, d_title, D_TITLE);
     tm_shadow(x, y, D_W, h);
     for (i = 0; i < d_n; i++)
         if (d_lines[i][0])
@@ -520,6 +529,7 @@ int launcher_offer_copy(const LauncherApp *app, int what, const char *from, cons
     static const char *const copy_or_not[] = { "Copy the files", "Not now" };
     char text[400];
 
+    d_title = " The game's files ";
     d_n = 0;
     if (what == LAUNCHER_CD)
         snprintf(text, sizeof text, "%s plays the music of %s from a copy of your own CD. It "
@@ -537,12 +547,61 @@ int launcher_offer_copy(const LauncherApp *app, int what, const char *from, cons
     return d_ask(app, what == LAUNCHER_CD ? copy_or_not : copy_or_quit, 2) == 0;
 }
 
+int launcher_offer_update(const LauncherApp *app, const char *version, const char *notes)
+{
+    static const char *const choices[] = { "Install update", "Later" };
+    char text[512];
+    size_t i;
+
+    d_title = " Update ready ";
+    d_n = 0;
+    d_para("A newer version of this port is available:");
+    d_value(version);
+    if (notes && *notes) {
+        d_gap();
+        snprintf(text, sizeof text, "%s", notes);
+        for (i = 0; text[i]; i++)
+            if (text[i] == '\r' || text[i] == '\n') text[i] = ' ';
+        d_para(text);
+    }
+    d_gap();
+    d_para("Install it now? The program will close and start again.");
+    return d_ask(app, choices, 2) == 0;
+}
+
+int launcher_ask_updates(const LauncherApp *app)
+{
+    static const char *const choices[] = { "Allow update checks", "No, thanks" };
+
+    d_title = " Updates ";
+    d_n = 0;
+    d_para("May this port check GitHub for newer versions once a day?");
+    d_gap();
+    d_para("When an update is ready, you will be asked before it is installed.");
+    d_gap();
+    d_para("No game files or personal information are sent.");
+    return d_ask(app, choices, 2) == 0;
+}
+
+void launcher_update_failed(const LauncherApp *app)
+{
+    static const char *const choices[] = { "Continue" };
+
+    d_title = " Update ";
+    d_n = 0;
+    d_para("The update could not be downloaded, verified or started.");
+    d_gap();
+    d_para("Your current version is still installed. You can try again next time.");
+    d_ask(app, choices, 1);
+}
+
 static const char *const d_quit[] = { "Quit" };
 
 void launcher_no_game(const LauncherApp *app, const char *how)
 {
     char text[400];
 
+    d_title = " The game's files ";
     d_n = 0;
     snprintf(text, sizeof text, "%s runs %s with the files of your own copy of the game, its "
              "GOG release. Neither its files nor an installed GOG release were found.",
@@ -559,6 +618,7 @@ void launcher_no_game(const LauncherApp *app, const char *how)
 
 void launcher_copy_failed(const LauncherApp *app, const char *from, const char *why)
 {
+    d_title = " The game's files ";
     d_n = 0;
     d_para("The files could not be copied:");
     d_value(why);

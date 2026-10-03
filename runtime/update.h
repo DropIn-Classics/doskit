@@ -1,4 +1,4 @@
-/* update.h - newer releases of the port made known, on the player's say
+/* update.h - consent-based update checks and player-confirmed installs
  * (docs/RELEASE.md, point 7).
  *
  * A release carries latest.json (the template's workflow makes it), which
@@ -13,8 +13,8 @@
  *     if (update_consent() < 0)        ask once, then update_set_consent
  *     update_start(PORT_VERSION, PORT_UPDATE_URL);    (does its work once,
  *                                      when the player has said yes)
- *     if (update_poll(&u))             show u.version, u.notes;
- *                                      a key: update_open(u.page)
+ *     if (update_poll(&u))             offer u.version and u.notes;
+ *                                      on confirmation: update_install(&u)
  */
 #ifndef DK_UPDATE_H
 #define DK_UPDATE_H
@@ -23,6 +23,8 @@ typedef struct {
     char version[32];   /* "v1.3" */
     char page[256];     /* the release's page, https:// */
     char notes[512];    /* for players, lines split by '\n'; may be empty */
+    char package[96];   /* this platform's release asset, empty on macOS */
+    char sha256[65];    /* the asset's SHA-256, lowercase hex */
 } UpdateInfo;
 
 /* the player's answer: -1 not asked yet, 0 no, 1 yes */
@@ -42,6 +44,13 @@ int update_poll(UpdateInfo *info);
 /* the release's page in the browser; only https:// addresses.  1 if the
  * browser was asked to. */
 int update_open(const char *page);
+
+/* Fetch, verify and arrange installation of a chosen release.  On Windows
+ * and Linux the helper replaces the package after this process exits and
+ * starts the updated program.  On macOS it opens the release page instead.
+ * Returns 1 when installation was scheduled, 2 when the macOS release page
+ * was opened, or 0 on failure. */
+int update_install(const UpdateInfo *info);
 
 /* for tests: latest.json's fields (1 if it has a version); a before b
  * (<0), the same (0), after (>0), "v1.10" after "v1.9" */

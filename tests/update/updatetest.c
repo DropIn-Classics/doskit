@@ -50,6 +50,14 @@ static void write_file(const char *path, const char *text)
 static void compare_and_parse(void)
 {
     UpdateInfo u;
+#ifdef _WIN32
+    const char *asset = ",\"packages\":{\"windows-x64\":{\"file\":\"testgame-windows-x64.zip\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}}";
+#elif defined(__APPLE__)
+    const char *asset = "";
+#else
+    const char *asset = ",\"packages\":{\"linux-x64\":{\"file\":\"testgame-linux-x64.tar.gz\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}}";
+#endif
+    char json[1024];
 
     expect(update_compare("v1.10", "v1.9") > 0, "v1.10 after v1.9");
     expect(update_compare("v1.2", "v1.2.0") == 0, "v1.2 = v1.2.0");
@@ -61,6 +69,22 @@ static void compare_and_parse(void)
     expect(!strcmp(u.notes, "a \"b\"\nc \xc3\xa4"), "notes decoded");
     expect(update_parse("{\"version\": \"v2.0\", \"page\": \"file:///etc\"}", &u) &&
            u.page[0] == 0, "a page not https:// dropped");
+    snprintf(json, sizeof json,
+             "{\"version\":\"v2.0\",\"page\":\"https://github.com/x/y/releases/tag/v2.0\"%s}",
+             asset);
+    expect(update_parse(json, &u), "latest release asset parsed");
+#ifndef __APPLE__
+    expect(u.package[0] && strlen(u.sha256) == 64, "platform package and digest");
+    snprintf(json, sizeof json,
+             "{\"version\":\"v2.0\",\"page\":\"https://x/y\",\"packages\":{"
+#ifdef _WIN32
+             "\"windows-x64\":{\"file\":\"..\\\\bad.zip\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}"
+#else
+             "\"linux-x64\":{\"file\":\"../bad.tar.gz\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}"
+#endif
+             "}}");
+    expect(!update_parse(json, &u), "unsafe asset path rejected");
+#endif
     expect(!update_parse("{\"page\": \"https://x\"}", &u), "no version, nothing");
     expect(!update_open("file:///etc/passwd"), "only https:// opened");
 }

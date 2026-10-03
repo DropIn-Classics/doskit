@@ -94,6 +94,13 @@ int sys_parent(const char *path, char *out, size_t n)
 
 #ifdef _WIN32
 
+void sys_exe_path(char *out, size_t n)
+{
+    DWORD len = GetModuleFileNameA(NULL, out, (DWORD)n);
+    if (!len || len >= n)
+        out[0] = 0;
+}
+
 void sys_exe_dir(char *out, size_t n)
 {
     char path[SYS_PATH];
@@ -202,6 +209,21 @@ void sys_home_dir(char *out, size_t n)
 }
 
 #else
+
+void sys_exe_path(char *out, size_t n)
+{
+#ifdef __APPLE__
+    uint32_t size = (uint32_t)n;
+    if (_NSGetExecutablePath(out, &size) != 0 || !realpath(out, out))
+        out[0] = 0;
+#else
+    ssize_t len = readlink("/proc/self/exe", out, n ? n - 1 : 0);
+    if (len <= 0 || (size_t)len >= n)
+        out[0] = 0;
+    else
+        out[len] = 0;
+#endif
+}
 
 void sys_exe_dir(char *out, size_t n)
 {

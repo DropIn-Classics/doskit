@@ -54,18 +54,19 @@ a point below.
    how to start, where the game is looked for and where it can be put,
    the first-start step for each platform, the keys, the licences.
    Nothing in it that only a developer needs.
-7. **Newer versions made known, on the player's say** (`update.h`). On
-   the first start the setup screen asks once whether the program may
-   look for new versions; nobody is made to. The answer can be changed
-   on the setup screen later. With a yes, a release build (one with
-   `PORT_VERSION`) fetches its release page's `latest.json` from GitHub
-   at most once a day, in the background, and says nothing when that
-   fails. When a newer version is there, the setup screen shows it with
-   its notes, and a key opens its release page in the browser: the
-   player downloads the package and puts its folder in place of the
-   old one (point 4 keeps the settings, saves and game). Nothing but
-   that one file is fetched and nothing is sent; README.txt says so,
-   and how to switch it off.
+7. **Updates by consent, installed only after confirmation** (`update.h`).
+   The first setup asks once whether the program may check GitHub for
+   newer versions; the answer can be changed there later. With a yes, a
+   release build checks `latest.json` at most once a day in the
+   background. When a newer version is ready, the setup asks each time
+   before installing it. On Windows and Linux, Yes downloads that
+   platform's package, verifies its SHA-256 from `latest.json`, then
+   replaces the program folder and restarts the new version after the
+   current process exits. No or Esc defers the update; it will be
+   offered again on the next start. On macOS, Yes opens the release page
+   instead: the app must be downloaded and opened by the player so
+   Gatekeeper can check it. No game files or personal information are
+   sent. README.txt describes the check, confirmation and opt-out.
 
 ## The packages
 
@@ -134,10 +135,11 @@ Each package is downloaded from the release page with a browser (so
 that it carries the quarantine or the mark of the web), unpacked with
 the system's own tool and started with a double click on its platform,
 with the GOG release installed where GOG puts it: the setup screen must
-come up, the game's files copied, a game played; and the release
-before it, with looking for new versions switched on, must show the new
-one and open its page. Where that was not
-done for a platform, the project's port/README.md says so.
+come up, the game's files copied, a game played; and the release before
+it, with update checks switched on, must show the new version. On
+Windows and Linux, confirm installation and check that the new program
+starts. On macOS, confirm that the release page opens. Where that was
+not done for a platform, the project's port/README.md says so.
 
 ## Not done yet
 
@@ -147,9 +149,9 @@ step; it needs an account the user decides on. An AppImage or Flatpak
 for Linux, a Windows ARM64 build and application icons are not part of
 the standard yet.
 
-A program that replaces itself (the package fetched, checked against
-`latest.json`'s SHA-256, unpacked over the old one) is not either: on
-Windows and Linux it could follow point 7; on a Mac an app started from
-the download folder runs from a read-only copy (App Translocation), and
-an update fetched by the program itself would pass Gatekeeper by, the
-check the first start asks the player to pass. It waits for signing.
+A program that installs its own updates is supported on Windows and
+Linux as described in point 7. macOS remains a release-page link: an
+app started from the download folder can run from a read-only copy (App
+Translocation), and a package fetched by the program itself would pass
+Gatekeeper by, the check the first start asks the player to pass. This
+restriction remains until the app can be signed and notarised.

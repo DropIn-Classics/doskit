@@ -30,7 +30,7 @@ static int fail(const char *what)
 int main(int argc, char **argv)
 {
     /* a screen answered at picture n takes the pictures up to n + 1 */
-    static const char keys[] = "2:1C 5:E0-50 7:1C 10:01 13:1C 16:1C";
+    static const char keys[] = "2:1C 5:E0-50 7:1C 10:01 13:1C 16:1C 19:1C 22:E0-50 24:1C 27:1C";
     static const LauncherApp app = { "A Game With A Name", "agame", "v1.2" };
     static const char from[] = "/home/player/GOG Games/A Game With A Name/data/game.gog";
     static const char to[] =
@@ -49,6 +49,11 @@ int main(int argc, char **argv)
         return fail("Esc did not decline");
     launcher_no_game(&app, NULL);
     launcher_copy_failed(&app, from, "cannot write GAME/GAME.EXE");
+    if (launcher_offer_update(&app, "v1.3", "Fixed a problem.\nImproved sound.") != 1)
+        return fail("Enter did not accept the update");
+    if (launcher_ask_updates(&app) != 0)
+        return fail("Down, Enter did not decline update checks");
+    launcher_update_failed(&app);
     if (launcher_copy_progress(&copy, "MUSIC/Track02.ogg", 5, 10) != 0 || copy.closed)
         return fail("the bar stopped the copy");
     printf("dialog ok\n");
