@@ -734,6 +734,41 @@ def check_gogfind(b):
     print(f'gog_find ok ({len(cases)} installations)')
 
 
+def check_goglist_linux(b):
+    """goglist.py finds games installed by GOG's Linux .sh installer"""
+    if not sys.platform.startswith('linux'):
+        return
+    d = os.path.join(b, 'goglist-linux')
+    if os.path.isdir(d):
+        shutil.rmtree(d)
+    home = os.path.join(d, 'home')
+    install = os.path.join(home, 'GOG Games', 'Test Game')
+    os.makedirs(os.path.join(install, '.mojosetup'))
+    with open(os.path.join(install, 'gameinfo'), 'w') as f:
+        f.write('Test Game\n1.0\nn/a\n')
+    os.makedirs(os.path.join(install, 'data'))
+    cd_image({'HELLO/HELLO.EXE': b'MZ' + bytes(100)}, os.path.join(install, 'data', 'game.gog'))
+    apps = os.path.join(home, '.local', 'share', 'applications')
+    os.makedirs(apps)
+    with open(os.path.join(apps, 'gog_com-Test_Game_1.desktop'), 'w') as f:
+        f.write('[Desktop Entry]\nName=Test Game\nPath=' + install + '\n')
+    env = dict(os.environ, HOME=home)
+    env.pop('DOSKIT_GOG_DIRS', None)
+    r = subprocess.run([sys.executable, os.path.join(TOOLS, 'goglist.py')], capture_output=True,
+                       text=True, env=env)
+    if r.returncode or 'Test Game' not in r.stdout or 'game.gog' not in r.stdout:
+        print(r.stdout + r.stderr)
+        raise SystemExit('selftest FAILED: goglist.py and a GOG Linux .sh installation')
+    project = os.path.join(d, 'project')
+    r = subprocess.run([sys.executable, os.path.join(TOOLS, 'new_project.py'), project,
+                        '--no-submodule'], input='1\ntestgame\n1\ny\n', capture_output=True,
+                       text=True, env=env)
+    if r.returncode or not os.path.isfile(os.path.join(project, 'game', 'HELLO', 'HELLO.EXE')):
+        print(r.stdout + r.stderr)
+        raise SystemExit('selftest FAILED: new_project.py and a GOG Linux .sh installation')
+    print('ok   GOG Linux .sh installation found and offered by new_project.py')
+
+
 def check_inno(b):
     """tools/inno.py on installers tests/inno/mkinno.py makes"""
     sys.path.insert(0, os.path.join(HERE, 'inno'))
@@ -1470,6 +1505,7 @@ def main():
     print(out.strip())
     check_update(b)
     check_gogfind(b)
+    check_goglist_linux(b)
     print(run([py, os.path.join(TOOLS, 'memcmp.py'), 'src/HELLO.hints',
                os.path.join(b, 'orig.ram'), os.path.join(b, 'port.ram'), '--skip', 'STACK',
                '--vram', os.path.join(b, 'orig.vram'), os.path.join(b, 'port.vram')]))

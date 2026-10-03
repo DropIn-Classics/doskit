@@ -13,6 +13,8 @@ GOG's older Mac applications (DOSBox or Boxer bundles, about 2012-2014)
 carry no such file: an application whose Info.plist says it is GOG.com's
 (BXOrganizationName, or an identifier com.gog.*) is taken by its
 CFBundleName, without a product ID.
+GOG's older Linux .sh installations (MojoSetup) use their gog_com-*.desktop
+entry and gameinfo file instead, also without a product ID.
 GOG's Windows installers not installed (setup_*.exe, Inno Setup; a game
 GOG sells for Windows only comes as one) are listed too, from the home
 folder, Downloads, Documents and Desktop: their name and ID from the
@@ -26,7 +28,7 @@ games on floppies, or installed as a folder, have none.  The
 registry's gameName is taken as GOG's installer is said to write it (not
 checked on an installation; PATH is).
 """
-import glob, json, os, plistlib, re, string, sys
+import glob, json, os, plistlib, re, shlex, string, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import inno, isox
@@ -237,6 +239,52 @@ def old_mac_apps(dirs, known):
     return out
 
 
+def from_linux_desktops():
+    """{folder: name} from GOG's Linux installer menu entries.
+
+    Its older MojoSetup installers identify an installation with a plain
+    `gameinfo` file and a `.mojosetup` directory, not goggame-ID.info.
+    """
+    data_home = os.environ.get('XDG_DATA_HOME') or os.path.join(
+        os.path.expanduser('~'), '.local', 'share')
+    apps = os.path.join(data_home, 'applications')
+    out = {}
+    for desktop in sorted(glob.glob(os.path.join(glob.escape(apps), 'gog_com-*.desktop'))):
+        try:
+            with open(desktop, encoding='utf-8') as f:
+                lines = f.read().splitlines()
+        except OSError:
+            continue
+        entry = {}
+        in_entry = False
+        for line in lines:
+            if line.startswith('['):
+                in_entry = line == '[Desktop Entry]'
+            elif in_entry and '=' in line:
+                key, value = line.split('=', 1)
+                entry[key] = value
+        folder = entry.get('Path', '').strip()
+        if not folder:
+            try:
+                command = shlex.split(entry.get('Exec', ''), comments=False)
+            except ValueError:
+                continue
+            command = [arg for arg in command if not arg.startswith('%')]
+            if command:
+                executable = command[0]
+                if not os.path.isabs(executable):
+                    continue
+                folder = os.path.dirname(executable)
+        folder = os.path.expanduser(folder)
+        if (not os.path.isdir(folder) or not os.path.isfile(os.path.join(folder, 'gameinfo'))
+                or not os.path.isdir(os.path.join(folder, '.mojosetup'))):
+            continue
+        name = entry.get('Name', '').strip()
+        if name:
+            out.setdefault(os.path.normpath(folder), (name, folder))
+    return out
+
+
 def from_registry():
     """{id: (name, folder)} from GOG's registry keys (Windows)"""
     import winreg
@@ -273,6 +321,10 @@ def installed():
     for gid, v in from_folders(dirs).items():
         found.setdefault(gid, v)
     games = [Game(gid, name, folder) for gid, (name, folder) in found.items()]
+    if sys.platform.startswith('linux') and 'DOSKIT_GOG_DIRS' not in os.environ:
+        known = {os.path.normpath(g.folder) for g in games}
+        games += [Game('', name, folder) for folder, (name, folder) in from_linux_desktops().items()
+                  if folder not in known]
     games += [Game('', name, folder)
               for name, folder in old_mac_apps(dirs, [f for _, f in found.values()])]
     games += setups(setup_dirs(), [g.id for g in games if g.id])
