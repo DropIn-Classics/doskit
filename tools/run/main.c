@@ -74,6 +74,8 @@
  *                    from t=0; runtime/opl.c's synthesis, not the chip's
  *                    exact output)
  *   -intwatch NN     print every INT NN call (hex)
+ *   -requirements    at exit, summarize devices and memory interfaces used,
+ *                    plus unsupported CPU, port, BIOS and DOS requests
  *   -criterr AH ERR  make the next INT 21h service AH enter its INT 24h
  *                    handler with DOS error ERR (hex); AL=3 (Fail) returns
  *                    that error in AX with CF set to its caller
@@ -90,12 +92,62 @@
 
 uint8_t *ram;
 int trace_level = 0;
+static int requirements = 0;
+static unsigned char req_devices[REQ_NDEV];
+static unsigned char req_mem_vga, req_mem_vga_w;
+static unsigned char req_ports[65536/8], req_dos_ah[256];
+static struct { uint8_t inum, ah, al; } req_bios_calls[32];
+static int req_bios_n;
+static const char *req_cpu_calls[32];
+static int req_cpu_n;
 void trc(const char *fmt, ...){
     va_list ap;
     if(!trace_level) return;
     va_start(ap, fmt);
     vfprintf(stderr, fmt, ap);
     va_end(ap);
+}
+void req_device(int kind){ if(requirements && kind >= 0 && kind < REQ_NDEV) req_devices[kind] = 1; }
+void req_memory(int vga, int write){ if(requirements && vga){ req_mem_vga = 1; if(write) req_mem_vga_w = 1; } }
+void req_unknown_port(uint16_t p){ if(requirements) req_ports[p>>3] |= (uint8_t)(1u << (p&7)); }
+void req_dos(uint8_t ah, uint8_t al){ (void)al; if(requirements) req_dos_ah[ah] = 1; }
+void req_bios(uint8_t inum, uint8_t ah, uint8_t al){
+    int i;
+    if(!requirements) return;
+    for(i=0;i<req_bios_n;i++) if(req_bios_calls[i].inum==inum && req_bios_calls[i].ah==ah && req_bios_calls[i].al==al) return;
+    if(req_bios_n < (int)(sizeof(req_bios_calls)/sizeof(req_bios_calls[0]))){
+        req_bios_calls[req_bios_n].inum = inum;
+        req_bios_calls[req_bios_n].ah = ah;
+        req_bios_calls[req_bios_n].al = al;
+        req_bios_n++;
+    }
+}
+void req_cpu(const char *what){
+    int i;
+    if(!requirements) return;
+    for(i=0;i<req_cpu_n;i++) if(!strcmp(req_cpu_calls[i],what)) return;
+    if(req_cpu_n < (int)(sizeof(req_cpu_calls)/sizeof(req_cpu_calls[0]))) req_cpu_calls[req_cpu_n++] = what;
+}
+void req_report(void){
+    static const char *const names[] = {"PIC","PIT","keyboard","CMOS","A20","game port","OPL2","DMA","VGA","Sound Blaster"};
+    int i, any = 0, first;
+    if(!requirements) return;
+    printf("requirements observed:\n");
+    printf("  devices:"); first = 1;
+    for(i=0;i<REQ_NDEV;i++) if(req_devices[i]){ printf("%s%s", first?" ":", ", names[i]); first=0; any=1; }
+    if(first) printf(" none");
+    printf("\n  memory:");
+    if(req_mem_vga) printf(" VGA%s", req_mem_vga_w?" read/write":" read"); else printf(" none");
+    printf("\n");
+    first=1; for(i=0;i<65536;i++) if(req_ports[i>>3] & (1u<<(i&7))){ if(first) printf("  unknown ports:"); printf(" %03X",i); first=0; any=1; }
+    if(!first) printf("\n");
+    first=1; for(i=0;i<256;i++) if(req_dos_ah[i]){ if(first) printf("  unimplemented DOS:"); printf(" AH=%02X",i); first=0; any=1; }
+    if(!first) printf("\n");
+    for(i=0;i<req_bios_n;i++){ if(i==0) printf("  unimplemented BIOS:"); printf(" INT %02Xh/AH=%02X AL=%02X", req_bios_calls[i].inum, req_bios_calls[i].ah, req_bios_calls[i].al); any=1; }
+    if(req_bios_n) printf("\n");
+    for(i=0;i<req_cpu_n;i++){ if(i==0) printf("  unsupported CPU:"); printf(" %s", req_cpu_calls[i]); any=1; }
+    if(req_cpu_n) printf("\n");
+    if(!any) printf("  no unmet requirements observed\n");
 }
 void dos_flush_con(void);
 
@@ -539,6 +591,7 @@ int main(int argc, char **argv){
         else if(!strcmp(a,"-oplwav")){ NEED(1); oplwav_file = argv[++i]; }
         else if(!strcmp(a,"-loadfix")) loadfix = 1;
         else if(!strcmp(a,"-intwatch")){ NEED(1); int_watch = (int)strtol(argv[++i], NULL, 16); }
+        else if(!strcmp(a,"-requirements")) requirements = 1;
         else if(!strcmp(a,"-criterr")){ unsigned ah, error; NEED(2);
             ah = (unsigned)strtoul(argv[++i], NULL, 16);
             error = (unsigned)strtoul(argv[++i], NULL, 16);
@@ -756,6 +809,7 @@ int main(int argc, char **argv){
     memwatch_report();
     rwatch_report();
     prof_report();
+    req_report();
     if(vga_state){ vga_dump(); vga_state_dump(); }
     printf("hash ram %016llx vram %016llx\n",
            (unsigned long long)fnv(ram, 0xA0000), (unsigned long long)fnv(vga_vram, sizeof(vga_vram)));

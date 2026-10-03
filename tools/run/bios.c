@@ -239,7 +239,7 @@ static void bios_int10(void){
                      for(i=0;i<CX*3;i++) mem_w8(p+i, io_r8(0x3C9));
                      break; }
         case 0x13: break;
-        default: break;
+        default: req_bios(0x10, AH, AL); break;
         } break;
     case 0x11:
         if(AL==0x30){ set_sreg(S_ES, 0xF000); REG16(R_EBP) = 0xFA6E; CX = 16; DL = 24; }
@@ -262,7 +262,7 @@ static void bios_int10(void){
     case 0x1A: AL = 0x1A; BL = 0x08; BH = 0x00; break;
     case 0x1B: break;
     case 0x4F: bios_vesa(); break;
-    default: break;
+    default: req_bios(0x10, AH, AL); break;
     }
 }
 
@@ -291,7 +291,7 @@ static void bios_int16(void){
     case 0x02: case 0x12: AL = BDA8(0x17); AH = BDA8(0x18); break;
     case 0x03: break;
     case 0x05: kbuf_put(CX); AL = 0; break;
-    default: AX = 0; break;
+    default: req_bios(0x16, AH, AL); AX = 0; break;
     }
 }
 
@@ -303,7 +303,7 @@ static void bios_int1a(void){
     case 0x01: BDA16_SET(0x6C, DX); BDA16_SET(0x6E, CX); break;
     case 0x02: CH=0x12; CL=0x00; DH=0x00; cpu.cf=0; break;
     case 0x04: CH=0x19; CL=0x93; DH=0x01; DL=0x01; cpu.cf=0; break;
-    default: cpu.cf = 1; break;
+    default: req_bios(0x1A, AH, AL); cpu.cf = 1; break;
     }
 }
 

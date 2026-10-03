@@ -1384,6 +1384,7 @@ void prof_report(void){
 
 static void cpu_undef(const char *what){
     uint32_t at = cs_base + insn_ip;
+    req_cpu(what);
     char bytes[64];
     int i, n = 0;
     for(i = 0; i < undef_nsite; i++) if(undef_site[i] == at) return;

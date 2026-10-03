@@ -108,6 +108,18 @@ void prof_report(void);
 extern int int_watch;                  /* -intwatch NN: log INT NN calls */
 extern uint8_t *cover_map;             /* -cover: RAM_SIZE bits, instruction starts */
 
+/* -requirements: compact summary of interfaces a run actually used or
+ * asked for but the runner does not implement. */
+enum { REQ_PIC, REQ_PIT, REQ_KBD, REQ_CMOS, REQ_A20, REQ_GAMEPORT,
+       REQ_OPL, REQ_DMA, REQ_VGA, REQ_SB, REQ_NDEV };
+void req_device(int kind);
+void req_memory(int vga, int write);
+void req_unknown_port(uint16_t p);
+void req_dos(uint8_t ah, uint8_t al);
+void req_bios(uint8_t inum, uint8_t ah, uint8_t al);
+void req_cpu(const char *what);
+void req_report(void);
+
 /* ---------------------------------------------------------------- I/O ---- */
 uint8_t  io_r8 (uint16_t p);
 uint16_t io_r16(uint16_t p);

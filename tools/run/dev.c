@@ -232,7 +232,21 @@ uint8_t vga_status1(void){
 static uint8_t cmos_idx = 0;
 static uint8_t adlib_idx = 0;
 
+static void req_port(uint16_t p){
+    if(p==0x20 || p==0x21 || p==0xA0 || p==0xA1) req_device(REQ_PIC);
+    else if(p>=0x40 && p<=0x43) req_device(REQ_PIT);
+    else if(p==0x60 || p==0x61 || p==0x64) req_device(REQ_KBD);
+    else if(p==0x70 || p==0x71) req_device(REQ_CMOS);
+    else if(p==0x92) req_device(REQ_A20);
+    else if(p==0x201) req_device(REQ_GAMEPORT);
+    else if(p==0x388 || p==0x389) req_device(REQ_OPL);
+    else if(dma_is_port(p)) req_device(REQ_DMA);
+    else if(p>=0x3B0 && p<=0x3DF) req_device(REQ_VGA);
+    else if(p>=0x220 && p<=0x22F) req_device(REQ_SB);
+}
+
 uint8_t io_r8(uint16_t p){
+    req_port(p);
     switch(p){
     case 0x20: case 0x21: return pic_read(0, p&1);
     case 0xA0: case 0xA1: return pic_read(1, p&1);
@@ -263,11 +277,13 @@ uint8_t io_r8(uint16_t p){
     if(dma_is_port(p)) return dma_read(p);
     if(p>=0x3B0 && p<=0x3DF) return vga_io_r(p);
     if(p>=0x220 && p<=0x22F) return sb_read(p);
+    req_unknown_port(p);
     trc("[io] read of unknown port %03X from %04X:%04X\n", p, cpu.sreg[S_CS], (unsigned)insn_ip);
     return 0xFF;
 }
 
 void io_w8(uint16_t p, uint8_t v){
+    req_port(p);
     switch(p){
     case 0x20: case 0x21: pic_write(0, p&1, v); return;
     case 0xA0: case 0xA1: pic_write(1, p&1, v); return;
@@ -292,6 +308,7 @@ void io_w8(uint16_t p, uint8_t v){
         if(kbc_cmd==0xD1){ a20_set(v & 2); kbc_cmd=0; }
         return;
     }
+    req_unknown_port(p);
     trc("[io] write %02X to unknown port %03X from %04X:%04X\n", v, p, cpu.sreg[S_CS], (unsigned)insn_ip);
 }
 

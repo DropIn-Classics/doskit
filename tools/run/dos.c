@@ -1112,6 +1112,7 @@ static void dos_int21(void){
         break;
     case 0x59: AX = 0; break;
     default:
+        req_dos(AH, AL);
         printf("dos: unimplemented INT 21h AH=%02X AL=%02X at t=%.6f\n", AH, AL, emu_now());
         bios_set_cf(1); AX = 1;
         break;

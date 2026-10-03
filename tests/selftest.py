@@ -1045,6 +1045,7 @@ def main():
           f'ADLIB.EXE {make_exe("ADLIB")} bytes; '
           f'SB16.EXE {make_exe("SB16")} bytes; CDPLAY.EXE {make_exe("CDPLAY")} bytes; '
           f'INT24.EXE {make_exe("INT24")} bytes; '
+          f'REQ.EXE {make_exe("REQ")} bytes; '
           f'MULTISEG.EXE {make_multiseg()} bytes'
           % make_relmod())
     shutil.copy(os.path.join(HERE, 'hello', 'src', 'HELLO.hints'), os.path.join(PROJ, 'src'))
@@ -1270,6 +1271,13 @@ def main():
         print(out)
         raise SystemExit('selftest FAILED: -criterr through INT 24')
     print('-criterr: INT 24 returns Fail and its INT 21 caller gets the injected error')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-requirements', 'REQ/REQ.EXE'])
+    want = ('requirements observed:', 'devices: VGA', 'memory: VGA read/write',
+            'unknown ports: 123', 'unimplemented DOS: AH=66', 'unimplemented BIOS: INT 10h/AH=FF AL=00')
+    if not all(s in out for s in want):
+        print(out)
+        raise SystemExit('selftest FAILED: -requirements summary')
+    print('-requirements: used VGA interfaces and missing port, BIOS and DOS services')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', 'CDROM/CDROM.EXE'])
     print('\n'.join(l for l in out.splitlines() if l.startswith('con:')))
     if 'con: cdrom ok' not in out:

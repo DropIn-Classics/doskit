@@ -58,6 +58,7 @@ static uint32_t vga_size(void){
 
 /* ------------------------------------------------------ memory interface */
 uint8_t vga_mem_r(uint32_t a){
+    req_memory(1,0);
     uint32_t off = a - vga_base();
     if(off >= vga_size()) return 0xFF;
     if(chain4()){
@@ -114,6 +115,7 @@ static void write_planes(uint32_t o, uint8_t data[4], uint8_t mask, uint8_t plan
 }
 
 void vga_mem_w(uint32_t a, uint8_t v){
+    req_memory(1,1);
     uint32_t off = a - vga_base();
     uint8_t data[4]; uint8_t bitmask; int p;
     if(off >= vga_size()) return;
@@ -611,7 +613,7 @@ void vga_init(void){
 
 uint8_t mem_r8(uint32_t a){
     a &= a20_mask; a &= (RAM_SIZE-1);
-    if(a >= VGA_LO && a < VGA_HI) return vga_mem_r(a);
+    if(a >= VGA_LO && a < VGA_HI){ req_memory(1,0); return vga_mem_r(a); }
     return ram[a];
 }
 uint16_t mem_r16(uint32_t a){
@@ -631,7 +633,7 @@ uint32_t mem_r32(uint32_t a){
 void mem_w8(uint32_t a, uint8_t v){
     a &= a20_mask; a &= (RAM_SIZE-1);
     if(a == memwatch_addr) memwatch_hit(a, v);
-    if(a >= VGA_LO && a < VGA_HI){ vga_mem_w(a,v); return; }
+    if(a >= VGA_LO && a < VGA_HI){ req_memory(1,1); vga_mem_w(a,v); return; }
     if(a >= 0xC0000 && a < 0x100000) return;       /* ROM */
     ram[a] = v;
 }
