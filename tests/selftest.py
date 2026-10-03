@@ -38,6 +38,8 @@ In build/selftest (a project as a game's would be, see kit.py):
      FAR PTR call within its segment; routines in FOUR reached only
      through a ptr and a words hint), with no instruction as DB, and
      without its prefix= hints build.py stops and says the labels collide;
+     HELLO with a name at two addresses is refused (disasm.py's check
+     for a name given twice);
      xfer.py carries MULTISEG's hints to MULTIS2 (its source with FOUR one
      byte further on, ONE and FOUR renamed), which rebuilds from them;
      MULTISEG with 512 more zero bytes in its header rebuilds with
@@ -1157,6 +1159,23 @@ def main():
         print(out)
         raise SystemExit('selftest FAILED: MULTISEG without prefix= hints')
     print('MULTISEG without its prefix= hints: build.py says the labels collide')
+    hints = os.path.join(PROJ, 'src', 'HELLO.hints')
+    with open(hints) as f:
+        whole = f.read()
+    with open(os.path.join(PROJ, 'build', 'DUPNAME.hints'), 'w') as f:
+        # next_step at another address too: a name given twice is refused
+        f.write(whole + 'name CODE:002B next_step\n')
+    out = run([py, os.path.join(TOOLS, 'build.py'), os.path.join(PROJ, 'build', 'DUPNAME.hints')], check=False)
+    if 'name next_step given twice (CODE:18 and CODE:2B)' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: HELLO with a name given twice')
+    print('HELLO with a name given twice: build.py refuses it')
+    import disasm as disasm_py
+    with open(os.path.join(PROJ, 'build', 'SAMENAME.hints'), 'w') as f:
+        # the same name at the same address again: still fine
+        f.write(whole + 'name CODE:0018 next_step\n')
+    disasm_py.Hints(os.path.join(PROJ, 'build', 'SAMENAME.hints'))
+    print('HELLO with a name repeated at its own address: taken')
 
     step('3. run in the runner (run.py)')
     import run as run_py
