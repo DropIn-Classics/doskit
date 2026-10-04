@@ -98,7 +98,7 @@ static unsigned char req_mem_vga, req_mem_vga_w;
 static unsigned char req_ports[65536/8], req_dos_ah[256];
 static struct { uint8_t inum, ah, al; } req_bios_calls[32];
 static int req_bios_n, req_bios_more;
-static const char *req_cpu_calls[32];
+static char req_cpu_calls[32][64];
 static int req_cpu_n, req_cpu_more;
 void trc(const char *fmt, ...){
     va_list ap;
@@ -126,7 +126,8 @@ void req_cpu(const char *what){
     int i;
     if(!requirements) return;
     for(i=0;i<req_cpu_n;i++) if(!strcmp(req_cpu_calls[i],what)) return;
-    if(req_cpu_n < (int)(sizeof(req_cpu_calls)/sizeof(req_cpu_calls[0]))) req_cpu_calls[req_cpu_n++] = what;
+    if(req_cpu_n < (int)(sizeof(req_cpu_calls)/sizeof(req_cpu_calls[0])))
+        snprintf(req_cpu_calls[req_cpu_n++], sizeof(req_cpu_calls[0]), "%s", what);
     else req_cpu_more = 1;
 }
 void req_report(void){
@@ -414,6 +415,21 @@ static void print_regs(void){
            cpu.sreg[S_CS], (unsigned)cpu.eip, REG16(R_EAX), REG16(R_EBX), REG16(R_ECX),
            REG16(R_EDX), REG16(R_ESI), REG16(R_EDI), REG16(R_EBP), REG16(R_ESP),
            cpu.sreg[S_DS], cpu.sreg[S_ES], cpu.sreg[S_SS], (unsigned)(cpu_getflags() & 0xFFFF));
+    if(cpu.cr0 & 1){
+        printf("pm CR0=%08X EIP=%08X linear=%08X GDT=%08X:%04X LDT=%04X\n",
+               (unsigned)cpu.cr0, (unsigned)cpu.eip,
+               (unsigned)(cpu.sbase[S_CS] + cpu.eip),
+               (unsigned)cpu.gdt_base, (unsigned)cpu.gdt_limit, cpu.ldtr);
+        printf("pm bases CS=%08X DS=%08X ES=%08X SS=%08X code32=%u stack32=%u\n",
+               (unsigned)cpu.sbase[S_CS], (unsigned)cpu.sbase[S_DS],
+               (unsigned)cpu.sbase[S_ES], (unsigned)cpu.sbase[S_SS],
+               cpu.sbig[S_CS], cpu.sbig[S_SS]);
+        printf("pm EAX=%08X EBX=%08X ECX=%08X EDX=%08X ESI=%08X EDI=%08X EBP=%08X ESP=%08X\n",
+               (unsigned)REG32(R_EAX), (unsigned)REG32(R_EBX),
+               (unsigned)REG32(R_ECX), (unsigned)REG32(R_EDX),
+               (unsigned)REG32(R_ESI), (unsigned)REG32(R_EDI),
+               (unsigned)REG32(R_EBP), (unsigned)REG32(R_ESP));
+    }
 }
 static void print_dumps(void){
     int i;

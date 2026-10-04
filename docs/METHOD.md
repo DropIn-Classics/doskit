@@ -174,6 +174,15 @@ The DOS layer's `INT 21h AH=38h` returns a fixed US country-information
 block (DOS 3+ layout) and country code 1; a request for a specific country
 returns DOS error 2. It does not load a host or game locale.
 
+Unused user interrupt vectors (60h..FFh) point to a shared plain IRET
+handler. This lets a DOS extender locate free vectors by comparing their
+far pointers. BIOS, DOS and mouse services retain distinct callback stubs.
+Protected-mode stops also print full registers, cached segment bases,
+the linear instruction address, CR0 and the GDT location. Use these with
+`-mem` rather than interpreting selectors as real-mode segment addresses.
+The requirements report retains copies of unsupported CPU descriptions,
+including descriptions formatted temporarily during instruction decoding.
+
 Useful options (all at the top of `tools/run/main.c`): `-key T KEY`,
 `KEY+`/`KEY-`, `-keys FILE` (key scripts); `-mouse T X,Y,B`, `-mice FILE`
 (absolute virtual coordinates and a left/right/middle button mask; events,

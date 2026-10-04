@@ -1180,6 +1180,7 @@ def main():
           f'SB16.EXE {make_exe("SB16")} bytes; CDPLAY.EXE {make_exe("CDPLAY")} bytes; '
           f'INT24.EXE {make_exe("INT24")} bytes; '
           f'COUNTRY.EXE {make_exe("COUNTRY")} bytes; '
+          f'IVT.EXE {make_exe("IVT")} bytes; '
           f'REQ.EXE {make_exe("REQ")} bytes; '
           f'MULTISEG.EXE {make_multiseg()} bytes'
           % make_relmod())
@@ -1457,6 +1458,10 @@ def main():
     if 'con: pmode ok' not in out:
         print(out)
         raise SystemExit('selftest FAILED: PMODE.EXE (the runner\'s protected mode)')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '0.02', 'PMODE/PMODE.EXE'])
+    if 'pm CR0=' not in out or 'pm bases CS=' not in out or 'pm EAX=' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: protected-mode register report')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', 'INT24/INT24.EXE'])
     if 'con: int24 no fault ok' not in out:
         print(out)
@@ -1472,9 +1477,15 @@ def main():
         print(out)
         raise SystemExit('selftest FAILED: INT 21h AH=38h country information')
     print('INT 21h AH=38h: current US country data and unsupported country code')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', 'IVT/IVT.EXE'])
+    if 'con: ivt ok' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: unused user interrupt vectors')
+    print('IVT: unused user vectors share an IRET; DOS and mouse services still work')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-requirements', 'REQ/REQ.EXE'])
     want = ('requirements observed:', 'devices: VGA', 'memory: VGA read/write',
-            'unknown ports: 123', 'unimplemented DOS: AH=66', 'unimplemented BIOS: INT 10h/AH=FF AL=00')
+            'unknown ports: 123', 'unimplemented DOS: AH=66', 'unimplemented BIOS: INT 10h/AH=FF AL=00',
+            'unsupported CPU: x87 esc D9 x87 esc DB')
     if not all(s in out for s in want):
         print(out)
         raise SystemExit('selftest FAILED: -requirements summary')

@@ -425,8 +425,13 @@ void bios_init(void){
 
     for(i=0;i<256;i++) cb_table[i] = bios_stub;
 
-    /* every vector defaults to a harmless IRET stub */
+    /* Keep service stubs distinct, but unused user vectors share an IRET.
+     * DOS extenders can find free vectors by comparing their far pointers;
+     * giving every unused vector a unique callback hides that free space. */
     for(i=0;i<256;i++) put_stub(i, (uint16_t)(0x1000 + i*4));
+    ram[0xF0E80] = 0xCF;
+    for(i=0x60;i<256;i++)
+        st32u(&ram[i*4], ((uint32_t)0xF000<<16) | 0x0E80);
 
     cb_table[0x09] = bios_int9;
     cb_table[0x10] = bios_int10;

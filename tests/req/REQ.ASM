@@ -18,6 +18,8 @@ start:
 	INT 10H
 	MOV AX,6600H
 	INT 21H
+	DB 0D9H,0D0H                 ; FNOP: unsupported x87 diagnostic
+	DB 0DBH,0E3H                 ; FNINIT: a second temporary diagnostic
 	MOV AX,4C00H
 	INT 21H
 CODE ENDS

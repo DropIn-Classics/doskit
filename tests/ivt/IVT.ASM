@@ -1,0 +1,62 @@
+; Independently written test of unused user vectors and active services.
+.186
+CODE SEGMENT PARA PUBLIC 'CODE'
+	ASSUME CS:CODE,DS:DATA,ES:NOTHING,SS:STACK
+start:
+	XOR AX,AX
+	MOV ES,AX
+	MOV SI,180H
+	MOV AX,ES:[SI]
+	MOV DX,ES:[SI+2]
+	MOV CX,159
+vectors:
+	ADD SI,4
+	CMP AX,ES:[SI]
+	JNE failed
+	CMP DX,ES:[SI+2]
+	JNE failed
+	LOOP vectors
+	MOV AX,1234H
+	MOV BX,5678H
+	STC
+	INT 60H
+	JNC failed
+	CMP AX,1234H
+	JNE failed
+	CMP BX,5678H
+	JNE failed
+	STC
+	INT 0FFH
+	JNC failed
+	CMP AX,1234H
+	JNE failed
+	MOV AH,30H
+	INT 21H
+	CMP AL,5
+	JNE failed
+	XOR AX,AX
+	INT 33H
+	CMP AX,0FFFFH
+	JNE failed
+	MOV AX,DATA
+	MOV DS,AX
+	MOV DX,OFFSET passed
+	JMP print
+failed:
+	MOV AX,DATA
+	MOV DS,AX
+	MOV DX,OFFSET failure
+print:
+	MOV AH,9
+	INT 21H
+	MOV AX,4C00H
+	INT 21H
+CODE ENDS
+DATA SEGMENT PARA PUBLIC 'DATA'
+passed DB 'ivt ok',13,10,'$'
+failure DB 'ivt FAILED',13,10,'$'
+DATA ENDS
+STACK SEGMENT PARA STACK 'STACK'
+	DB 100H DUP (?)
+STACK ENDS
+	END start
