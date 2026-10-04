@@ -959,6 +959,20 @@ static void dos_int21(void){
     case 0x35: { uint32_t v = ld32u(&ram[(uint32_t)AL*4]);
         set_sreg(S_ES, (uint16_t)(v>>16)); BX = (uint16_t)v; break; }
     case 0x36: AX = 4; BX = 20000; CX = 512; DX = 30000; break;
+    case 0x38: {
+        /* DOS 3+ country information (34 bytes).  This DOS has a fixed US
+         * locale, matching its fixed DOS date/time and version settings. */
+        uint32_t a = cpu.sbase[S_DS] + DX;
+        static const uint8_t info[34] = {
+            0x00,0x00, '$',0,0,0,0, ',',0, '.',0, '/',0, ':',0,
+            0x00, 2, 0x00, 0,0,0,0, ',',0
+        };
+        unsigned i;
+        if(AL != 0){ AX = 2; bios_set_cf(1); break; }
+        for(i=0;i<sizeof(info);i++) mem_w8(a+i, info[i]);
+        BX = 1;                         /* United States */
+        bios_set_cf(0);
+        break; }
     case 0x3B: {
         char name[260], g[260];
         read_dosstr(cpu.sbase[S_DS] + DX, name, sizeof(name));

@@ -21,7 +21,8 @@ In build/selftest (a project as a game's would be, see kit.py):
      tests/rwatch/RWATCH.ASM into game/RWATCH/RWATCH.EXE,
      tests/adlib/ADLIB.ASM into game/ADLIB/ADLIB.EXE,
      tests/sb16/SB16.ASM into game/SB16/SB16.EXE, tests/cdplay/CDPLAY.ASM
-     into game/CDPLAY/CDPLAY.EXE, tests/multiseg/MULTISEG.ASM into
+     into game/CDPLAY/CDPLAY.EXE, tests/country/COUNTRY.ASM into
+     game/COUNTRY/COUNTRY.EXE, tests/multiseg/MULTISEG.ASM into
      game/MULTISEG/MULTISEG.EXE with TLINK's header and its relocations
      in reverse order;
   2. check.py: disasm.py makes their sources from tests/hello/src/HELLO.hints
@@ -1178,6 +1179,7 @@ def main():
           f'ADLIB.EXE {make_exe("ADLIB")} bytes; '
           f'SB16.EXE {make_exe("SB16")} bytes; CDPLAY.EXE {make_exe("CDPLAY")} bytes; '
           f'INT24.EXE {make_exe("INT24")} bytes; '
+          f'COUNTRY.EXE {make_exe("COUNTRY")} bytes; '
           f'REQ.EXE {make_exe("REQ")} bytes; '
           f'MULTISEG.EXE {make_multiseg()} bytes'
           % make_relmod())
@@ -1464,6 +1466,12 @@ def main():
         print(out)
         raise SystemExit('selftest FAILED: -criterr through INT 24')
     print('-criterr: INT 24 returns Fail and its INT 21 caller gets the injected error')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-requirements',
+               'COUNTRY/COUNTRY.EXE'])
+    if 'con: country ok' not in out or 'unimplemented DOS: AH=38' in out:
+        print(out)
+        raise SystemExit('selftest FAILED: INT 21h AH=38h country information')
+    print('INT 21h AH=38h: current US country data and unsupported country code')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-requirements', 'REQ/REQ.EXE'])
     want = ('requirements observed:', 'devices: VGA', 'memory: VGA read/write',
             'unknown ports: 123', 'unimplemented DOS: AH=66', 'unimplemented BIOS: INT 10h/AH=FF AL=00')

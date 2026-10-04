@@ -170,6 +170,10 @@ runs on an emulated clock (6 M instructions a second by default):
 nothing reads the host's clock, the same arguments give the same run,
 and the report ends with hashes of memory and video memory.
 
+The DOS layer's `INT 21h AH=38h` returns a fixed US country-information
+block (DOS 3+ layout) and country code 1; a request for a specific country
+returns DOS error 2. It does not load a host or game locale.
+
 Useful options (all at the top of `tools/run/main.c`): `-key T KEY`,
 `KEY+`/`KEY-`, `-keys FILE` (key scripts); `-mouse T X,Y,B`, `-mice FILE`
 (absolute virtual coordinates and a left/right/middle button mask; events,
