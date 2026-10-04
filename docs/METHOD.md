@@ -173,6 +173,10 @@ and the report ends with hashes of memory and video memory.
 The DOS layer's `INT 21h AH=38h` returns a fixed US country-information
 block (DOS 3+ layout) and country code 1; a request for a specific country
 returns DOS error 2. It does not load a host or game locale.
+`INT 21h AX=6300h` returns an empty DBCS lead-byte table for the same
+US locale; other AH=63h subfunctions return AL=FFh and carry set.
+The pointer and byte-pair layout follow Microsoft's
+[MS-DOS Encyclopedia, Function 63h](https://www.pcjs.org/documents/books/mspl13/msdos/encyclopedia/section5/).
 
 Unused user interrupt vectors (60h..FFh) point to a shared plain IRET
 handler. This lets a DOS extender locate free vectors by comparing their

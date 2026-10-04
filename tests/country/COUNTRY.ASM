@@ -1,5 +1,6 @@
 ; COUNTRY.EXE - runner test for INT 21h AH=38h, current-country information
 .186
+JUMPS
 CODE SEGMENT PARA PUBLIC 'CODE'
 	ASSUME CS:CODE,DS:DATA,SS:STACK
 start:
@@ -48,8 +49,24 @@ reserved:
 	JNC failed
 	CMP AX,2
 	JNE failed
+	PUSH DS
+	MOV AX,6300H
+	INT 21H
+	JC dbcs_failed
+	CMP AL,0
+	JNE dbcs_failed
+	CMP WORD PTR [SI],0
+	JNE dbcs_failed
+	POP DS
+	MOV AX,6301H
+	INT 21H
+	JNC failed
+	CMP AL,0FFH
+	JNE failed
 	MOV DX,OFFSET passed
 	JMP print
+dbcs_failed:
+	POP DS
 failed:
 	MOV DX,OFFSET failure
 print:

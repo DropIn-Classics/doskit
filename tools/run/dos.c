@@ -1114,6 +1114,13 @@ static void dos_int21(void){
         break;
     case 0x50: cur_psp = BX; break;
     case 0x51: case 0x62: BX = cur_psp; break;
+    case 0x63:
+        if(AL == 0){
+            /* Fixed US locale: no double-byte lead-byte ranges. */
+            set_sreg(S_DS, 0xF000); SI = 0x0E90;
+            AL = 0; bios_set_cf(0);
+        } else { AL = 0xFF; bios_set_cf(1); }
+        break;
     case 0x54: AL = 0; break;
     case 0x57: {
         /* a file's date and time: the fixed day at midnight, as the
@@ -1164,6 +1171,7 @@ void dos_init(const char *game_dir, const char *state_dir){
     mkdir_host(state_root);
     memset(fh,0,sizeof(fh));
     mcb_init();
+    st16u(&ram[0xF0E90], 0);       /* empty DBCS lead-byte table */
     cur_psp = 0; nproc = 0;
     dta_seg = 0; dta_off = 0x80;
     for(l=0;l<26;l++) snprintf(cwds[l], sizeof(cwds[0]), "\\");

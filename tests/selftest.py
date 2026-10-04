@@ -1473,7 +1473,7 @@ def main():
     print('-criterr: INT 24 returns Fail and its INT 21 caller gets the injected error')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-requirements',
                'COUNTRY/COUNTRY.EXE'])
-    if 'con: country ok' not in out or 'unimplemented DOS: AH=38' in out:
+    if 'con: country ok' not in out or 'unimplemented DOS: AH=38' in out or 'unimplemented DOS: AH=63' in out:
         print(out)
         raise SystemExit('selftest FAILED: INT 21h AH=38h country information')
     print('INT 21h AH=38h: current US country data and unsupported country code')
