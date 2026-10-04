@@ -187,6 +187,13 @@ the linear instruction address, CR0 and the GDT location. Use these with
 The requirements report retains copies of unsupported CPU descriptions,
 including descriptions formatted temporarily during instruction decoding.
 
+Named segment offsets in run.py accept up to eight hexadecimal digits;
+generated labels accept four through eight. This includes 32-bit image
+offsets with +N and #N suffixes. LE translation adds the object's declared
+base and the supplied -base; the actual loader mapping must still be
+established from a run. The synthetic translation tests passed on Debian
+Linux; this change was not checked on Windows or macOS.
+
 Useful options (all at the top of `tools/run/main.c`): `-key T KEY`,
 `KEY+`/`KEY-`, `-keys FILE` (key scripts); `-mouse T X,Y,B`, `-mice FILE`
 (absolute virtual coordinates and a left/right/middle button mask; events,

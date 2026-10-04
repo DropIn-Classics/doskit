@@ -1345,6 +1345,17 @@ def main():
     if got != ['10ACB3', '10ACB3', '1011D7', '10ACB3#3']:
         raise SystemExit(f'selftest FAILED: run.py translates no image address with -base: {got}')
     print("run.py translates an image's names with -base")
+    wide = run_py.Names(img, 'IMAGE.EXE', 0x100F30)
+    got = [wide.translate(t) for t in
+           ('CODE:12345', 'L12345+4#2', 'CODE:FFFFFFFF', '0180:12345')]
+    if got != ['113275', '113279#2', '100100F2F', '0180:12345']:
+        raise SystemExit(f'selftest FAILED: run.py truncates a 32-bit offset: {got}')
+    if wide.lookup('CODE:100000000') is not None:
+        raise SystemExit('selftest FAILED: run.py accepts an offset wider than 32 bits')
+    got = names.lookup('LTWO_12345')
+    if got != ('TWO', 0x12345):
+        raise SystemExit(f'selftest FAILED: run.py truncates a label with prefix=: {got}')
+    print('run.py translates 32-bit offsets and generated labels')
     le_hints = disasm.Hints(os.path.join(PROJ, 'src', 'LE.hints'))
     previous_project = os.environ.get('DOSKIT_PROJECT')
     os.environ['DOSKIT_PROJECT'] = PROJ
@@ -1352,6 +1363,9 @@ def main():
         le = disasm.load_program(le_hints)
         expected = 0x100000 + le.descs[1][0] + 4
         got = run_py.Names(le_hints, 'LE.EXE', 0x100000).translate('OTHER')
+        wide_le = run_py.Names(le_hints, 'LE.EXE', 0x100000)
+        wide_expected = 0x100000 + le.descs[0][0] + 0x12345 + 4
+        wide_got = wide_le.translate('CODE:12345+4#2')
     finally:
         if previous_project is None:
             os.environ.pop('DOSKIT_PROJECT', None)
@@ -1359,6 +1373,8 @@ def main():
             os.environ['DOSKIT_PROJECT'] = previous_project
     if got != f'{expected:X}':
         raise SystemExit(f'selftest FAILED: run.py omitted the LE object base: {got}')
+    if wide_got != f'{wide_expected:X}#2':
+        raise SystemExit(f'selftest FAILED: run.py truncates an LE object offset: {wide_got}')
     print('run.py translates LE names with the object base and -base')
     try:
         run_py.Names(img, 'IMAGE.EXE').translate('PLAY')

@@ -22,6 +22,8 @@ runner's (see the top of tools/run/main.c); run.py only
       SEG:OFF   with SEG a segment of the hints (CODE:4CEE, DATA:8A8A),
       a label   of the generated source (L4CEE, D8A8A, C4F05) or a `name`
                 or `code` name of the hints,
+    segment offsets accept one through eight hex digits; generated label
+      offsets accept four through eight, including 32-bit image offsets,
     optionally with +N (hex) added: DATA:9A9A+4.  PROG:ADDR takes the
       names of another program's hints, one PROGRAM starts (a menu that
       runs the game: GAME.EXE:main_loop#100). LE image names translate to
@@ -126,17 +128,17 @@ class Names:
                 self.byname[name.upper()] = (s, o)
 
     def lookup(self, t):
-        m = re.fullmatch(r'([A-Za-z_]\w*):([0-9A-Fa-f]{1,4})', t)
+        m = re.fullmatch(r'([A-Za-z_]\w*):([0-9A-Fa-f]{1,8})', t)
         if m and m.group(1).upper() in self.segs:
             return m.group(1).upper(), int(m.group(2), 16)
         if t.upper() in self.byname:
             return self.byname[t.upper()]
         for s in self.h.segs:              # a label of a segment with prefix=
             if s.own_prefix:
-                m = re.fullmatch(r'L?' + re.escape(s.prefix) + r'([0-9A-Fa-f]{4})', t, re.I)
+                m = re.fullmatch(r'L?' + re.escape(s.prefix) + r'([0-9A-Fa-f]{4,8})', t, re.I)
                 if m:
                     return s.name, int(m.group(1), 16)
-        m = re.fullmatch(r'(L?)([A-Za-z])([0-9A-Fa-f]{4})', t)
+        m = re.fullmatch(r'(L?)([A-Za-z])([0-9A-Fa-f]{4,8})', t)
         if m:
             code, letter, off = m.group(1), m.group(2).upper(), int(m.group(3), 16)
             if not code and letter == 'L':
