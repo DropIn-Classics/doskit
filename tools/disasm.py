@@ -286,6 +286,19 @@ class LEProgram(PmaxProgram):
                 raise SystemExit(f'{path}: expected one valid embedded LE header, found {len(hits)}')
             off = hits[0]
         self.leoff = off
+        # A bound executable may prepend another DOS program. File-relative
+        # LE fields then belong to the MZ image whose header points here.
+        origins = []
+        for start in range(off):
+            if d[start:start + 2] != b'MZ' or start + 0x40 > off:
+                continue
+            header_size = struct.unpack_from('<H', d, start + 8)[0] * 16
+            link = struct.unpack_from('<I', d, start + 0x3c)[0]
+            if header_size >= 0x40 and start + header_size <= off and start + link == off:
+                origins.append(start)
+        if len(origins) > 1:
+            raise SystemExit(f'{path}: ambiguous MZ origin for LE header')
+        self.file_origin = origins[0] if origins else 0
         h = off
         u32 = lambda x: struct.unpack_from('<I', d, h + x)[0]
         if d[h + 2:h + 4] != b'\0\0':
@@ -296,7 +309,7 @@ class LEProgram(PmaxProgram):
         self.page_size, self.last_page = u32(0x28), u32(0x2c)
         object_off, nobjects, page_map = u32(0x40), u32(0x44), u32(0x48)
         self.fixup_page_off, self.fixup_rec_off = u32(0x68), u32(0x6c)
-        self.data_off = u32(0x80)
+        self.data_off = self.file_origin + u32(0x80)
         if self.data_off >= len(d):
             raise SystemExit(f'{path}: LE data pages start beyond the file')
         self.descs, self.object_flags, self.object_pages = [], [], []

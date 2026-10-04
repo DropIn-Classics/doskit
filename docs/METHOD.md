@@ -360,7 +360,11 @@ linked by Microsoft LINK, 186/386 instructions in 16-bit code. Not tried:
   preserves the original bytes in selector-fixup fields. Iterated and
   compressed LE pages are refused. The analysis locates an embedded LE
   header by validating its tables when the MZ extended-header pointer is
-  not usable. The runner
+  not usable. When a preceding MZ header points to that LE header, its
+  beginning is the origin of file-relative page offsets; a bound DOS
+  program before that MZ image is preserved by the writer. Independent
+  synthetic images check ordinary, fallback and bound header discovery
+  and byte-identical rebuilding. The runner
   emulates the 386's protected mode (tests/pmode: the BIOS's way in, a
   fault, an interrupt, ring 3, a call gate, V86 mode) for an extender
   that switches by itself; no real extender run through yet. The port's

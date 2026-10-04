@@ -522,6 +522,7 @@ def make_le():
     struct.pack_into('<I', header, 0x80, data_off)
     wrapper = bytearray(leoff)
     wrapper[:2] = b'MZ'
+    struct.pack_into('<H', wrapper, 8, leoff // 16)
     struct.pack_into('<I', wrapper, 0x3c, leoff)
     result = wrapper + header
     for _, base, size, flags, page_first, count, _ in objects:
@@ -559,6 +560,22 @@ def make_le():
     from disasm import LEProgram
     if LEProgram(fallback_path).leoff != leoff:
         raise SystemExit('selftest FAILED: LE header discovery without a valid MZ pointer')
+    # Bind the independent image after another MZ program. Its file-relative
+    # page offset must stay relative to the inner executable, for both reads
+    # and writes; table offsets remain relative to the LE header.
+    prefix = bytearray(0x230)
+    prefix[:2] = b'MZ'
+    struct.pack_into('<H', prefix, 8, 4)
+    struct.pack_into('<I', prefix, 0x3c, 0xffffffff)
+    bound_path = os.path.join(PROJ, 'build', 'files', 'LE_BOUND.EXE')
+    with open(bound_path, 'wb') as f:
+        f.write(prefix + result)
+    plain, bound = LEProgram(path), LEProgram(bound_path)
+    if (bound.file_origin != len(prefix) or bound.leoff != len(prefix) + leoff or
+            bound.data_off != len(prefix) + data_off or bound.img != plain.img or
+            bound.selector_sites != plain.selector_sites or bound.entry_object != plain.entry_object or
+            bound.ip != plain.ip):
+        raise SystemExit('selftest FAILED: bound LE image origin and page mapping')
     return len(result)
 
 
@@ -1190,6 +1207,8 @@ def main():
     flat_hints = flat_hints.replace('pmax       build/files/FLAT.386', 'le        build/files/LE.EXE')
     with open(os.path.join(PROJ, 'src', 'LE.hints'), 'w', encoding='utf-8') as f:
         f.write(flat_hints)
+    with open(os.path.join(PROJ, 'src', 'LE_BOUND.hints'), 'w', encoding='utf-8') as f:
+        f.write(flat_hints.replace('build/files/LE.EXE', 'build/files/LE_BOUND.EXE'))
     shutil.copy(os.path.join(HERE, 'raw', 'src', 'RAWDRV.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'relmod', 'src', 'RELMOD.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'multiseg', 'src', 'MULTISEG.hints'), os.path.join(PROJ, 'src'))
