@@ -142,6 +142,8 @@ Hints syntax (one per line, ';' starts a comment, numbers are hex):
                                                          sign-extended 83h form
                                          test_form=rm_reg  TEST r,r with the
                                                          first register in r/m
+                                         regreg_form=rm_reg  register ALU/MOV
+                                                         destination in r/m
                                          imm8_alu=OP,OP...  only these ALU
                                                          operations (add, or,
                                                          adc, sbb, and, sub,
@@ -593,12 +595,14 @@ class Hints:
                 elif k == 'asm':
                     for o in f[1:]:
                         key, val = o.split('=', 1)
-                        if key not in ('lea_smart', 'alu_ax_short', 'test_form', 'imm8_alu', 'xchg_ax_short'):
+                        if key not in ('lea_smart', 'alu_ax_short', 'test_form', 'regreg_form', 'imm8_alu', 'xchg_ax_short'):
                             raise ValueError(f'unknown asm option {key}')
                         if key == 'imm8_alu':
                             self.asm[key] = set(val.lower().split(','))
                         else:
-                            self.asm[key] = val if key == 'test_form' else val not in ('0', 'no', 'off')
+                            if key in ('test_form', 'regreg_form') and val not in ('reg_rm', 'rm_reg'):
+                                raise ValueError(f'invalid asm {key}: {val}')
+                            self.asm[key] = val if key in ('test_form', 'regreg_form') else val not in ('0', 'no', 'off')
                 elif k == 'raw':
                     self.raw.add(self.addr(f[1]))
                 elif k == 'stop':

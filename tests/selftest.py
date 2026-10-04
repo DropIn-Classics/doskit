@@ -1209,6 +1209,21 @@ def main():
         f.write(flat_hints)
     with open(os.path.join(PROJ, 'src', 'LE_BOUND.hints'), 'w', encoding='utf-8') as f:
         f.write(flat_hints.replace('build/files/LE.EXE', 'build/files/LE_BOUND.EXE'))
+    form_asm = os.path.join(PROJ, 'build', 'REGFORM.ASM')
+    with open(form_asm, 'w', encoding='utf-8') as f:
+        f.write('CODE SEGMENT USE32\n MOV EBP,ESP\n XOR ECX,EDX\n RET\nCODE ENDS\nEND\n')
+    form_hints = os.path.join(PROJ, 'src', 'REGFORM.hints')
+    with open(form_hints, 'w', encoding='utf-8') as f:
+        f.write('bin build/files/REGFORM.BIN\nsegment CODE 0 CODE\nasm regreg_form=rm_reg\n')
+    import disasm
+    form = tasm.Assembler(form_asm)
+    for key, value in disasm.Hints(form_hints).asm.items():
+        setattr(form, key, value)
+    form.assemble()
+    if bytes(form.segments['CODE'].data) != bytes.fromhex('89e531d1c3'):
+        raise SystemExit('selftest FAILED: register encoding option from hints')
+    with open(os.path.join(PROJ, 'build', 'files', 'REGFORM.BIN'), 'wb') as f:
+        f.write(form.segments['CODE'].data)
     shutil.copy(os.path.join(HERE, 'raw', 'src', 'RAWDRV.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'relmod', 'src', 'RELMOD.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'multiseg', 'src', 'MULTISEG.hints'), os.path.join(PROJ, 'src'))

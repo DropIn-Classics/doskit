@@ -78,6 +78,11 @@ which assembler it was:
 - `ADD AX,5` as `83 C0 05`: MASM (`asm alu_ax_short=0`);
 - `TEST r1,r2` with r1 in r/m: MASM (`asm test_form=rm_reg`).
 
+`asm regreg_form=rm_reg` selects the destination-in-r/m encoding for
+register-to-register ALU and MOV instructions; the default is `reg_rm`.
+`test_form` can select TEST's form separately. Both options are checked
+with independent synthetic instructions and a byte-identical rebuild.
+
 A compiler writes machine code itself and has its own choices; Borland
 C (1991): `AND`/`OR` with a small constant in the word form (`asm
 imm8_alu=add,adc,sbb,sub,cmp,xor`), `XCHG AX,reg` as 87h /r (`asm
