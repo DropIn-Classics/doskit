@@ -1486,7 +1486,20 @@ def main():
             shift = f.read()[0x417] & 2
         if shift != want:
             raise SystemExit(f'selftest FAILED: -keysat {lines!r} on HELLO.EXE: shift bit {shift}')
-    print('-keysat: the same keys from a file')
+    # several -keysat, each its own list: the first's key at a pass not reached, the second's at the first
+    # (HELLO takes one key a pass)
+    keys2 = os.path.join(b, 'keysat2.txt')
+    with open(keys, 'w') as f:
+        f.write('3 lctrl+\n')
+    with open(keys2, 'w') as f:
+        f.write('1 lshift+\n')
+    run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-keysat', 'CODE:0018', keys, '-keysat', 'CODE:0018', keys2,
+         '-ram', os.path.join(b, 'keyat.ram'), 'HELLO/HELLO.EXE'])
+    with open(os.path.join(b, 'keyat.ram'), 'rb') as f:
+        shift = f.read()[0x417] & 6
+    if shift != 2:
+        raise SystemExit(f'selftest FAILED: two -keysat lists on HELLO.EXE: shift and ctrl bits {shift}, not 2')
+    print('-keysat: the same keys from a file, several lists')
     # a table with more readers than the runner once kept (64): RWATCH.EXE's
     # 200 bytes, each read by its LODSB, the first 100 by its CMP as well
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-rwatch', 'RWATCH.EXE+0004:0000', 'C8',
