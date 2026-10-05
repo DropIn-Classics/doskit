@@ -1479,6 +1479,33 @@ def main():
             raise SystemExit(f'selftest FAILED: shot.c\'s {name}.png')
         print(f'shot.c {name}.png: {w}x{h}, {os.path.getsize(os.path.join(shots, name + ".png"))}'
               f' bytes for {w * h} pixels')
+    vsync = os.path.join(b, 'vsync')
+    os.makedirs(vsync, exist_ok=True)
+    exe = cc(os.path.join(b, 'vsynctest'), [os.path.join(HERE, 'vsync', 'vsynctest.c')] + [
+        os.path.join(RUNTIME, f) for f in ('plat_null.c', 'shot.c', 'sys.c')])
+    out = subprocess.run(
+        [exe, vsync],
+        cwd=PROJ, capture_output=True, text=True,
+        env=dict(os.environ, DOSKIT_PROJECT=PROJ,
+                 DK_SHOTS='0:' + os.path.join(vsync, 'got0.png') +
+                          ' 1:' + os.path.join(vsync, 'got1.png') +
+                          ' 2:' + os.path.join(vsync, 'got2.png')))
+    if out.returncode or 'vsync ok' not in out.stdout:
+        print(out.stdout + out.stderr)
+        raise SystemExit('selftest FAILED: plat_set_vsync')
+    rgb0 = rgb1 = None
+    for got, exp in (('got0', 'expA'), ('got1', 'expB'), ('got2', 'expA')):
+        w, h, rgb = read_png(os.path.join(vsync, got + '.png'))
+        w2, h2, rgb2 = read_png(os.path.join(vsync, exp + '.png'))
+        if (w, h, rgb) != (w2, h2, rgb2):
+            raise SystemExit(f'selftest FAILED: plat_set_vsync: {got}.png is not {exp}.png')
+        if got == 'got0':
+            rgb0 = rgb
+        if got == 'got1':
+            rgb1 = rgb
+    if rgb1 == rgb0:
+        raise SystemExit('selftest FAILED: plat_set_vsync: the pictures did not change')
+    print('plat_set_vsync off/on/off: the three shots as handed in')
     exe = cc(os.path.join(b, 'vgamodes'), [os.path.join(HERE, 'vgamode', 'runtime.c'),
                                            os.path.join(RUNTIME, 'vga.c')])
     out = run([exe])
