@@ -27,6 +27,11 @@ int plat_has_window(void);
 void plat_set_fullscreen(int on);
 int plat_fullscreen(void);
 
+/* tear-free presents at the panel's rate (1) or paced by the
+ * program's tick as before (0); needs a panel that keeps up with
+ * the emulated refresh rate, else the game runs slower */
+void plat_set_vsync(int on);
+
 /* shows width x height palette indexes with a 0x00RRGGBB palette, in the
  * 4:3 shape of a VGA screen; Alt+Enter switches to the whole monitor */
 void plat_present(const uint8_t *pixels, int width, int height, const uint32_t palette[256]);

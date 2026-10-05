@@ -268,6 +268,16 @@ static void toggle_fullscreen(void)
     plat_set_fullscreen(!plat_fullscreen());
 }
 
+void plat_set_vsync(int on)
+{
+#if SDL_COMPILEDVERSION >= SDL_VERSIONNUM(2, 0, 18)
+    if (renderer)
+        SDL_RenderSetVSync(renderer, on ? 1 : 0);
+#else
+    (void)on;
+#endif
+}
+
 int plat_init(const char *title)
 {
     snprintf(app_title, sizeof app_title, "%s", title);
@@ -283,7 +293,8 @@ int plat_init(const char *title)
         fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError());
         return 0;
     }
-    /* no vsync: frame.c paces the pictures by the program's tick */
+    /* no vsync by default: frame.c paces the pictures by the
+     * program's tick (plat_set_vsync asks for tear-free presents) */
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer)
         renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);

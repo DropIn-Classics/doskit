@@ -229,6 +229,11 @@ void plat_set_fullscreen(int on)
     set_fullscreen(on != 0);
 }
 
+void plat_set_vsync(int on)
+{
+    (void)on;
+}
+
 int plat_fullscreen(void)
 {
     return fullscreen;
