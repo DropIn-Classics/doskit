@@ -810,6 +810,20 @@ def check_gogfind(b):
          '', True),
         ('nothing', None, {}, '', 'HELLO/HELLO.EXE', False),
     ]
+    if sys.platform == 'darwin':
+        # Mac: only the application bundles are searched, not Linux's
+        # folders, menus and Wine prefixes. The old ~/Desktop scan may
+        # prompt for access (presumably; no prompt was observed) and held
+        # the app before it reached its setup screen.
+        linux = [(what + ', not looked at on a Mac', place, files, prefix, must, False)
+                 for what, place, files, prefix, must, ok in cases if ok]
+        cases = [
+            ('the application in ~/Applications', 'Applications/Test Game.app/game.gog', {}, '',
+             '', True),
+            ('the application, with must_have', 'Applications/Test Game.app/game.gog', {}, '',
+             'HELLO/HELLO.EXE', True),
+            ('another application', 'Applications/Other.app/game.gog', {}, '', '', False),
+        ] + linux + [('nothing', None, {}, '', 'HELLO/HELLO.EXE', False)]
     if os.name == 'nt':
         # Windows: GOG Galaxy's folder under %ProgramFiles(x86)%, which is
         # set to the folder made here.  The registry's key of a product ID
@@ -1661,6 +1675,33 @@ def main():
             raise SystemExit(f'selftest FAILED: shot.c\'s {name}.png')
         print(f'shot.c {name}.png: {w}x{h}, {os.path.getsize(os.path.join(shots, name + ".png"))}'
               f' bytes for {w * h} pixels')
+    vsync = os.path.join(b, 'vsync')
+    os.makedirs(vsync, exist_ok=True)
+    exe = cc(os.path.join(b, 'vsynctest'), [os.path.join(HERE, 'vsync', 'vsynctest.c')] + [
+        os.path.join(RUNTIME, f) for f in ('plat_null.c', 'shot.c', 'sys.c')])
+    out = subprocess.run(
+        [exe, vsync],
+        cwd=PROJ, capture_output=True, text=True,
+        env=dict(os.environ, DOSKIT_PROJECT=PROJ,
+                 DK_SHOTS='0:' + os.path.join(vsync, 'got0.png') +
+                          ' 1:' + os.path.join(vsync, 'got1.png') +
+                          ' 2:' + os.path.join(vsync, 'got2.png')))
+    if out.returncode or 'vsync ok' not in out.stdout:
+        print(out.stdout + out.stderr)
+        raise SystemExit('selftest FAILED: plat_set_vsync')
+    rgb0 = rgb1 = None
+    for got, exp in (('got0', 'expA'), ('got1', 'expB'), ('got2', 'expA')):
+        w, h, rgb = read_png(os.path.join(vsync, got + '.png'))
+        w2, h2, rgb2 = read_png(os.path.join(vsync, exp + '.png'))
+        if (w, h, rgb) != (w2, h2, rgb2):
+            raise SystemExit(f'selftest FAILED: plat_set_vsync: {got}.png is not {exp}.png')
+        if got == 'got0':
+            rgb0 = rgb
+        if got == 'got1':
+            rgb1 = rgb
+    if rgb1 == rgb0:
+        raise SystemExit('selftest FAILED: plat_set_vsync: the pictures did not change')
+    print('plat_set_vsync off/on/off: the three shots as handed in')
     exe = cc(os.path.join(b, 'vgamodes'), [os.path.join(HERE, 'vgamode', 'runtime.c'),
                                            os.path.join(RUNTIME, 'vga.c')])
     out = run([exe])
@@ -1669,16 +1710,31 @@ def main():
     print(out.strip())
     exe = cc(os.path.join(b, 'cdatest'), [os.path.join(HERE, 'cdaudio', 'cdatest.c')] + [
         os.path.join(RUNTIME, f) for f in ('cdaudio.c', 'cdimage.c', 'plat_null.c', 'sys.c', 'shot.c')])
-    out = run([exe, make_cue()])
+    cue = make_cue()
+    out = run([exe, cue])
     if 'cdaudio ok' not in out:
         raise SystemExit('selftest FAILED: cdaudio.c: ' + out)
     copy = os.path.join(b, 'cuecopy')
     if os.path.isdir(copy):
         shutil.rmtree(copy)
-    out = run([exe, make_cue(), copy])
+    out = run([exe, cue, copy])
     if 'cdaudio ok' not in out or not os.path.isfile(os.path.join(copy, 'MUSIC', 'TRACK03.OGG')):
         raise SystemExit('selftest FAILED: cdimage.c\'s cd_copy_disc: ' + out)
     print('cd_copy_disc: the disc copied, its copy read: ' + out.strip())
+    boxer = os.path.join(b, 'Illusions.boxer')
+    source = os.path.join(boxer, 'C.harddisk', 'illusion', 'Illusions')
+    shutil.copytree(os.path.dirname(cue), source)
+    track = os.path.join(source, 'music', 'track03.ogg')
+    cdmedia = os.path.join(boxer, 'game.cdmedia')
+    os.makedirs(cdmedia)
+    shutil.copy(track, cdmedia)
+    os.remove(track)
+    boxed_cue = os.path.join(source, 'game.inst')
+    boxed_copy = os.path.join(b, 'boxer-cuecopy')
+    out = run([exe, boxed_cue, boxed_copy])
+    if 'cdaudio ok' not in out or not os.path.isfile(os.path.join(boxed_copy, 'MUSIC', 'TRACK03.OGG')):
+        raise SystemExit('selftest FAILED: cdimage.c\'s Boxer .cdmedia fallback: ' + out)
+    print('cd_copy_disc: the Boxer .cdmedia track copied and read: ' + out.strip())
     exe = cc(os.path.join(b, 'launchtest'), [os.path.join(HERE, 'launcher', 'launchtest.c')] + [
         os.path.join(RUNTIME, f) for f in ('launcher.c', 'textmode.c', 'pad.c', 'frame.c', 'vga.c',
                                            'plat_null.c', 'shot.c', 'sys.c')])
