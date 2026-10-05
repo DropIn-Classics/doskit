@@ -698,6 +698,20 @@ def check_gogfind(b):
          '', True),
         ('nothing', None, {}, '', 'HELLO/HELLO.EXE', False),
     ]
+    if sys.platform == 'darwin':
+        # Mac: only the application bundles are searched, not Linux's
+        # folders, menus and Wine prefixes. The old ~/Desktop scan may
+        # prompt for access (presumably; no prompt was observed) and held
+        # the app before it reached its setup screen.
+        linux = [(what + ', not looked at on a Mac', place, files, prefix, must, False)
+                 for what, place, files, prefix, must, ok in cases if ok]
+        cases = [
+            ('the application in ~/Applications', 'Applications/Test Game.app/game.gog', {}, '',
+             '', True),
+            ('the application, with must_have', 'Applications/Test Game.app/game.gog', {}, '',
+             'HELLO/HELLO.EXE', True),
+            ('another application', 'Applications/Other.app/game.gog', {}, '', '', False),
+        ] + linux + [('nothing', None, {}, '', 'HELLO/HELLO.EXE', False)]
     if os.name == 'nt':
         # Windows: GOG Galaxy's folder under %ProgramFiles(x86)%, which is
         # set to the folder made here.  The registry's key of a product ID
@@ -1473,16 +1487,31 @@ def main():
     print(out.strip())
     exe = cc(os.path.join(b, 'cdatest'), [os.path.join(HERE, 'cdaudio', 'cdatest.c')] + [
         os.path.join(RUNTIME, f) for f in ('cdaudio.c', 'cdimage.c', 'plat_null.c', 'sys.c', 'shot.c')])
-    out = run([exe, make_cue()])
+    cue = make_cue()
+    out = run([exe, cue])
     if 'cdaudio ok' not in out:
         raise SystemExit('selftest FAILED: cdaudio.c: ' + out)
     copy = os.path.join(b, 'cuecopy')
     if os.path.isdir(copy):
         shutil.rmtree(copy)
-    out = run([exe, make_cue(), copy])
+    out = run([exe, cue, copy])
     if 'cdaudio ok' not in out or not os.path.isfile(os.path.join(copy, 'MUSIC', 'TRACK03.OGG')):
         raise SystemExit('selftest FAILED: cdimage.c\'s cd_copy_disc: ' + out)
     print('cd_copy_disc: the disc copied, its copy read: ' + out.strip())
+    boxer = os.path.join(b, 'Illusions.boxer')
+    source = os.path.join(boxer, 'C.harddisk', 'illusion', 'Illusions')
+    shutil.copytree(os.path.dirname(cue), source)
+    track = os.path.join(source, 'music', 'track03.ogg')
+    cdmedia = os.path.join(boxer, 'game.cdmedia')
+    os.makedirs(cdmedia)
+    shutil.copy(track, cdmedia)
+    os.remove(track)
+    boxed_cue = os.path.join(source, 'game.inst')
+    boxed_copy = os.path.join(b, 'boxer-cuecopy')
+    out = run([exe, boxed_cue, boxed_copy])
+    if 'cdaudio ok' not in out or not os.path.isfile(os.path.join(boxed_copy, 'MUSIC', 'TRACK03.OGG')):
+        raise SystemExit('selftest FAILED: cdimage.c\'s Boxer .cdmedia fallback: ' + out)
+    print('cd_copy_disc: the Boxer .cdmedia track copied and read: ' + out.strip())
     exe = cc(os.path.join(b, 'launchtest'), [os.path.join(HERE, 'launcher', 'launchtest.c')] + [
         os.path.join(RUNTIME, f) for f in ('launcher.c', 'textmode.c', 'pad.c', 'frame.c', 'vga.c',
                                            'plat_null.c', 'shot.c', 'sys.c')])
