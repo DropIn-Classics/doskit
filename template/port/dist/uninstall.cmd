@@ -11,12 +11,14 @@ rem hand and is deleted by hand.
 rem No blocks in parentheses below: a folder's name may hold them.
 setlocal DisableDelayedExpansion
 set "NAME={{NAME}}"
+rem the program's folder, taken before the options: shift moves %%0 as well
+set "HERE=%~dp0"
 set "YES=0"
 set "ALL=0"
 :args
 if "%~1"=="" goto args_done
-if /i "%~1"=="--yes" set "YES=1" & shift & goto args
-if /i "%~1"=="--all" set "ALL=1" & shift & goto args
+if /i "%~1"=="--yes" set "YES=1" & shift /1 & goto args
+if /i "%~1"=="--all" set "ALL=1" & shift /1 & goto args
 goto usage
 :args_done
 if "%ALL%"=="1" if "%YES%"=="0" goto usage
@@ -29,7 +31,6 @@ rem never a folder that is not the program's own
 if "%DATA%"=="" goto bad_data
 if "%DATA:~3%"=="" goto bad_data
 if /i "%DATA%"=="%USERPROFILE%" goto bad_data
-set "HERE=%~dp0"
 set "REMOVED=0"
 
 call :game "%DATA%\game"
