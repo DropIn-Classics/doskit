@@ -29,7 +29,9 @@ the latest release's `latest.json`.
 `.github/workflows/build.yml` builds the packages doskit/docs/RELEASE.md
 prescribes; a pushed tag `vX.Y` makes a release of them. `dist/README.txt`
 is the players' README in each package: fill in the game's keys and
-anything the game needs before the first release.
+anything the game needs before the first release. `dist/uninstall.sh`
+and `dist/uninstall.cmd` go into the packages as they are: they remove
+what the port copied (doskit/docs/RELEASE.md, point 8).
 
 (which packages were started from a download, on which systems)
 

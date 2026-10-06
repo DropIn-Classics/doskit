@@ -1,6 +1,6 @@
 # Builds the port (port/) for Windows, Linux and macOS and packs each as
 # doskit/docs/RELEASE.md says: the program (on a Mac an app), the player's
-# port/dist/README.txt and the licences of micromod and SDL2.  A push of a
+# port/dist/README.txt, its uninstall script and the licences of micromod and SDL2.  A push of a
 # tag v* also makes a GitHub release with the three packages and
 # latest.json, which the releases look for (doskit/runtime/update.h).
 # Nothing here needs the game's data: the tools' checks (doskit/tools/
@@ -39,7 +39,7 @@ jobs:
         run: |
           $d = "{{SLUG}}-windows-x64"
           New-Item -ItemType Directory $d | Out-Null
-          Copy-Item port\build\{{SLUG}}.exe, port\dist\README.txt $d
+          Copy-Item port\build\{{SLUG}}.exe, port\dist\README.txt, port\dist\uninstall.cmd $d
           Copy-Item doskit\runtime\third_party\micromod\LICENCE.txt $d\LICENCE-micromod.txt
           Compress-Archive $d "$d.zip"
       - uses: actions/upload-artifact@v4
@@ -81,7 +81,8 @@ jobs:
           test -x port/build/{{SLUG}}
           d={{SLUG}}-linux-x64
           mkdir $d
-          cp port/build/{{SLUG}} port/dist/README.txt $d/
+          cp port/build/{{SLUG}} port/dist/README.txt port/dist/uninstall.sh $d/
+          chmod +x $d/uninstall.sh
           cp -L sdl2/lib/libSDL2-2.0.so.0 $d/
           # sdl2-config's search path is this machine's: only the program's own folder
           patchelf --set-rpath '$ORIGIN' $d/{{SLUG}}
@@ -136,6 +137,9 @@ jobs:
           python3 doskit/tools/macapp.py port/build/{{SLUG}} $d --name {{SLUG}} \
             --id io.github.dropin-classics.{{SLUG}} --version "$PORT_VERSION"
           cp port/dist/README.txt $d/
+          # the same script as Linux's; a .command opens in Terminal at a double click
+          cp port/dist/uninstall.sh $d/uninstall.command
+          chmod +x $d/uninstall.command
           cp doskit/runtime/third_party/micromod/LICENCE.txt $d/LICENCE-micromod.txt
           cp SDL2-$SDL2_VERSION/LICENSE.txt $d/LICENCE-SDL2.txt
           ditto -c -k --keepParent $d $d.zip

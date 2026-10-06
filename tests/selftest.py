@@ -133,7 +133,10 @@ In build/selftest (a project as a game's would be, see kit.py):
      only when runtime/sdl2-flags.sh finds SDL2; plat_win32.c not here);
   6. new_project.py: a project made from template/ in build/selftest-new
      (the kit linked in as doskit/), its port built with its build.sh and
-     run headless on HELLO's files; its check.py says all ok.  Then one
+     run headless on HELLO's files; its check.py says all ok; its
+     port/dist/uninstall.sh (on Windows uninstall.cmd) run on a made-up
+     data folder: nothing removed unasked, --yes, --yes --all, and (not
+     on Windows) the answers typed on a terminal.  Then one
      chosen from the installed GOG games (DOSKIT_GOG_DIRS naming a folder
      made here: a game's goggame-ID.info and a raw CD image with HELLO's
      files, cd_image below, named by a cue sheet; and one of GOG's older
@@ -257,6 +260,112 @@ def cc(out, srcs, incs=(), defs=(), obj=False):
         print((r.stdout + r.stderr).strip())
         raise SystemExit(f'selftest FAILED: cl {os.path.basename(out)}')
     return out if obj else out + EXE
+
+
+def on_terminal(cmd, env, answers):
+    """runs cmd with a terminal of its own (not on Windows) and types an
+    answer and Enter each time it asks "[y/N] "; its exit status and all
+    it said come back"""
+    import pty
+    import select
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.execvpe(cmd[0], cmd, env)
+    said, sent = b'', 0
+    while True:
+        if not select.select([fd], [], [], 30)[0]:
+            os.kill(pid, 9)
+            break
+        try:
+            more = os.read(fd, 4096)
+        except OSError:                         # Linux: the other end is closed
+            break
+        if not more:
+            break
+        said += more
+        if said.count(b'[y/N] ') > sent and sent < len(answers):
+            os.write(fd, answers[sent].encode() + b'\n')
+            sent += 1
+    status = os.waitpid(pid, 0)[1]
+    return os.WEXITSTATUS(status) if os.WIFEXITED(status) else -1, said.decode(errors='replace')
+
+
+def check_uninstall(new):
+    """the template's uninstall script as the new project `new` got it
+    (uninstall.sh; on Windows uninstall.cmd), in a made-up package folder
+    with a made-up data folder (DK_DATA_DIR, never the user's): asked
+    without a terminal it removes nothing; --yes removes the copied game
+    files there and those left beside the program and keeps the saves;
+    --yes --all removes the data folder; an option it does not know
+    removes nothing; the program's folder always stays.  With a terminal
+    (not on Windows) the answers n and n, Enter and Enter keep
+    everything, y and n remove the game files only, y and y and n and
+    yes the folder."""
+    name = 'uninstall.cmd' if os.name == 'nt' else 'uninstall.sh'
+    src = os.path.join(new, 'port', 'dist', name)
+    text = open(src, 'rb').read()
+    if b'{{' in text or b'testgame' not in text or b'Test Game' not in text:
+        raise SystemExit(f'selftest FAILED: {name}: the template\'s names not filled in')
+    if os.name != 'nt' and not os.access(src, os.X_OK):
+        raise SystemExit(f'selftest FAILED: {name} cannot be executed')
+    root = os.path.join(KIT, 'build', 'selftest-uninstall')
+    pkg, data = os.path.join(root, 'the package'), os.path.join(root, 'data folder')
+    script = os.path.join(pkg, name)
+    cmd = (['cmd', '/c', script] if os.name == 'nt' else ['sh', script])
+    env = dict(os.environ, DK_DATA_DIR=data)
+
+    def fresh(leftover=False):
+        if os.path.isdir(root):
+            shutil.rmtree(root)
+        for d in [pkg, os.path.join(data, 'game', 'SUB'), os.path.join(data, 'save')] + (
+                [os.path.join(pkg, 'game')] if leftover else []):
+            os.makedirs(d)
+            with open(os.path.join(d, 'FILE.DAT'), 'w') as f:
+                f.write('x')
+        shutil.copy(src, script)
+
+    def there():
+        return ''.join(c for c, p in (('g', os.path.join(data, 'game', 'SUB', 'FILE.DAT')),
+                                      ('s', os.path.join(data, 'save', 'FILE.DAT')),
+                                      ('l', os.path.join(pkg, 'game', 'FILE.DAT')),
+                                      ('p', script)) if os.path.isfile(p))
+
+    def expect(what, args, left, code=0, says=None, answers=None, leftover=False):
+        fresh(leftover)
+        if answers is None:
+            r = subprocess.run(cmd + args, capture_output=True, text=True, env=env,
+                               stdin=subprocess.DEVNULL)
+            got, said = r.returncode, r.stdout + r.stderr
+        else:
+            got, said = on_terminal(cmd + args, env, answers)
+        if got != code or there() != left or (says and says not in said):
+            print(said)
+            raise SystemExit(f'selftest FAILED: {name} {what}: exit {got} for {code}, '
+                             f'left {there()} for {left}')
+
+    expect('without a terminal', [], 'gslp', says='kept', leftover=True)
+    expect('--yes', ['--yes'], 'sp', says='removed', leftover=True)
+    expect('--yes --all', ['--yes', '--all'], 'p', says='removed')
+    expect('--all alone', ['--all'], 'gsp', code=2)
+    expect('an unknown option', ['--everything'], 'gsp', code=2)
+    fresh()
+    shutil.rmtree(data)
+    r = subprocess.run(cmd + ['--yes', '--all'], capture_output=True, text=True, env=env,
+                       stdin=subprocess.DEVNULL)
+    if r.returncode or 'Nothing removed' not in r.stdout or there() != 'p':
+        print(r.stdout + r.stderr)
+        raise SystemExit(f'selftest FAILED: {name} with nothing to remove')
+    asked = 'not on a terminal (Windows)'
+    if os.name != 'nt':
+        expect('n, n', [], 'gsp', answers=['n', 'n'], says='Nothing removed')
+        expect('Enter, Enter', [], 'gsp', answers=['', ''], says='Nothing removed')
+        expect('y, n', [], 'sp', answers=['y', 'n'])
+        expect('y, y', [], 'p', answers=['y', 'y'])
+        expect('n, yes', [], 'p', answers=['n', 'yes'])
+        expect('x, maybe', [], 'gsp', answers=['x', 'maybe'], says='Nothing removed')
+        asked = 'asked on a terminal: n n, Enter Enter, y n, y y, n yes, x maybe'
+    print(f'ok   {name}: nothing without a terminal, --yes, --yes --all, unknown options, '
+          f'nothing there; {asked}')
 
 
 def link_dir(target, link):
@@ -1835,6 +1944,7 @@ def main():
     print(out.stdout.strip())
     if out.returncode:
         raise SystemExit('selftest FAILED: check.py in the new project')
+    check_uninstall(new)
 
     gog = os.path.join(KIT, 'build', 'selftest-gog')
     if os.path.isdir(gog):
