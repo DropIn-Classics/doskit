@@ -330,12 +330,16 @@ def check_uninstall(new):
                                       ('l', os.path.join(pkg, 'game', 'FILE.DAT')),
                                       ('p', script)) if os.path.isfile(p))
 
+    def unasked(args):
+        # bytes, read here: what Windows' own commands say (choice, pause) is in
+        # the console's code page, not the one Python would decode with
+        r = subprocess.run(cmd + args, capture_output=True, env=env, stdin=subprocess.DEVNULL)
+        return r.returncode, (r.stdout + r.stderr).decode('ascii', errors='replace')
+
     def expect(what, args, left, code=0, says=None, answers=None, leftover=False):
         fresh(leftover)
         if answers is None:
-            r = subprocess.run(cmd + args, capture_output=True, text=True, env=env,
-                               stdin=subprocess.DEVNULL)
-            got, said = r.returncode, r.stdout + r.stderr
+            got, said = unasked(args)
         else:
             got, said = on_terminal(cmd + args, env, answers)
         if got != code or there() != left or (says and says not in said):
@@ -350,10 +354,9 @@ def check_uninstall(new):
     expect('an unknown option', ['--everything'], 'gsp', code=2)
     fresh()
     shutil.rmtree(data)
-    r = subprocess.run(cmd + ['--yes', '--all'], capture_output=True, text=True, env=env,
-                       stdin=subprocess.DEVNULL)
-    if r.returncode or 'Nothing removed' not in r.stdout or there() != 'p':
-        print(r.stdout + r.stderr)
+    got, said = unasked(['--yes', '--all'])
+    if got or 'Nothing removed' not in said or there() != 'p':
+        print(said)
         raise SystemExit(f'selftest FAILED: {name} with nothing to remove')
     asked = 'not on a terminal (Windows)'
     if os.name != 'nt':
