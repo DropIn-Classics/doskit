@@ -286,6 +286,68 @@ static void paint(HDC dc)
 
 /* the mouse, in the client area's pixels */
 static int mouse_seen, mouse_x, mouse_y, mouse_clicks;
+/* the mouse as a device: what plat_mouse_motion gives */
+static int move_seen, move_dx, move_dy, mouse_held, mouse_grabbed, mouse_centred;
+
+/* the middle of the client area on the screen */
+static POINT mouse_middle(void)
+{
+    RECT r;
+    POINT p;
+
+    GetClientRect(window, &r);
+    p.x = r.right / 2;
+    p.y = r.bottom / 2;
+    ClientToScreen(window, &p);
+    return p;
+}
+
+/* Grabbed, the pointer is kept to the client area and set back to its
+ * middle at each asking; how far it was from there is the movement. */
+void plat_mouse_grab(int on)
+{
+    if (!on == !mouse_grabbed)
+        return;
+    mouse_grabbed = on != 0;
+    mouse_centred = 0;
+    move_dx = move_dy = 0;
+    if (!on)
+        ClipCursor(NULL);
+}
+
+int plat_mouse_motion(int *dx, int *dy, int *buttons)
+{
+    if (mouse_grabbed && GetForegroundWindow() == window) {
+        POINT m = mouse_middle(), p, a = {0, 0};
+        RECT r;
+
+        if (mouse_centred && GetCursorPos(&p)) {
+            if (p.x != m.x || p.y != m.y)
+                move_seen = 1;
+            move_dx += p.x - m.x;
+            move_dy += p.y - m.y;
+        }
+        GetClientRect(window, &r);
+        ClientToScreen(window, &a);
+        OffsetRect(&r, a.x, a.y);
+        ClipCursor(&r);
+        SetCursorPos(m.x, m.y);
+        mouse_centred = 1;
+    }
+    *dx = move_dx;
+    *dy = move_dy;
+    *buttons = mouse_held;
+    move_dx = move_dy = 0;
+    return move_seen;
+}
+
+/* a button's message as plat_mouse_motion's bit */
+static int mouse_bit(UINT msg)
+{
+    return msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP ? 1
+         : msg == WM_RBUTTONDOWN || msg == WM_RBUTTONUP ? 2
+         : msg == WM_MBUTTONDOWN || msg == WM_MBUTTONUP ? 4 : 0;
+}
 
 int plat_mouse(int *x, int *y, int *clicks)
 {
@@ -326,13 +388,35 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_MOUSEMOVE:
     case WM_LBUTTONDOWN:
     case WM_RBUTTONDOWN:
+    case WM_MBUTTONDOWN:
+        if (msg == WM_MOUSEMOVE && !mouse_grabbed && mouse_seen) {
+            move_seen = 1;
+            move_dx += (short)LOWORD(lp) - mouse_x;
+            move_dy += (short)HIWORD(lp) - mouse_y;
+        }
+        if (msg != WM_MOUSEMOVE) {
+            move_seen = 1;
+            mouse_held |= mouse_bit(msg);
+            SetCapture(hwnd);           /* the release comes here from anywhere */
+        }
         mouse_seen = 1;
         mouse_x = (short)LOWORD(lp);
         mouse_y = (short)HIWORD(lp);
         mouse_clicks |= msg == WM_LBUTTONDOWN ? 1 : msg == WM_RBUTTONDOWN ? 2 : 0;
         return 0;
+    case WM_LBUTTONUP:
+    case WM_RBUTTONUP:
+    case WM_MBUTTONUP:
+        mouse_held &= ~mouse_bit(msg);
+        if (!mouse_held)
+            ReleaseCapture();
+        return 0;
     case WM_KILLFOCUS:
         release_all();
+        mouse_held = 0;
+        mouse_centred = 0;
+        if (mouse_grabbed)
+            ClipCursor(NULL);
         break;
     case WM_CHAR:
         push_control((char)wp);
@@ -399,6 +483,8 @@ int plat_init(const char *title)
 
 void plat_shutdown(void)
 {
+    if (mouse_grabbed)
+        ClipCursor(NULL);
     if (window)
         DestroyWindow(window);
     window = NULL;

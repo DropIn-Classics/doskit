@@ -113,7 +113,10 @@ In build/selftest (a project as a game's would be, see kit.py):
      note's frequency and level with the rhythm mode off and on, the
      tom-tom a sine, the cymbal a mixture of high frequencies at its
      envelope's level, the hi-hat noise, the snare tone and noise, each
-     silent after its key) says "opl ok"; tests/cdaudio/cdatest.c
+     silent after its key) says "opl ok"; tests/platmouse/platmousetest.c
+     (platform.h's mouse as a device on plat_null.c with DK_MOUSEMOVE:
+     the movement summed and given once, the buttons held, a grab) says
+     "platmouse ok"; tests/cdaudio/cdatest.c
      (cdaudio.c on the cue sheet of step 3: the table, the WAVE's samples,
      the Ogg's tones by loudness, the channels, the clock) says "cdaudio
      ok"; tests/update/updatetest.c
@@ -1805,6 +1808,16 @@ def main():
     if out.returncode or 'vsync ok' not in out.stdout:
         print(out.stdout + out.stderr)
         raise SystemExit('selftest FAILED: plat_set_vsync')
+    exe = cc(os.path.join(b, 'platmousetest'), [os.path.join(HERE, 'platmouse', 'platmousetest.c')] + [
+        os.path.join(RUNTIME, f) for f in ('plat_null.c', 'shot.c', 'sys.c')])
+    out = subprocess.run(
+        [exe], cwd=PROJ, capture_output=True, text=True,
+        env=dict(os.environ,
+                 DK_MOUSEMOVE='2:5,-3,1 2:1,1,1 4:0,0,0 6:-7,2,6 8:9,9,0 9:4,0,0'))
+    if out.returncode or 'platmouse ok' not in out.stdout:
+        print(out.stdout + out.stderr)
+        raise SystemExit('selftest FAILED: plat_mouse_motion')
+    print(out.stdout.strip())
     rgb0 = rgb1 = None
     for got, exp in (('got0', 'expA'), ('got1', 'expB'), ('got2', 'expA')):
         w, h, rgb = read_png(os.path.join(vsync, got + '.png'))

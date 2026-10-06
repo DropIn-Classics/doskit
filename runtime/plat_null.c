@@ -11,6 +11,10 @@
  *                   to 320,240 of a 640x480 picture (in 1/640 and 1/480
  *                   of the picture whatever its size) and clicks the left
  *                   button (2 the right, 0 none)
+ *   DK_MOUSEMOVE=...  the mouse as a device by picture number:
+ *                   "300:5,-3,1 310:0,0,0" moves it 5 right and 3 up at
+ *                   picture 300 with the left button held from there on
+ *                   (1 left, 2 right, 4 middle), and lets go at 310
  *   DK_SHOTS=...    screenshots by picture number: "120:a.png 300:b.png"
  *                   writes pictures 120 and 300 as PNG files (shot.h;
  *                   no spaces in the names)
@@ -23,8 +27,9 @@
 #include "shot.h"
 
 static long frames_left = -1, picture;
-static const char *dump_path, *keys, *mouse, *shots;
+static const char *dump_path, *keys, *mouse, *moves, *shots;
 static int mouse_seen, mouse_x, mouse_y, mouse_clicks;
+static int move_seen, move_dx, move_dy, move_held, move_grabbed;
 static uint64_t now_us;
 static uint8_t pending[64];
 static int npending, pos_pending;
@@ -42,6 +47,7 @@ int plat_init(const char *title)
     dump_path = getenv("DK_DUMP");
     keys = getenv("DK_KEYS");
     mouse = getenv("DK_MOUSE");
+    moves = getenv("DK_MOUSEMOVE");
     shots = getenv("DK_SHOTS");
     return 1;
 }
@@ -124,6 +130,30 @@ static void mouse_for_picture(void)
     }
 }
 
+/* what DK_MOUSEMOVE gives for picture `picture` */
+static void moves_for_picture(void)
+{
+    const char *p = moves;
+    while (p && *p) {
+        char *end;
+        long at = strtol(p, &end, 10), x, y, b;
+        if (end == p || *end != ':')
+            break;
+        x = strtol(end + 1, &end, 10);
+        y = *end == ',' ? strtol(end + 1, &end, 10) : 0;
+        b = *end == ',' ? strtol(end + 1, &end, 10) : 0;
+        if (at == picture) {
+            move_seen = 1;
+            move_dx += (int)x;
+            move_dy += (int)y;
+            move_held = (int)b & 7;
+        }
+        p = end;
+        while (*p == ' ')
+            p++;
+    }
+}
+
 /* the screenshots DK_SHOTS asks for at picture `picture` */
 static void shots_for_picture(void)
 {
@@ -156,6 +186,25 @@ int plat_mouse(int *x, int *y, int *clicks)
     *x = mouse_x;
     *y = mouse_y;
     return mouse_seen;
+}
+
+/* nothing to keep it to here; a grab starts the movement anew, as the
+ * windows' do */
+void plat_mouse_grab(int on)
+{
+    if (!on == !move_grabbed)
+        return;
+    move_grabbed = on != 0;
+    move_dx = move_dy = 0;
+}
+
+int plat_mouse_motion(int *dx, int *dy, int *buttons)
+{
+    *dx = move_dx;
+    *dy = move_dy;
+    *buttons = move_held;
+    move_dx = move_dy = 0;
+    return move_seen;
 }
 
 int plat_pump(void)
@@ -200,6 +249,7 @@ void plat_present(const uint8_t *pixels, int width, int height, const uint32_t p
         frames_left--;
     keys_for_picture();
     mouse_for_picture();
+    moves_for_picture();
 }
 
 int plat_read_scancode(void)

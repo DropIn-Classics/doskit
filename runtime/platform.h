@@ -54,6 +54,17 @@ int plat_read_control(void);
  * yet.  The system's pointer is not shown over the window. */
 int plat_mouse(int *x, int *y, int *clicks);
 
+/* The mouse as a device, for a program that read a mouse driver: the
+ * buttons held now in *buttons (1 left, 2 right, 4 middle) and how far
+ * it was moved since the last call in *dx and *dy (the system's counts,
+ * right and down positive); 0 while there was nothing from it yet.
+ * plat_mouse_grab(1) keeps it to the window and gives its movement
+ * without an end at the window's edges, 0 lets it go; without the grab
+ * the movement is that of the pointer over the window.  A window that
+ * loses the keyboard holds no button. */
+void plat_mouse_grab(int on);
+int plat_mouse_motion(int *dx, int *dy, int *buttons);
+
 /* monotonic clock in microseconds */
 uint64_t plat_micros(void);
 void plat_sleep_ms(int ms);
