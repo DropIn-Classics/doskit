@@ -18,9 +18,16 @@
  * The envelope's times are the chip's table as the data sheet gives it for
  * rate 1 (attack 2826.24 ms, decay 39280.64 ms from 0 to 96 dB), halved for
  * every rate above, the rate's lowest two bits (from key scaling) in
- * between; the attack's curve (exponential in dB) is a choice.  The
- * rhythm mode's drums are an approximation: noise and square waves from
- * the operators' phases, not the chip's circuit. */
+ * between; the attack's curve (exponential in dB) is a choice.
+ *
+ * The rhythm mode, as the chip's application manual has it: the bass drum
+ * is FM of two operators, the tom-tom a sine, and the snare drum, the top
+ * cymbal and the hi-hat are "composite frequencies", a number of
+ * frequencies of the two channels' phase generators combined with each
+ * other and with white noise, each then shaped by its operator's envelope
+ * and level.  The manual does not say which frequencies are combined or
+ * how; what drums() takes for them is a choice and says so, not the chip's
+ * circuit. */
 #include "opl.h"
 #include <math.h>
 #include <string.h>
@@ -166,23 +173,37 @@ static double wave(int ws, double ph){
     return s;
 }
 
+/* channel c's operator k's amplitude (0..1) from its envelope, a sample
+ * on, and its level; 0 when it is off or below the envelope's bottom */
+static double op_amp(OPL *o, int c, int k, double am){
+    OPLOp *p = &o->op[2 * c + k];
+    double db;
+    envelope(o, c, k);
+    db = p->env + level(o, c, k, am);
+    return (p->stage != OPL_OFF && db < SILENT) ? pow(10.0, -db / 20.0) : 0.0;
+}
+
+/* channel c's operator k's phase a sample on */
+static void op_step(OPL *o, int c, int k, double vib){
+    OPLOp *p = &o->op[2 * c + k];
+    int r20 = o->reg[0x20 + op_reg(c, k)];
+    int fnum = o->reg[0xA0 + c] | ((o->reg[0xB0 + c] & 3) << 8);
+    int block = (o->reg[0xB0 + c] >> 2) & 7;
+    double f = fnum * (double)(1 << block) * CHIP_HZ / 1048576.0 * mult2[r20 & 15] / 2.0;
+    if(r20 & 0x40) f *= vib;
+    p->phase += f / o->rate;
+    p->phase -= floor(p->phase);
+}
+
 /* channel c's operator k's output (-1..1) with the phase moved by pm
  * cycles; its phase goes on by a sample */
 static double op_out(OPL *o, int c, int k, double pm, double am, double vib){
     OPLOp *p = &o->op[2 * c + k];
-    int r = op_reg(c, k), r20 = o->reg[0x20 + r];
-    int fnum = o->reg[0xA0 + c] | ((o->reg[0xB0 + c] & 3) << 8);
-    int block = (o->reg[0xB0 + c] >> 2) & 7;
+    int r = op_reg(c, k);
     int ws = (o->reg[0x01] & 0x20) ? o->reg[0xE0 + r] & 3 : 0;
-    double f = fnum * (double)(1 << block) * CHIP_HZ / 1048576.0 * mult2[r20 & 15] / 2.0;
-    double db, v = 0.0;
-    if(r20 & 0x40) f *= vib;
-    envelope(o, c, k);
-    db = p->env + level(o, c, k, am);
-    if(p->stage != OPL_OFF && db < SILENT)
-        v = wave(ws, p->phase + pm) * pow(10.0, -db / 20.0);
-    p->phase += f / o->rate;
-    p->phase -= floor(p->phase);
+    double a = op_amp(o, c, k, am), v = 0.0;
+    if(a > 0.0) v = wave(ws, p->phase + pm) * a;
+    op_step(o, c, k, vib);
     p->prev = p->out;
     p->out = v;
     return v;
@@ -202,22 +223,50 @@ static double channel(OPL *o, int c, double am, double vib){
     return op_out(o, c, 1, mv * 4.0, am, vib);
 }
 
-/* the rhythm mode's channels 6-8: bass drum as a channel, the other four
- * one operator each; noise and squares for the hi-hat, snare and cymbal */
+/* a square wave `mult` times a phase generator's frequency: 1 in its
+ * first half */
+static int square(double phase, int mult){
+    phase *= mult;
+    return phase - floor(phase) < 0.5;
+}
+
+/* the rhythm mode's channels 6-8.  The bass drum is channel 6 as a
+ * channel; the tom-tom is channel 8's first operator as it is, a sine.
+ * The hi-hat (channel 7's first operator), the snare drum (its second)
+ * and the top cymbal (channel 8's second) are each a signal of full
+ * swing, +1 or -1, times the operator's amplitude: the envelope and the
+ * level shape them, the operator's own wave does not.
+ * Choices, where the manual gives no more than "composite frequencies"
+ * and "white noise":
+ *   the composite is the exclusive or of four squares, 8 and 32 times the
+ *   frequency of each of the two phase generators the three share (the
+ *   hi-hat's and the cymbal's operators); the cymbal is the composite
+ *   alone, so that it is a mixture of high frequencies whatever low
+ *   frequency the channels are set to;
+ *   the hi-hat is the noise, turned over by the hi-hat's generator's
+ *   square;
+ *   the snare is three parts of its own generator's square and one part
+ *   of noise;
+ *   a signal of full swing is taken at 1/sqrt 2, a sine's mean power, and
+ *   all five drums at twice a melodic operator's level. */
 static double drums(OPL *o, double am, double vib){
     double s = 2.0 * channel(o, 6, am, vib);
     double hh, sd, tom, cy;
-    int bit = o->noise & 1;
+    int bit = o->noise & 1, comp;
     o->noise = (o->noise >> 1) ^ (bit ? 0x400181u : 0u);   /* a 23-bit shift register */
-    /* each op's output taken for its level, the wave replaced */
-    hh = fabs(op_out(o, 7, 0, 0.0, am, vib));
-    sd = fabs(op_out(o, 7, 1, 0.0, am, vib));
+    hh = op_amp(o, 7, 0, am);
+    sd = op_amp(o, 7, 1, am);
     tom = op_out(o, 8, 0, 0.0, am, vib);
-    cy = fabs(op_out(o, 8, 1, 0.0, am, vib));
-    hh *= ((o->op[14].phase < 0.5) ^ bit) ? 1.0 : -1.0;
-    sd *= (o->op[15].phase < 0.5) ? (bit ? 1.0 : 0.5) : (bit ? -0.5 : -1.0);
-    cy *= (o->op[17].phase < 0.5) ? 1.0 : -1.0;
-    return s + 2.0 * (hh + sd + tom + cy);
+    cy = op_amp(o, 8, 1, am);
+    comp = square(o->op[14].phase, 8) ^ square(o->op[14].phase, 32)
+         ^ square(o->op[17].phase, 8) ^ square(o->op[17].phase, 32);
+    hh *= (square(o->op[14].phase, 1) ^ bit) ? 1.0 : -1.0;
+    sd *= square(o->op[15].phase, 1) ? (bit ? 1.0 : 0.5) : (bit ? -0.5 : -1.0);
+    cy *= comp ? 1.0 : -1.0;
+    op_step(o, 7, 0, vib);
+    op_step(o, 7, 1, vib);
+    op_step(o, 8, 1, vib);
+    return s + 2.0 * tom + 2.0 * 0.7071067811865476 * (hh + sd + cy);
 }
 
 void opl_render(OPL *o, int16_t *out, int n){
