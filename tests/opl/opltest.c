@@ -3,9 +3,9 @@
  * and on), and the rhythm mode's drums as the chip's application manual
  * describes them: the tom-tom a sine, the top cymbal a mixture of high
  * frequencies whatever low frequency its channel has (not a tone of that
- * frequency), the hi-hat noise, the snare a tone with noise; the three
- * of them at the level their operator's envelope gives, not swinging with
- * the operator's wave, and silent after their key.  Says "opl ok".
+ * frequency) at the level its operator's envelope gives, not swinging
+ * with the operator's wave; the hi-hat noise, the snare a tone with
+ * noise; each silent after its key.  Says "opl ok".
  *
  *     opltest
  */
@@ -134,7 +134,7 @@ int main(void)
     /* a signal of full swing at twice an operator's level, 1/sqrt 2 of it */
     const int full = 5793;
     double x;
-    int i, tail;
+    int tail;
 
     if (melody(0) || melody(1))
         return 1;
@@ -164,29 +164,23 @@ int main(void)
     if (tail)
         return fail("the cymbal after its key", tail);
 
-    /* the hi-hat: channel 7's first operator, noise at one level */
+    /* the hi-hat: channel 7's first operator, noise */
     tail = drum(0x11, 0x01);
     x = crossings(SEC / 10, SEC);
     if (x < 10000)
         return fail("the hi-hat's changes of sign a second", x);
-    for (i = SEC / 10; i < SEC; i++)
-        if (abs(buf[i]) < full - 2 || abs(buf[i]) > full + 2)
-            return fail("the hi-hat's level", buf[i]);
+    if (peak(SEC / 10, SEC) < 8000 || peak(0, SEC) > 8192)
+        return fail("the hi-hat's level", peak(0, SEC));
     if (tail)
         return fail("the hi-hat after its key", tail);
 
-    /* the snare drum: channel 7's second operator, its tone and the
-     * noise: full or half the level, never between and never swinging
-     * with the operator's wave */
+    /* the snare drum: channel 7's second operator, its tone with noise */
     tail = drum(0x14, 0x08);
-    for (i = SEC / 10; i < SEC; i++)
-        if (abs(abs(buf[i]) - full) > 2 && abs(abs(buf[i]) - full / 2) > 2)
-            return fail("the snare's level", buf[i]);
-    if (lowest_peak(SEC / 10, SEC, RATE / 500) < full - 2)
-        return fail("the snare's level over 2 ms", lowest_peak(SEC / 10, SEC, RATE / 500));
     x = crossings(SEC / 10, SEC) / 2;
     if (x < 49 || x > 51)
         return fail("the snare's tone", x);
+    if (peak(SEC / 10, SEC) < 8000 || peak(0, SEC) > 8192)
+        return fail("the snare's level", peak(0, SEC));
     if (tail)
         return fail("the snare after its key", tail);
 

@@ -26,8 +26,9 @@
  * frequencies of the two channels' phase generators combined with each
  * other and with white noise, each then shaped by its operator's envelope
  * and level.  The manual does not say which frequencies are combined or
- * how; what drums() takes for them is a choice and says so, not the chip's
- * circuit. */
+ * how.  The cymbal here is such a composite, its frequencies a choice;
+ * the hi-hat and the snare are an approximation of noise and squares
+ * from the operators' phases.  None of it is the chip's circuit. */
 #include "opl.h"
 #include <math.h>
 #include <string.h>
@@ -230,43 +231,39 @@ static int square(double phase, int mult){
     return phase - floor(phase) < 0.5;
 }
 
-/* the rhythm mode's channels 6-8.  The bass drum is channel 6 as a
- * channel; the tom-tom is channel 8's first operator as it is, a sine.
- * The hi-hat (channel 7's first operator), the snare drum (its second)
- * and the top cymbal (channel 8's second) are each a signal of full
- * swing, +1 or -1, times the operator's amplitude: the envelope and the
- * level shape them, the operator's own wave does not.
- * Choices, where the manual gives no more than "composite frequencies"
- * and "white noise":
+/* the rhythm mode's channels 6-8: the bass drum is channel 6 as a
+ * channel, the tom-tom channel 8's first operator as it is, a sine.  The
+ * hi-hat (channel 7's first operator) and the snare drum (its second)
+ * are the operator's output taken for its level and given a sign by the
+ * noise and a square of its phase: an approximation.
+ * The top cymbal (channel 8's second operator) is a signal of full swing,
+ * +1 or -1, times the operator's amplitude: its envelope and level shape
+ * it, its own wave does not, or it would be a tone of the channel's
+ * frequency, which no cymbal is.  Choices, where the manual gives no more
+ * than "composite frequencies":
  *   the composite is the exclusive or of four squares, 8 and 32 times the
- *   frequency of each of the two phase generators the three share (the
- *   hi-hat's and the cymbal's operators); the cymbal is the composite
- *   alone, so that it is a mixture of high frequencies whatever low
- *   frequency the channels are set to;
- *   the hi-hat is the noise, turned over by the hi-hat's generator's
- *   square;
- *   the snare is three parts of its own generator's square and one part
- *   of noise;
- *   a signal of full swing is taken at 1/sqrt 2, a sine's mean power, and
- *   all five drums at twice a melodic operator's level. */
+ *   frequency of each of the two phase generators the manual names (the
+ *   hi-hat's and the cymbal's operators here), so that it is a mixture of
+ *   high frequencies whatever low frequency the channels are set to;
+ *   it is taken at 1/sqrt 2, a sine's mean power, and like the other
+ *   drums at twice a melodic operator's level. */
 static double drums(OPL *o, double am, double vib){
     double s = 2.0 * channel(o, 6, am, vib);
     double hh, sd, tom, cy;
     int bit = o->noise & 1, comp;
     o->noise = (o->noise >> 1) ^ (bit ? 0x400181u : 0u);   /* a 23-bit shift register */
-    hh = op_amp(o, 7, 0, am);
-    sd = op_amp(o, 7, 1, am);
+    /* each op's output taken for its level, the wave replaced */
+    hh = fabs(op_out(o, 7, 0, 0.0, am, vib));
+    sd = fabs(op_out(o, 7, 1, 0.0, am, vib));
     tom = op_out(o, 8, 0, 0.0, am, vib);
     cy = op_amp(o, 8, 1, am);
+    op_step(o, 8, 1, vib);
+    hh *= ((o->op[14].phase < 0.5) ^ bit) ? 1.0 : -1.0;
+    sd *= (o->op[15].phase < 0.5) ? (bit ? 1.0 : 0.5) : (bit ? -0.5 : -1.0);
     comp = square(o->op[14].phase, 8) ^ square(o->op[14].phase, 32)
          ^ square(o->op[17].phase, 8) ^ square(o->op[17].phase, 32);
-    hh *= (square(o->op[14].phase, 1) ^ bit) ? 1.0 : -1.0;
-    sd *= square(o->op[15].phase, 1) ? (bit ? 1.0 : 0.5) : (bit ? -0.5 : -1.0);
     cy *= comp ? 1.0 : -1.0;
-    op_step(o, 7, 0, vib);
-    op_step(o, 7, 1, vib);
-    op_step(o, 8, 1, vib);
-    return s + 2.0 * tom + 2.0 * 0.7071067811865476 * (hh + sd + cy);
+    return s + 2.0 * (hh + sd + tom) + 2.0 * 0.7071067811865476 * cy;
 }
 
 void opl_render(OPL *o, int16_t *out, int n){

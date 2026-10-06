@@ -111,9 +111,9 @@ In build/selftest (a project as a game's would be, see kit.py):
      (hud.c: the box, a letter, the bar, the size at 800x600, the
      pictures shown) says "hud ok"; tests/opl/opltest.c (opl.c: a
      note's frequency and level with the rhythm mode off and on, the
-     tom-tom a sine, the cymbal a mixture of high frequencies, the
-     hi-hat noise, the snare tone and noise, each at its envelope's
-     level and silent after its key) says "opl ok"; tests/cdaudio/cdatest.c
+     tom-tom a sine, the cymbal a mixture of high frequencies at its
+     envelope's level, the hi-hat noise, the snare tone and noise, each
+     silent after its key) says "opl ok"; tests/cdaudio/cdatest.c
      (cdaudio.c on the cue sheet of step 3: the table, the WAVE's samples,
      the Ogg's tones by loudness, the channels, the clock) says "cdaudio
      ok"; tests/update/updatetest.c
