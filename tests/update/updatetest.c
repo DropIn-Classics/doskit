@@ -63,6 +63,11 @@ static void compare_and_parse(void)
     expect(update_compare("v1.2", "v1.2.0") == 0, "v1.2 = v1.2.0");
     expect(update_compare("v1.2", "v1.2.1") < 0, "v1.2 before v1.2.1");
     expect(update_compare("1.3", "v1.2") > 0, "1.3 after v1.2");
+    expect(update_compare("v1.0", "v1.0-rc2") > 0, "v1.0 after v1.0-rc2");
+    expect(update_compare("v1.0-rc1", "v1.0-rc2") < 0, "v1.0-rc1 before v1.0-rc2");
+    expect(update_compare("v1.0-rc2", "v1.0") < 0, "v1.0-rc2 before v1.0");
+    expect(update_compare("v1.0-rc2", "v1.0-rc2") == 0, "the same rc");
+    expect(update_compare("v1.1-rc1", "v1.0") > 0, "v1.1-rc1 after v1.0");
     expect(update_parse("{\"version\": \"v2.0\", \"page\" : \"https://x/y\","
                         " \"notes\": \"a \\\"b\\\"\\nc \\u00e4\"}", &u), "parsed");
     expect(!strcmp(u.version, "v2.0") && !strcmp(u.page, "https://x/y"), "version, page");

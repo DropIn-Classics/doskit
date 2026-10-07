@@ -53,7 +53,8 @@ int update_open(const char *page);
 int update_install(const UpdateInfo *info);
 
 /* for tests: latest.json's fields (1 if it has a version); a before b
- * (<0), the same (0), after (>0), "v1.10" after "v1.9" */
+ * (<0), the same (0), after (>0): "v1.10" after "v1.9", "v1.0" after
+ * "v1.0-rc2" (a "-rcN" is older than the bare version, a smaller N older) */
 int update_parse(const char *json, UpdateInfo *info);
 int update_compare(const char *a, const char *b);
 
