@@ -73,6 +73,11 @@ int main(int argc, char **argv)
         fprintf(stderr, "port: %s\n", err);
         return 1;
     }
+    /* the BIOS's data area as DOS leaves it: text mode 3, CRTC at 3D4h */
+    if (mem[0x449] != 3 || frw(0x40, 0x4A) != 80 || frw(0x40, 0x63) != 0x3D4) {
+        fprintf(stderr, "port: the BIOS's data area is not text mode 3's\n");
+        return 1;
+    }
     seg_code = RM_LOAD_PSP + 0x10;
     seg_data = seg_code + HELLO_DATA;
     rm_ds = seg_data;

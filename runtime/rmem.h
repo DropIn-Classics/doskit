@@ -39,7 +39,8 @@ extern uint16_t rm_ds;
 extern uint16_t rm_psp, rm_arena;
 
 /* Loads the MZ program at `path` with its PSP at `psp` (the image at psp +
- * 10h, relocated by that segment) after clearing memory; the program keeps
+ * 10h, relocated by that segment) after clearing memory and filling the
+ * BIOS's data area as the runner does (text mode 3, CRTC 3D4h); the program keeps
  * `paras` paragraphs from its PSP on (what it keeps with INT 21h 4Ah), one
  * free block follows up to RM_TOP.  With want_size/want_sha256 (hex, lower
  * case; NULL: not checked) the file must be the one the hints describe
