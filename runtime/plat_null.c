@@ -18,6 +18,18 @@
  *   DK_SHOTS=...    screenshots by picture number: "120:a.png 300:b.png"
  *                   writes pictures 120 and 300 as PNG files (shot.h;
  *                   no spaces in the names)
+ *   DK_AUDIO=1      a virtual audio device: plat_audio_start says 1, and
+ *                   the callback is asked for the frames of the virtual
+ *                   clock's time as plat_sleep_ms moves it on (the frames
+ *                   due by then less those given; a fraction is carried),
+ *                   on the caller's thread.  Without it there is no
+ *                   device, as before.
+ *   DK_WAV=file     the same, and the frames are written there as a WAVE
+ *                   file (stereo, 16 bits), finished by plat_shutdown
+ *
+ * The audio's clock is the virtual clock and nothing else: time passes
+ * only in plat_sleep_ms, so whatever the program does between two sleeps
+ * takes none and falls on one frame.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -71,9 +83,72 @@ static void dump(void)
     fclose(f);
 }
 
+/* ---- the virtual audio device (DK_AUDIO, DK_WAV) ---- */
+
+static PlatAudioFill audio_fill;
+static void *audio_user;
+static int audio_rate;
+static uint64_t audio_from_us;          /* the clock at plat_audio_start */
+static uint64_t audio_given;            /* frames the callback was asked for */
+static FILE *wav;
+
+static void put_le(FILE *f, uint32_t v, int bytes)
+{
+    while (bytes-- > 0) {
+        fputc((int)(v & 0xFF), f);
+        v >>= 8;
+    }
+}
+
+/* the WAVE file's header for `frames` frames, at the file's start */
+static void wav_header(uint64_t frames)
+{
+    uint32_t bytes = (uint32_t)(frames * 4);
+
+    fseek(wav, 0, SEEK_SET);
+    fwrite("RIFF", 1, 4, wav);
+    put_le(wav, 36 + bytes, 4);
+    fwrite("WAVEfmt ", 1, 8, wav);
+    put_le(wav, 16, 4);
+    put_le(wav, 1, 2);                  /* PCM */
+    put_le(wav, 2, 2);
+    put_le(wav, (uint32_t)audio_rate, 4);
+    put_le(wav, (uint32_t)audio_rate * 4, 4);
+    put_le(wav, 4, 2);
+    put_le(wav, 16, 2);
+    fwrite("data", 1, 4, wav);
+    put_le(wav, bytes, 4);
+}
+
+/* asks the callback for the frames due at the clock's time */
+static void audio_run(void)
+{
+    static int16_t buf[1024 * 2];
+    uint64_t due;
+
+    if (!audio_fill)
+        return;
+    due = (now_us - audio_from_us) * (uint64_t)audio_rate / 1000000;
+    while (audio_given < due) {
+        int i, n = due - audio_given > 1024 ? 1024 : (int)(due - audio_given);
+
+        memset(buf, 0, sizeof buf);
+        audio_fill(buf, n, audio_user);
+        audio_given += (uint64_t)n;
+        for (i = 0; wav && i < n * 2; i++)
+            put_le(wav, (uint16_t)buf[i], 2);
+    }
+}
+
 void plat_shutdown(void)
 {
     dump();
+    if (wav) {
+        wav_header(audio_given);
+        fclose(wav);
+        wav = NULL;
+    }
+    audio_fill = NULL;
 }
 
 void plat_message(const char *text)
@@ -270,14 +345,31 @@ uint64_t plat_micros(void)
 void plat_sleep_ms(int ms)
 {
     now_us += (uint64_t)(ms > 0 ? ms : 1) * 1000;      /* 0 (a yield) too */
+    audio_run();
 }
 
 int plat_audio_start(int rate, PlatAudioFill fill, void *user)
 {
-    (void)rate;
-    (void)fill;
-    (void)user;
-    return 0;                   /* no device: sound.c moves the module */
+    const char *path = getenv("DK_WAV"), *on = getenv("DK_AUDIO");
+
+    if (!(path && *path) && !(on && *on && strcmp(on, "0")))
+        return 0;               /* no device: sound.c moves the module */
+    if (rate <= 0 || !fill || audio_fill)
+        return 0;
+    audio_rate = rate;
+    audio_user = user;
+    audio_from_us = now_us;
+    audio_given = 0;
+    if (path && *path) {
+        wav = fopen(path, "wb");
+        if (!wav) {
+            fprintf(stderr, "cannot write %s\n", path);
+            return 0;
+        }
+        wav_header(0);
+    }
+    audio_fill = fill;
+    return 1;
 }
 
 void plat_audio_lock(void)

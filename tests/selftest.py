@@ -117,7 +117,15 @@ In build/selftest (a project as a game's would be, see kit.py):
      note's frequency and level with the rhythm mode off and on, the
      tom-tom a sine, the cymbal a mixture of high frequencies at its
      envelope's level, the hi-hat noise, the snare tone and noise, each
-     silent after its key) says "opl ok"; tests/platmouse/platmousetest.c
+     silent after its key) says "opl ok"; tests/oplq/oplqtest.c (oplq.c
+     on plat_null.c's virtual audio device, DK_WAV: a short tune's
+     register writes stamped with their samples by a program that makes
+     its timer's interrupts by the samples played; the frames those of
+     the virtual clock's time, the samples those of a chip written
+     exactly at the stamps, silence up to a note's sample; a stamp that
+     goes back, a late one, a full queue) says "oplq ok", and the WAVE
+     file holds those frames, the first note at its sample;
+     tests/platmouse/platmousetest.c
      (platform.h's mouse as a device on plat_null.c with DK_MOUSEMOVE:
      the movement summed and given once, the buttons held, a grab) says
      "platmouse ok"; tests/cdaudio/cdatest.c
@@ -436,6 +444,43 @@ def read_png(path):
             for i in row[1:]:
                 rgb += plte[3 * i:3 * i + 3]
     return w, h, bytes(rgb)
+
+
+def check_oplq(b):
+    """tests/oplq/oplqtest.c on plat_null.c's virtual audio device, and the
+    WAVE file DK_WAV asked for: 44100 Hz stereo, the frames the test
+    counted, both sides the same, silent up to the first note's sample."""
+    import struct
+    exe = cc(os.path.join(b, 'oplqtest'), [os.path.join(HERE, 'oplq', 'oplqtest.c')] + [
+        os.path.join(RUNTIME, f) for f in ('oplq.c', 'opl.c', 'plat_null.c', 'shot.c', 'sys.c')])
+    path = os.path.join(b, 'oplq.wav')
+    out = subprocess.run([exe], cwd=PROJ, capture_output=True, text=True,
+                         env=dict(os.environ, DK_WAV=path, DK_AUDIO=''))
+    m = re.search(r'oplq ok: (\d+) frames, \d+ writes, the first note at (\d+),', out.stdout)
+    if out.returncode or not m:
+        print(out.stdout + out.stderr)
+        raise SystemExit('selftest FAILED: oplq.c on the virtual audio device')
+    frames, first = int(m.group(1)), int(m.group(2))
+    with open(path, 'rb') as f:
+        data = f.read()
+    chans, rate = struct.unpack('<HI', data[22:28])
+    size = struct.unpack('<I', data[40:44])[0]
+    s = struct.unpack('<%dh' % ((len(data) - 44) // 2), data[44:])
+    left, right = s[0::2], s[1::2]
+    loud = [i for i, x in enumerate(left) if x]
+    if (rate, chans, size, len(left)) != (44100, 2, frames * 4, frames) or left != right \
+            or not loud or not first <= loud[0] < first + 32:
+        raise SystemExit(f'selftest FAILED: DK_WAV\'s file ({rate} Hz, {chans} channels, '
+                         f'{len(left)} frames for {frames}, the first sound at '
+                         f'{loud[0] if loud else None} for {first})')
+    # without DK_AUDIO and DK_WAV there is no device, as before
+    out2 = subprocess.run([exe], cwd=PROJ, capture_output=True, text=True,
+                          env=dict(os.environ, DK_WAV='', DK_AUDIO=''))
+    if 'no virtual audio device' not in out2.stdout:
+        print(out2.stdout + out2.stderr)
+        raise SystemExit('selftest FAILED: plat_null.c has an audio device without DK_AUDIO')
+    print(out.stdout.strip())
+    print(f'oplq.wav: {frames} frames at {rate} Hz, the first sound at sample {loud[0]}')
 
 
 def check_adlib_wav(path):
@@ -1923,6 +1968,7 @@ def main():
     if 'opl ok' not in out:
         raise SystemExit('selftest FAILED: opl.c: ' + out)
     print(out.strip())
+    check_oplq(b)
     check_update(b)
     check_gogfind(b)
     check_goglist_linux(b)

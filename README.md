@@ -74,7 +74,8 @@ agent session leads others working on it.
 - `runtime/` (C99; a project compiles the files it needs):
   - `platform.h` with `plat_sdl.c` (SDL2: macOS, Linux, Steam Deck),
     `plat_win32.c` (Windows SDK only) and `plat_null.c` (headless, for
-    tests and scripted runs); `sdl2-flags.sh` finds SDL2 (`SDL2_STATIC=1`:
+    tests and scripted runs; with `DK_AUDIO=1` or `DK_WAV=file` a
+    virtual audio device on its virtual clock); `sdl2-flags.sh` finds SDL2 (`SDL2_STATIC=1`:
     its static library, for the macOS release).
   - `rmem.h`: the program's memory as under DOS (MZ loader with a
     SHA-256 check, DOS memory blocks); `pmem.h`: a protected-mode
@@ -89,7 +90,10 @@ agent session leads others working on it.
     of contents, the plays an MSCDEX program asks for, mixed into the
     port's audio), `opl.h` (an OPL2's FM synthesis,
     the AdLib's chip, from the program's register writes; the runner's
-    -oplwav too), `audiofx.h` (optional EQ and a
+    -oplwav too), `oplq.h` (those writes with the sample each belongs
+    to, for a port whose own thread makes the timer's interrupts while
+    the audio callback renders; its count of samples rendered is the
+    clock for them), `audiofx.h` (optional EQ and a
     headphone mode), `fli.h` (FLI animations), `textmode.h` (an 80x25
     text screen), `launcher.h` (the setup screen specified by
     `docs/LAUNCHER.md`: a menu and pages of choices, keys and actions by keyboard
