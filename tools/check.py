@@ -85,7 +85,10 @@ def main():
     bad = []
     for h in hints:
         rc, out = run([os.path.join(HERE, 'build.py'), h])
-        last = out.splitlines()[-1] if out else ''
+        # build.py's verdict line; a list of instructions written as DB
+        # may follow it
+        last = next((l for l in reversed(out.splitlines())
+                     if ': IDENTICAL (' in l or ': differs (' in l), '')
         name = os.path.basename(h)
         if rc or 'IDENTICAL' not in last:
             bad.append(name)

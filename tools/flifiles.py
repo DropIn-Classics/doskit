@@ -26,6 +26,7 @@ FRAME_HEADER_SIZE = 16
 CHUNK_HEADER_SIZE = 6
 
 CHUNK_NAMES = {
+    7: 'SS2',
     11: 'COLOR_64',
     12: 'LC',
     13: 'BLACK',
@@ -184,8 +185,10 @@ def signed_byte(data, pos, context):
 
 
 def check_padding(data, pos, context):
+    # one byte that pads the chunk to an even length; some writers leave
+    # whatever was in their buffer there, not a zero
     padding = data[pos:]
-    if padding not in (b'', b'\0'):
+    if padding and not (len(padding) == 1 and len(data) % 2 == 0):
         raise ValueError(f'{context} has {len(padding)} trailing bytes')
 
 
@@ -247,6 +250,59 @@ def decode_lc(data, pixels, width, height):
     check_padding(data, pos, 'LC')
 
 
+def decode_ss2(data, pixels, width, height):
+    """FLC word-oriented delta: a count of lines that hold packets; per
+    line, words with the top bits 11 skip -word lines, 10 put their low
+    byte in the line's last pixel (after its packets), 00 give the line's packet count; a
+    packet is a column skip byte and a signed count of words, literal
+    (positive) or one word repeated (negative)"""
+    if len(data) < 2:
+        raise ValueError('truncated SS2 line count')
+    line_count = struct.unpack_from('<H', data)[0]
+    pos, y = 2, 0
+    for n in range(line_count):
+        last = None
+        while True:
+            if pos + 2 > len(data):
+                raise ValueError(f'truncated SS2 line {n} word')
+            word = struct.unpack_from('<H', data, pos)[0]
+            pos += 2
+            if word & 0xC000 == 0xC000:
+                y += 0x10000 - word
+            elif word & 0xC000 == 0x8000:
+                last = word & 0xFF
+            elif word & 0xC000:
+                raise ValueError(f'SS2 line {n} has an undefined word {word:04X}')
+            else:
+                break
+        if y >= height:
+            raise ValueError('SS2 lines extend below the picture')
+        x = 0
+        for packet in range(word):
+            skip, pos = byte(data, pos, f'SS2 line {y} packet {packet} skip')
+            count, pos = signed_byte(data, pos,
+                                     f'SS2 line {y} packet {packet} count')
+            x += skip
+            start = y * width + x
+            if count >= 0:
+                end = pos + 2 * count
+                if end > len(data) or x + 2 * count > width:
+                    raise ValueError(f'invalid SS2 literal on line {y}')
+                pixels[start:start + 2 * count] = data[pos:end]
+                pos = end
+                x += 2 * count
+            else:
+                if pos + 2 > len(data) or x - 2 * count > width:
+                    raise ValueError(f'invalid SS2 repeat on line {y}')
+                pixels[start:start - 2 * count] = data[pos:pos + 2] * -count
+                pos += 2
+                x -= 2 * count
+        if last is not None:
+            pixels[y * width + width - 1] = last
+        y += 1
+    check_padding(data, pos, 'SS2')
+
+
 def decode_brun(data, pixels, width, height):
     pos = 0
     for line in range(height):
@@ -277,7 +333,9 @@ def decode_brun(data, pixels, width, height):
 
 
 def decode_chunk(chunk, pixels, palette, width, height):
-    if chunk.kind == 11:
+    if chunk.kind == 7:
+        decode_ss2(chunk.data, pixels, width, height)
+    elif chunk.kind == 11:
         decode_color(chunk.data, palette)
     elif chunk.kind == 12:
         decode_lc(chunk.data, pixels, width, height)
