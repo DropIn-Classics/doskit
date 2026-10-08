@@ -170,6 +170,15 @@ void mouse_mode_changed(int mode);
 void mouse_input(uint16_t x, uint16_t y, uint16_t buttons);
 void mouse_overlay(uint32_t *pixels, int w, int h);
 
+/* --------------------------------------------------------- game port ---- */
+/* Two sticks at port 201h (dev.c).  A stick's axis is the time its
+ * one-shot stays high after a write to the port, in microseconds (a PC's
+ * is about 24 + 11 a kilohm: some 570 with a 100 kilohm stick in the
+ * middle); `buttons` are its two (bits 0 and 1, set while held).  A stick
+ * not there (the start; x below 0) leaves its axis bits set for ever and
+ * its buttons up. */
+void joy_input(int stick, int x_us, int y_us, unsigned buttons);
+
 /* ---------------------------------------------------------------- BIOS --- */
 void bios_init(void);
 int  bios_kbuf_get(uint16_t *out);    /* type-ahead queue for DOS input */

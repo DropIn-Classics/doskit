@@ -32,6 +32,12 @@
  *   -mouse T X,Y,B   put the mouse at virtual coordinates X,Y with button
  *                    mask B (bits 0 left, 1 right, 2 middle)
  *   -mice FILE       mouse events from a file, "T X,Y,B" a line, # comments
+ *   -joy T N,X,Y,B   from T on stick N (0 or 1) is at the game port with
+ *                    its axes X and Y (the microseconds each one-shot stays
+ *                    high after a write to 201h; a PC's stick in the middle
+ *                    has some 570) and the button mask B (bits 0 and 1);
+ *                    "N,off" takes it away.  Without one no stick is there
+ *   -joys FILE       such events from a file, "T N,X,Y,B" a line, # comments
  *   -shot T FILE     the screen at T as PNG
  *   -shotevery DT PREFIX   the screen every DT seconds, PREFIX_NNNNN.png
  *   -break ADDR[#N]  stop before the instruction at ADDR (the Nth time)
@@ -230,6 +236,9 @@ static int nkeys = 0, key_pos = 0;
 typedef struct { double t; uint16_t x, y, buttons; } MouseEv;
 static MouseEv mice[MAXEV];
 static int nmice = 0, mouse_pos = 0;
+typedef struct { double t; int stick, x, y, seq; unsigned buttons; } JoyEv;
+static JoyEv joys[MAXEV];
+static int njoys = 0, joy_pos = 0;
 
 typedef struct { double t; char file[260]; } Shot;
 static Shot shots[256];
@@ -385,6 +394,35 @@ static int mouse_cmp(const void *a, const void *b){
     const MouseEv *x = (const MouseEv*)a, *y = (const MouseEv*)b;
     return x->t < y->t ? -1 : x->t > y->t ? 1 : 0;
 }
+/* ---------------------------------------------------------- game port */
+static void add_joy(double t, const char *spec){
+    unsigned n, x, y, b; char tail, word[8];
+    if(njoys == MAXEV) die("too many joystick events");
+    if(sscanf(spec, "%u,%7s", &n, word) == 2 && !strcmp(word, "off") && n < 2){
+        joys[njoys].x = joys[njoys].y = -1; joys[njoys].buttons = 0;
+    } else if(sscanf(spec, "%u,%u,%u,%u%c", &n, &x, &y, &b, &tail) == 4 && n < 2 && x < 1000000 && y < 1000000 && b < 4){
+        joys[njoys].x = (int)x; joys[njoys].y = (int)y; joys[njoys].buttons = b;
+    } else die("bad joystick event %s (N,X,Y,B or N,off wanted)", spec);
+    joys[njoys].t = t; joys[njoys].stick = (int)n; joys[njoys].seq = njoys; njoys++;
+}
+static int joy_cmp(const void *a, const void *b){
+    const JoyEv *x = (const JoyEv*)a, *y = (const JoyEv*)b;
+    /* events of one time in the order given */
+    return x->t < y->t ? -1 : x->t > y->t ? 1 : x->seq - y->seq;
+}
+static void read_joys(const char *path){
+    FILE *f = fopen(path, "r");
+    char line[256];
+    if(!f) die("cannot read %s", path);
+    while(fgets(line, sizeof(line), f)){
+        double t; char event[96];
+        char *h = strchr(line, '#');
+        if(h) *h = 0;
+        if(sscanf(line, "%lf %95s", &t, event) == 2) add_joy(t, event);
+    }
+    fclose(f);
+}
+
 static void read_mice(const char *path){
     FILE *f = fopen(path, "r");
     char line[256];
@@ -532,6 +570,8 @@ int main(int argc, char **argv){
         else if(!strcmp(a,"-keys")){ NEED(1); read_keys(argv[++i]); }
         else if(!strcmp(a,"-mouse")){ NEED(2); add_mouse(atof(argv[i+1]), argv[i+2]); i += 2; }
         else if(!strcmp(a,"-mice")){ NEED(1); read_mice(argv[++i]); }
+        else if(!strcmp(a,"-joy")){ NEED(2); add_joy(atof(argv[i+1]), argv[i+2]); i += 2; }
+        else if(!strcmp(a,"-joys")){ NEED(1); read_joys(argv[++i]); }
         else if(!strcmp(a,"-shot")){ NEED(2);
             if(nshots == 256) die("too many -shot");
             shots[nshots].t = atof(argv[i+1]);
@@ -637,6 +677,7 @@ int main(int argc, char **argv){
     emu_inv_ips = 1.0 / emu_ips;
     qsort(keys, (size_t)nkeys, sizeof(KeyEv), key_cmp);
     qsort(mice, (size_t)nmice, sizeof(MouseEv), mouse_cmp);
+    qsort(joys, (size_t)njoys, sizeof(JoyEv), joy_cmp);
     shot_next = 0.0;                 /* picture n is at n*DT */
 
     ram = (uint8_t*)calloc(RAM_ALLOC, 1);
@@ -710,6 +751,10 @@ int main(int argc, char **argv){
                 mouse_input(mice[mouse_pos].x, mice[mouse_pos].y, mice[mouse_pos].buttons);
                 mouse_pos++;
             }
+            while(!cut_end && joy_pos < njoys && joys[joy_pos].t <= now){
+                joy_input(joys[joy_pos].stick, joys[joy_pos].x, joys[joy_pos].y, joys[joy_pos].buttons);
+                joy_pos++;
+            }
             while(shot_pos < nshots && shots[shot_pos].t <= now){
                 shot(shots[shot_pos].file); shot_pos++;
             }
@@ -732,6 +777,7 @@ int main(int argc, char **argv){
                 double next = until;
                 if(key_pos < nkeys && keys[key_pos].t < next) next = keys[key_pos].t;
                 if(mouse_pos < nmice && mice[mouse_pos].t < next) next = mice[mouse_pos].t;
+                if(joy_pos < njoys && joys[joy_pos].t < next) next = joys[joy_pos].t;
                 until_c = cpu.cycles + (uint64_t)((next - now) * emu_ips) + 1;
             }
             if(cpu.halted){

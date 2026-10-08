@@ -17,6 +17,7 @@ In build/selftest (a project as a game's would be, see kit.py):
      game/PMODE/PMODE.EXE, tests/cdrom/CDROM.ASM into game/CDROM/CDROM.EXE,
      tests/vgamode/VGAMODE.ASM into game/VGAMODE/VGAMODE.EXE,
      tests/gameport/GAMEPORT.ASM into game/GAMEPORT/GAMEPORT.EXE,
+     tests/joy/JOY.ASM into game/JOY/JOY.EXE,
      tests/mouse/MOUSE.ASM into game/MOUSE/MOUSE.EXE,
      tests/rwatch/RWATCH.ASM into game/RWATCH/RWATCH.EXE,
      tests/strreg/STRREG.ASM into game/STRREG/STRREG.EXE,
@@ -76,7 +77,10 @@ In build/selftest (a project as a game's would be, see kit.py):
      4F01h, 4F02h with modes 101h and 103h, 4F03h) and says
      "vgamode ok"; GAMEPORT.EXE, which reads the game port as a PC
      without a joystick has it (FFh, the axis bits never falling after
-     the one-shots are started) and says "gameport ok"; MOUSE.EXE, which
+     the one-shots are started) and says "gameport ok"; JOY.EXE, which
+     with a scripted stick (-joy) finds its buttons, its two one-shots
+     running as long as the script says and no second stick, and says
+     "joy ok"; MOUSE.EXE, which
      checks the INT 33h driver's ranges, position, sensitivity, saved state,
      movement and button callbacks from three scripted events, and its cursor
      in a PNG; RWATCH.EXE, whose
@@ -1373,6 +1377,7 @@ def main():
           f'RELMOD.MOD %d bytes, %d offsets; PMODE.EXE {make_exe("PMODE")} bytes; '
           f'CDROM.EXE {make_exe("CDROM")} bytes; VGAMODE.EXE {make_exe("VGAMODE")} bytes; '
           f'GAMEPORT.EXE {make_exe("GAMEPORT")} bytes; '
+          f'JOY.EXE {make_exe("JOY")} bytes; '
           f'MOUSE.EXE {make_exe("MOUSE")} bytes; '
           f'RWATCH.EXE {make_exe("RWATCH")} bytes; '
           f'ADLIB.EXE {make_exe("ADLIB")} bytes; '
@@ -1787,6 +1792,15 @@ def main():
     if 'con: gameport ok' not in out:
         print(out)
         raise SystemExit('selftest FAILED: GAMEPORT.EXE (the runner\'s game port)')
+    joys = os.path.join(b, 'joy.joys')
+    with open(joys, 'w') as f:
+        f.write('# a second stick that goes away again before the program looks\n0 1,100,100,3\n0 1,off\n')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-joy', '0', '0,300,600,1',
+               '-joys', joys, 'JOY/JOY.EXE'])
+    print('\n'.join(l for l in out.splitlines() if l.startswith('con:')))
+    if 'con: joy ok' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: JOY.EXE (the runner\'s -joy and -joys)')
     mouse_png = os.path.join(b, 'mouse.png')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1',
                '-mouse', '0.02', '100,60,0', '-mouse', '0.04', '120,70,1',
