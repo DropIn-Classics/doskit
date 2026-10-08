@@ -29,7 +29,8 @@ at run time.
    keyboard, controllers) for Windows, macOS and Linux.
 
 docs/METHOD.md says how each step goes and what was learned doing it;
-docs/NEW-PROJECT.md how to start a new game.
+docs/NEW-PROJECT.md how to start a new game; docs/LEAD.md how one
+agent session leads others working on it.
 
 ## Layout
 
