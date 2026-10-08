@@ -28,6 +28,10 @@ uint8_t vga_inb(uint16_t port);
 void vga_write(uint16_t offset, uint8_t value);
 uint8_t vga_read(uint16_t offset);
 
+/* Before any mode set the registers are text mode 3's, as DOS leaves the
+ * card (the retrace status runs at 70 Hz; the text itself is not drawn
+ * by vga_render). */
+
 /* INT 10h AH=00h: mode 12h (640x480, 16 colours), 0Dh or 0Eh (320x200
  * and 640x200, 16 colours, scan-doubled) or 13h (320x200, 256 colours,
  * chain-4; any other number too); the registers the BIOS sets, memory
