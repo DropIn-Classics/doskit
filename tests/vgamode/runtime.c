@@ -5,6 +5,7 @@
  * The VESA modes 101h and 103h: size and rate, then planar with a
  * narrowed line as Pinball Illusions sets them (the picture in the
  * middle of the mode's width).
+ * The state before any mode set (text mode 3's timing and retrace).
  * Prints "vga modes ok", exit status 0, or what went wrong. */
 #include <math.h>
 #include <stdio.h>
@@ -109,9 +110,27 @@ static int check_vesa(int mode, int w, int h, double hz)
     return 0;
 }
 
+/* before any mode set: text mode 3's timing, and a wait for the
+ * retrace's start (3DAh bit 3) ends within one frame's reads */
+static int check_start(void)
+{
+    int n = 0;
+
+    if (fabs(vga_refresh_hz() - 70.08) > 0.05) {
+        printf("start: %.2f Hz, not 70.08\n", vga_refresh_hz());
+        return 1;
+    }
+    while (!(vga_inb(0x3DA) & 8))
+        if (++n > 1000) {
+            printf("start: no retrace in 1000 reads\n");
+            return 1;
+        }
+    return 0;
+}
+
 int main(void)
 {
-    if (check(0x0D, 320) || check(0x0E, 640) || check_latch()
+    if (check_start() || check(0x0D, 320) || check(0x0E, 640) || check_latch()
         || check_vesa(0x101, 640, 480, 59.94) || check_vesa(0x103, 800, 600, 60.32)
         || vga_set_mode_vesa(0x105, 1) || check(0x0D, 320))
         return 1;

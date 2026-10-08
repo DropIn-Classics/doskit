@@ -44,6 +44,23 @@ int rm_load_exe(const char *path, size_t want_size, const char *want_sha256,
     }
 
     memset(mem, 0, sizeof mem);
+    /* the BIOS's data area as the runner sets it (tools/run/bios.c):
+     * 80x25 colour text mode 3 on the CRTC at 3D4h (vga.c starts in it),
+     * 640 KB, the keyboard buffer empty */
+    fww(0x40, 0x10, 0x0021);
+    fww(0x40, 0x13, 640);
+    fww(0x40, 0x1A, 0x001E);
+    fww(0x40, 0x1C, 0x001E);
+    fwb(0x40, 0x49, 0x03);
+    fww(0x40, 0x4A, 80);
+    fww(0x40, 0x4C, 4096);
+    fww(0x40, 0x63, 0x03D4);
+    fww(0x40, 0x80, 0x001E);
+    fww(0x40, 0x82, 0x003E);
+    fwb(0x40, 0x84, 24);
+    fww(0x40, 0x85, 16);
+    fwb(0x40, 0x87, 0x60);
+    fwb(0x40, 0x88, 0x09);
     /* the image: from the header's end to the size in the header */
     hdr = (size_t)sw(f + 8) * 16;
     image = (size_t)(sw(f + 4) - 1) * 512 + (sw(f + 2) ? sw(f + 2) : 512) - hdr;
