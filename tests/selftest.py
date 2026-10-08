@@ -1569,8 +1569,16 @@ def main():
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-break', 'CODE:0026',
                '-dump', 'counter', '2', '-ram', os.path.join(b, 'orig.ram'),
                '-mem', os.path.join(b, 'orig.mem'),
-               '-vram', os.path.join(b, 'orig.vram'), 'HELLO/HELLO.EXE'])
+               '-vram', os.path.join(b, 'orig.vram'), '-dac', os.path.join(b, 'orig.dac'),
+               '-vgastate', 'HELLO/HELLO.EXE'])
     print('\n'.join(l for l in out.splitlines() if l.startswith(('con:', 'break', 'dump'))))
+    # -dac: the 256 colours, the first 32 as -vgastate prints them
+    with open(os.path.join(b, 'orig.dac'), 'rb') as f:
+        dac = f.read()
+    shown = bytes.fromhex(''.join(''.join(m.split()) for m in re.findall(r'dac [0-9A-F]{2}:((?: [0-9A-F]{6})+)', out)))
+    if len(dac) != 768 or len(shown) != 96 or dac[:96] != shown:
+        raise SystemExit('selftest FAILED: -dac is not the 768 bytes of the DAC -vgastate shows')
+    print('-dac: 768 bytes, the first 32 colours as -vgastate shows them')
     if 'con: hello from doskit' not in out:
         raise SystemExit('selftest FAILED: no console line from HELLO.EXE')
     with open(os.path.join(b, 'orig.ram'), 'rb') as f, open(os.path.join(b, 'orig.mem'), 'rb') as g:

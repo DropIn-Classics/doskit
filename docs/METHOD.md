@@ -209,7 +209,7 @@ the Nth pass, input by a frame loop's passes; `-keysat ADDR FILE` for
 many), `-watch ADDR` (who writes a byte, when),
 `-dump ADDR LEN`, `-dumpevery DT` (a time series), `-trace FILE N`,
 `-dos` (every INT 21h call with its file), `-intwatch NN`, `-prof`,
-`-ram`/`-vram` (memory for memcmp.py), `-wav`, `-cdwav`, `-oplwav`, `-put GUEST HOST` (a
+`-ram`/`-vram` (memory for memcmp.py), `-dac` (the 256 colours), `-wav`, `-cdwav`, `-oplwav`, `-put GUEST HOST` (a
 configuration file the set-up program would have written), `-loadfix`
 (load above 64 KB: EXEPACK's unpacker fails in a program loaded below
 it, e.g. a driver EXECed by a small program). run.py translates
