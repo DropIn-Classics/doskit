@@ -67,6 +67,20 @@ a point below.
    instead: the app must be downloaded and opened by the player so
    Gatekeeper can check it. No game files or personal information are
    sent. README.txt describes the check, confirmation and opt-out.
+8. **Removing what the port copied.** Each package carries a script
+   beside README.txt (`port/dist/uninstall.sh` and `uninstall.cmd`, from
+   the template; the Mac package has the first as `uninstall.command`).
+   It removes only what the program put into the data folder of point
+   4, and asks first, twice: whether to remove the copied game files
+   (`game` there, and a `game` an old version left beside the
+   program), then whether to remove the saves and settings too (the
+   whole data folder). The default is no; where it cannot ask (no
+   terminal) it removes nothing. `--yes` answers the first question
+   with yes and the second with no, `--yes --all` both with yes. It
+   never touches the program's own folder, which the player unpacked
+   by hand and deletes by hand, and it is the one thing beside the
+   program that is not needed to play. README.txt's "Removing" says
+   this in the platform's words.
 
 ## The packages
 
@@ -77,6 +91,7 @@ each unpacking into one folder of the same name that holds:
 |---|---|---|---|
 | program | `SLUG.exe` | `SLUG`, `libSDL2-2.0.so.0` | `SLUG.app` |
 | README.txt | yes | yes | yes |
+| removing | `uninstall.cmd` | `uninstall.sh` | `uninstall.command` |
 | licences | `LICENCE-micromod.txt` | `LICENCE-micromod.txt`, `LICENCE-SDL2.txt` | `LICENCE-micromod.txt`, `LICENCE-SDL2.txt` |
 
 Beside the three packages each release carries `latest.json`, which

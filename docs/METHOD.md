@@ -314,9 +314,13 @@ it into its audio callback (cda_mix).
 **The platform.** `platform.h`: a window showing an indexed picture in
 the 4:3 of a VGA screen (Alt+Enter full screen; Print Screen writes the
 picture shown as screenshot_NNNN.png, `shot.h`; full screen on a Steam
-Deck), PC scan codes, a monotonic clock, an audio callback, the mouse.
+Deck), PC scan codes, a monotonic clock, an audio callback, the mouse
+(as a pointer on the picture with its clicks, `plat_mouse`, or as a
+device with the buttons held and its movement, `plat_mouse_motion`,
+kept to the window by `plat_mouse_grab`, for a program that read a
+mouse driver).
 `plat_null.c` runs headless on a virtual clock for tests
-(`DK_FRAMES`, `DK_KEYS`, `DK_MOUSE`, `DK_DUMP`, `DK_SHOTS` for PNG
+(`DK_FRAMES`, `DK_KEYS`, `DK_MOUSE`, `DK_MOUSEMOVE`, `DK_DUMP`, `DK_SHOTS` for PNG
 screenshots by picture number). Controllers become keys
 (`pad.h`, a table per situation). `textmode.h` draws an 80x25 screen for
 a setup program in the style of DOS's. `cdimage.h` finds the GOG

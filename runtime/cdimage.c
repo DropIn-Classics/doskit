@@ -260,6 +260,11 @@ static int each_install_dir(const GogRelease *rel, int (*fn)(const char *dir, vo
         ".var/app/com.usebottles.bottles/data/bottles/bottles",
         ".local/share/wineprefixes",
     };
+#ifdef __APPLE__
+    static const int mac = 1;
+#else
+    static const int mac = 0;
+#endif
     const char *wineprefix = getenv("WINEPREFIX");
     char home[SYS_PATH], dir[SYS_PATH];
     Walk w;
@@ -274,6 +279,8 @@ static int each_install_dir(const GogRelease *rel, int (*fn)(const char *dir, vo
     if (snprintf(path, sizeof path, "%s/%s.app", dir, rel->folder) < (int)sizeof path
         && fn(path, ctx))
         return 1;
+    if (mac)
+        return 0;
     w.rel = rel;
     w.fn = fn;
     w.ctx = ctx;
@@ -801,6 +808,78 @@ static int cue_find(const char *dir, const char *name, char *out, size_t n)
     return 1;
 }
 
+static int cue_suffix(const char *name, const char *suffix)
+{
+    size_t len = strlen(name), tail = strlen(suffix);
+
+    return len >= tail && sys_stricmp(name + len - tail, suffix) == 0;
+}
+
+/* Find the enclosing Boxer bundle, whose *.cdmedia folder may hold audio
+ * files named by the cue sheet but kept outside the hard-disk image. */
+static int cue_boxer_dir(const char *dir, char *out, size_t n)
+{
+    char at[SYS_PATH], parent[SYS_PATH];
+
+    snprintf(at, sizeof at, "%s", dir);
+    for (;;) {
+        const char *base = strrchr(at, '/'), *back = strrchr(at, '\\');
+
+        if (back && (!base || back > base))
+            base = back;
+        base = base ? base + 1 : at;
+        if (cue_suffix(base, ".boxer")) {
+            snprintf(out, n, "%s", at);
+            return 1;
+        }
+        if (!at[0] || !sys_parent(at, parent, sizeof parent) || strcmp(at, parent) == 0)
+            return 0;
+        snprintf(at, sizeof at, "%s", parent);
+    }
+}
+
+typedef struct {
+    const char *boxer;
+    const char *leaf;
+    char *out;
+    size_t n;
+    int found;
+} CueCdmedia;
+
+static void cue_cdmedia_entry(void *ctx, const char *name, int is_dir)
+{
+    CueCdmedia *c = (CueCdmedia *)ctx;
+    char dir[SYS_PATH];
+
+    if (c->found || !is_dir || !cue_suffix(name, ".cdmedia"))
+        return;
+    sys_join(dir, sizeof dir, c->boxer, name);
+    c->found = sys_find(dir, c->leaf, c->out, c->n);
+}
+
+/* The Mac GOG Boxer bundle can keep a cue sheet's flat track files in its
+ * sibling *.cdmedia directory. Only use that fallback after the sheet's
+ * own relative path failed. */
+static int cue_find_cdmedia(const char *src_dir, const char *name,
+                            char *out, size_t n)
+{
+    char boxer[SYS_PATH];
+    const char *leaf = strrchr(name, '/'), *back = strrchr(name, '\\');
+    CueCdmedia c;
+
+    if (back && (!leaf || back > leaf))
+        leaf = back;
+    c.boxer = boxer;
+    c.leaf = leaf ? leaf + 1 : name;
+    c.out = out;
+    c.n = n;
+    c.found = 0;
+    if (!*c.leaf || !cue_boxer_dir(src_dir, boxer, sizeof boxer))
+        return 0;
+    sys_list_dir(boxer, cue_cdmedia_entry, &c);
+    return c.found;
+}
+
 /* the next FILE line's name of the sheet `f` into name; 0 at the end */
 static int cue_next_file(FILE *f, char *name, size_t n)
 {
@@ -911,7 +990,8 @@ int cd_copy_disc(const char *cue, const char *dir,
             break;
         }
         while (c.r == 0 && cue_next_file(f, name, sizeof name)) {
-            if (!cue_find(src_dir, name, from, sizeof from)) {
+            if (!cue_find(src_dir, name, from, sizeof from) &&
+                !cue_find_cdmedia(src_dir, name, from, sizeof from)) {
                 copy_fail(&c, "A file the CD's cue sheet names is missing.");
                 break;
             }

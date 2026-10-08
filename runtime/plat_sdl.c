@@ -23,6 +23,7 @@ static uint32_t *argb;
 static int closed;
 static SDL_Rect shown;                  /* the picture, in the renderer's pixels */
 static int mouse_seen, mouse_x, mouse_y, mouse_clicks;  /* window points */
+static int move_seen, move_dx, move_dy, mouse_held, mouse_grabbed;
 
 /* ---- keyboard: a queue of scan code bytes ---- */
 
@@ -101,6 +102,13 @@ static void push_key(int code, int extended, int up)
 }
 
 /* everything still down goes up (the window lost the keyboard) */
+/* a button as plat_mouse_motion gives it */
+static int mouse_bit(int button)
+{
+    return button == SDL_BUTTON_LEFT ? 1 : button == SDL_BUTTON_RIGHT ? 2
+         : button == SDL_BUTTON_MIDDLE ? 4 : 0;
+}
+
 static void release_all(void)
 {
     int i;
@@ -268,6 +276,16 @@ static void toggle_fullscreen(void)
     plat_set_fullscreen(!plat_fullscreen());
 }
 
+void plat_set_vsync(int on)
+{
+#if SDL_COMPILEDVERSION >= SDL_VERSIONNUM(2, 0, 18)
+    if (renderer)
+        SDL_RenderSetVSync(renderer, on ? 1 : 0);
+#else
+    (void)on;
+#endif
+}
+
 int plat_init(const char *title)
 {
     snprintf(app_title, sizeof app_title, "%s", title);
@@ -283,7 +301,8 @@ int plat_init(const char *title)
         fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError());
         return 0;
     }
-    /* no vsync: frame.c paces the pictures by the program's tick */
+    /* no vsync by default: frame.c paces the pictures by the
+     * program's tick (plat_set_vsync asks for tear-free presents) */
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer)
         renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
@@ -330,8 +349,10 @@ int plat_pump(void)
             closed = 1;
             break;
         case SDL_WINDOWEVENT:
-            if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
+            if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
                 release_all();
+                mouse_held = 0;
+            }
             break;
         case SDL_CONTROLLERDEVICEADDED:        /* also those there at the start */
             pad_added(e.cdevice.which);
@@ -350,8 +371,16 @@ int plat_pump(void)
             mouse_seen = 1;
             mouse_x = e.motion.x;
             mouse_y = e.motion.y;
+            move_seen = 1;
+            move_dx += e.motion.xrel;
+            move_dy += e.motion.yrel;
+            break;
+        case SDL_MOUSEBUTTONUP:
+            mouse_held &= ~mouse_bit(e.button.button);
             break;
         case SDL_MOUSEBUTTONDOWN:
+            move_seen = 1;
+            mouse_held |= mouse_bit(e.button.button);
             mouse_seen = 1;
             mouse_x = e.button.x;
             mouse_y = e.button.y;
@@ -434,6 +463,26 @@ void plat_present(const uint8_t *src, int width, int height, const uint32_t pale
     SDL_RenderClear(renderer);
     SDL_RenderCopy(renderer, texture, NULL, &dst);
     SDL_RenderPresent(renderer);
+}
+
+/* SDL's relative mode: the pointer stays where it is, the movement comes
+ * as it left the device */
+void plat_mouse_grab(int on)
+{
+    if (!on == !mouse_grabbed)
+        return;
+    mouse_grabbed = on != 0;
+    SDL_SetRelativeMouseMode(on ? SDL_TRUE : SDL_FALSE);
+    move_dx = move_dy = 0;
+}
+
+int plat_mouse_motion(int *dx, int *dy, int *buttons)
+{
+    *dx = move_dx;
+    *dy = move_dy;
+    *buttons = mouse_held;
+    move_dx = move_dy = 0;
+    return move_seen;
 }
 
 /* the window's points to the renderer's pixels (more on a Retina screen) */

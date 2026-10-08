@@ -109,7 +109,14 @@ In build/selftest (a project as a game's would be, see kit.py):
      files: the copy taken, declined, the two messages, the bar) says
      "dialog ok"; tests/hud/hudtest.c
      (hud.c: the box, a letter, the bar, the size at 800x600, the
-     pictures shown) says "hud ok"; tests/cdaudio/cdatest.c
+     pictures shown) says "hud ok"; tests/opl/opltest.c (opl.c: a
+     note's frequency and level with the rhythm mode off and on, the
+     tom-tom a sine, the cymbal a mixture of high frequencies at its
+     envelope's level, the hi-hat noise, the snare tone and noise, each
+     silent after its key) says "opl ok"; tests/platmouse/platmousetest.c
+     (platform.h's mouse as a device on plat_null.c with DK_MOUSEMOVE:
+     the movement summed and given once, the buttons held, a grab) says
+     "platmouse ok"; tests/cdaudio/cdatest.c
      (cdaudio.c on the cue sheet of step 3: the table, the WAVE's samples,
      the Ogg's tones by loudness, the channels, the clock) says "cdaudio
      ok"; tests/update/updatetest.c
@@ -129,7 +136,10 @@ In build/selftest (a project as a game's would be, see kit.py):
      only when runtime/sdl2-flags.sh finds SDL2; plat_win32.c not here);
   6. new_project.py: a project made from template/ in build/selftest-new
      (the kit linked in as doskit/), its port built with its build.sh and
-     run headless on HELLO's files; its check.py says all ok.  Then one
+     run headless on HELLO's files; its check.py says all ok; its
+     port/dist/uninstall.sh (on Windows uninstall.cmd) run on a made-up
+     data folder: nothing removed unasked, --yes, --yes --all, and (not
+     on Windows) the answers typed on a terminal.  Then one
      chosen from the installed GOG games (DOSKIT_GOG_DIRS naming a folder
      made here: a game's goggame-ID.info and a raw CD image with HELLO's
      files, cd_image below, named by a cue sheet; and one of GOG's older
@@ -253,6 +263,115 @@ def cc(out, srcs, incs=(), defs=(), obj=False):
         print((r.stdout + r.stderr).strip())
         raise SystemExit(f'selftest FAILED: cl {os.path.basename(out)}')
     return out if obj else out + EXE
+
+
+def on_terminal(cmd, env, answers):
+    """runs cmd with a terminal of its own (not on Windows) and types an
+    answer and Enter each time it asks "[y/N] "; its exit status and all
+    it said come back"""
+    import pty
+    import select
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.execvpe(cmd[0], cmd, env)
+    said, sent = b'', 0
+    while True:
+        if not select.select([fd], [], [], 30)[0]:
+            os.kill(pid, 9)
+            break
+        try:
+            more = os.read(fd, 4096)
+        except OSError:                         # Linux: the other end is closed
+            break
+        if not more:
+            break
+        said += more
+        if said.count(b'[y/N] ') > sent and sent < len(answers):
+            os.write(fd, answers[sent].encode() + b'\n')
+            sent += 1
+    status = os.waitpid(pid, 0)[1]
+    return os.WEXITSTATUS(status) if os.WIFEXITED(status) else -1, said.decode(errors='replace')
+
+
+def check_uninstall(new):
+    """the template's uninstall script as the new project `new` got it
+    (uninstall.sh; on Windows uninstall.cmd), in a made-up package folder
+    with a made-up data folder (DK_DATA_DIR, never the user's): asked
+    without a terminal it removes nothing; --yes removes the copied game
+    files there and those left beside the program and keeps the saves;
+    --yes --all removes the data folder; an option it does not know
+    removes nothing; the program's folder always stays.  With a terminal
+    (not on Windows) the answers n and n, Enter and Enter keep
+    everything, y and n remove the game files only, y and y and n and
+    yes the folder."""
+    name = 'uninstall.cmd' if os.name == 'nt' else 'uninstall.sh'
+    src = os.path.join(new, 'port', 'dist', name)
+    text = open(src, 'rb').read()
+    if b'{{' in text or b'testgame' not in text or b'Test Game' not in text:
+        raise SystemExit(f'selftest FAILED: {name}: the template\'s names not filled in')
+    if os.name != 'nt' and not os.access(src, os.X_OK):
+        raise SystemExit(f'selftest FAILED: {name} cannot be executed')
+    root = os.path.join(KIT, 'build', 'selftest-uninstall')
+    pkg, data = os.path.join(root, 'the package'), os.path.join(root, 'data folder')
+    script = os.path.join(pkg, name)
+    cmd = (['cmd', '/c', script] if os.name == 'nt' else ['sh', script])
+    env = dict(os.environ, DK_DATA_DIR=data)
+
+    def fresh(leftover=False):
+        if os.path.isdir(root):
+            shutil.rmtree(root)
+        for d in [pkg, os.path.join(data, 'game', 'SUB'), os.path.join(data, 'save')] + (
+                [os.path.join(pkg, 'game')] if leftover else []):
+            os.makedirs(d)
+            with open(os.path.join(d, 'FILE.DAT'), 'w') as f:
+                f.write('x')
+        shutil.copy(src, script)
+
+    def there():
+        return ''.join(c for c, p in (('g', os.path.join(data, 'game', 'SUB', 'FILE.DAT')),
+                                      ('s', os.path.join(data, 'save', 'FILE.DAT')),
+                                      ('l', os.path.join(pkg, 'game', 'FILE.DAT')),
+                                      ('p', script)) if os.path.isfile(p))
+
+    def unasked(args):
+        # bytes, read here: what Windows' own commands say (choice, pause) is in
+        # the console's code page, not the one Python would decode with
+        r = subprocess.run(cmd + args, capture_output=True, env=env, stdin=subprocess.DEVNULL)
+        return r.returncode, (r.stdout + r.stderr).decode('ascii', errors='replace')
+
+    def expect(what, args, left, code=0, says=None, answers=None, leftover=False):
+        fresh(leftover)
+        if answers is None:
+            got, said = unasked(args)
+        else:
+            got, said = on_terminal(cmd + args, env, answers)
+        if got != code or there() != left or (says and says not in said):
+            print(said)
+            raise SystemExit(f'selftest FAILED: {name} {what}: exit {got} for {code}, '
+                             f'left {there()} for {left}')
+
+    expect('without a terminal', [], 'gslp', says='kept', leftover=True)
+    expect('--yes', ['--yes'], 'sp', says='removed', leftover=True)
+    expect('--yes --all', ['--yes', '--all'], 'p', says='removed')
+    expect('--all alone', ['--all'], 'gsp', code=2)
+    expect('an unknown option', ['--everything'], 'gsp', code=2)
+    fresh()
+    shutil.rmtree(data)
+    got, said = unasked(['--yes', '--all'])
+    if got or 'Nothing removed' not in said or there() != 'p':
+        print(said)
+        raise SystemExit(f'selftest FAILED: {name} with nothing to remove')
+    asked = 'not on a terminal (Windows)'
+    if os.name != 'nt':
+        expect('n, n', [], 'gsp', answers=['n', 'n'], says='Nothing removed')
+        expect('Enter, Enter', [], 'gsp', answers=['', ''], says='Nothing removed')
+        expect('y, n', [], 'sp', answers=['y', 'n'])
+        expect('y, y', [], 'p', answers=['y', 'y'])
+        expect('n, yes', [], 'p', answers=['n', 'yes'])
+        expect('x, maybe', [], 'gsp', answers=['x', 'maybe'], says='Nothing removed')
+        asked = 'asked on a terminal: n n, Enter Enter, y n, y y, n yes, x maybe'
+    print(f'ok   {name}: nothing without a terminal, --yes, --yes --all, unknown options, '
+          f'nothing there; {asked}')
 
 
 def link_dir(target, link):
@@ -810,6 +929,20 @@ def check_gogfind(b):
          '', True),
         ('nothing', None, {}, '', 'HELLO/HELLO.EXE', False),
     ]
+    if sys.platform == 'darwin':
+        # Mac: only the application bundles are searched, not Linux's
+        # folders, menus and Wine prefixes. The old ~/Desktop scan may
+        # prompt for access (presumably; no prompt was observed) and held
+        # the app before it reached its setup screen.
+        linux = [(what + ', not looked at on a Mac', place, files, prefix, must, False)
+                 for what, place, files, prefix, must, ok in cases if ok]
+        cases = [
+            ('the application in ~/Applications', 'Applications/Test Game.app/game.gog', {}, '',
+             '', True),
+            ('the application, with must_have', 'Applications/Test Game.app/game.gog', {}, '',
+             'HELLO/HELLO.EXE', True),
+            ('another application', 'Applications/Other.app/game.gog', {}, '', '', False),
+        ] + linux + [('nothing', None, {}, '', 'HELLO/HELLO.EXE', False)]
     if os.name == 'nt':
         # Windows: GOG Galaxy's folder under %ProgramFiles(x86)%, which is
         # set to the folder made here.  The registry's key of a product ID
@@ -1486,7 +1619,20 @@ def main():
             shift = f.read()[0x417] & 2
         if shift != want:
             raise SystemExit(f'selftest FAILED: -keysat {lines!r} on HELLO.EXE: shift bit {shift}')
-    print('-keysat: the same keys from a file')
+    # several -keysat, each its own list: the first's key at a pass not reached, the second's at the first
+    # (HELLO takes one key a pass)
+    keys2 = os.path.join(b, 'keysat2.txt')
+    with open(keys, 'w') as f:
+        f.write('3 lctrl+\n')
+    with open(keys2, 'w') as f:
+        f.write('1 lshift+\n')
+    run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-keysat', 'CODE:0018', keys, '-keysat', 'CODE:0018', keys2,
+         '-ram', os.path.join(b, 'keyat.ram'), 'HELLO/HELLO.EXE'])
+    with open(os.path.join(b, 'keyat.ram'), 'rb') as f:
+        shift = f.read()[0x417] & 6
+    if shift != 2:
+        raise SystemExit(f'selftest FAILED: two -keysat lists on HELLO.EXE: shift and ctrl bits {shift}, not 2')
+    print('-keysat: the same keys from a file, several lists')
     # a table with more readers than the runner once kept (64): RWATCH.EXE's
     # 200 bytes, each read by its LODSB, the first 100 by its CMP as well
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-rwatch', 'RWATCH.EXE+0004:0000', 'C8',
@@ -1648,6 +1794,43 @@ def main():
             raise SystemExit(f'selftest FAILED: shot.c\'s {name}.png')
         print(f'shot.c {name}.png: {w}x{h}, {os.path.getsize(os.path.join(shots, name + ".png"))}'
               f' bytes for {w * h} pixels')
+    vsync = os.path.join(b, 'vsync')
+    os.makedirs(vsync, exist_ok=True)
+    exe = cc(os.path.join(b, 'vsynctest'), [os.path.join(HERE, 'vsync', 'vsynctest.c')] + [
+        os.path.join(RUNTIME, f) for f in ('plat_null.c', 'shot.c', 'sys.c')])
+    out = subprocess.run(
+        [exe, vsync],
+        cwd=PROJ, capture_output=True, text=True,
+        env=dict(os.environ, DOSKIT_PROJECT=PROJ,
+                 DK_SHOTS='0:' + os.path.join(vsync, 'got0.png') +
+                          ' 1:' + os.path.join(vsync, 'got1.png') +
+                          ' 2:' + os.path.join(vsync, 'got2.png')))
+    if out.returncode or 'vsync ok' not in out.stdout:
+        print(out.stdout + out.stderr)
+        raise SystemExit('selftest FAILED: plat_set_vsync')
+    exe = cc(os.path.join(b, 'platmousetest'), [os.path.join(HERE, 'platmouse', 'platmousetest.c')] + [
+        os.path.join(RUNTIME, f) for f in ('plat_null.c', 'shot.c', 'sys.c')])
+    out = subprocess.run(
+        [exe], cwd=PROJ, capture_output=True, text=True,
+        env=dict(os.environ,
+                 DK_MOUSEMOVE='2:5,-3,1 2:1,1,1 4:0,0,0 6:-7,2,6 8:9,9,0 9:4,0,0'))
+    if out.returncode or 'platmouse ok' not in out.stdout:
+        print(out.stdout + out.stderr)
+        raise SystemExit('selftest FAILED: plat_mouse_motion')
+    print(out.stdout.strip())
+    rgb0 = rgb1 = None
+    for got, exp in (('got0', 'expA'), ('got1', 'expB'), ('got2', 'expA')):
+        w, h, rgb = read_png(os.path.join(vsync, got + '.png'))
+        w2, h2, rgb2 = read_png(os.path.join(vsync, exp + '.png'))
+        if (w, h, rgb) != (w2, h2, rgb2):
+            raise SystemExit(f'selftest FAILED: plat_set_vsync: {got}.png is not {exp}.png')
+        if got == 'got0':
+            rgb0 = rgb
+        if got == 'got1':
+            rgb1 = rgb
+    if rgb1 == rgb0:
+        raise SystemExit('selftest FAILED: plat_set_vsync: the pictures did not change')
+    print('plat_set_vsync off/on/off: the three shots as handed in')
     exe = cc(os.path.join(b, 'vgamodes'), [os.path.join(HERE, 'vgamode', 'runtime.c'),
                                            os.path.join(RUNTIME, 'vga.c')])
     out = run([exe])
@@ -1656,16 +1839,31 @@ def main():
     print(out.strip())
     exe = cc(os.path.join(b, 'cdatest'), [os.path.join(HERE, 'cdaudio', 'cdatest.c')] + [
         os.path.join(RUNTIME, f) for f in ('cdaudio.c', 'cdimage.c', 'plat_null.c', 'sys.c', 'shot.c')])
-    out = run([exe, make_cue()])
+    cue = make_cue()
+    out = run([exe, cue])
     if 'cdaudio ok' not in out:
         raise SystemExit('selftest FAILED: cdaudio.c: ' + out)
     copy = os.path.join(b, 'cuecopy')
     if os.path.isdir(copy):
         shutil.rmtree(copy)
-    out = run([exe, make_cue(), copy])
+    out = run([exe, cue, copy])
     if 'cdaudio ok' not in out or not os.path.isfile(os.path.join(copy, 'MUSIC', 'TRACK03.OGG')):
         raise SystemExit('selftest FAILED: cdimage.c\'s cd_copy_disc: ' + out)
     print('cd_copy_disc: the disc copied, its copy read: ' + out.strip())
+    boxer = os.path.join(b, 'Illusions.boxer')
+    source = os.path.join(boxer, 'C.harddisk', 'illusion', 'Illusions')
+    shutil.copytree(os.path.dirname(cue), source)
+    track = os.path.join(source, 'music', 'track03.ogg')
+    cdmedia = os.path.join(boxer, 'game.cdmedia')
+    os.makedirs(cdmedia)
+    shutil.copy(track, cdmedia)
+    os.remove(track)
+    boxed_cue = os.path.join(source, 'game.inst')
+    boxed_copy = os.path.join(b, 'boxer-cuecopy')
+    out = run([exe, boxed_cue, boxed_copy])
+    if 'cdaudio ok' not in out or not os.path.isfile(os.path.join(boxed_copy, 'MUSIC', 'TRACK03.OGG')):
+        raise SystemExit('selftest FAILED: cdimage.c\'s Boxer .cdmedia fallback: ' + out)
+    print('cd_copy_disc: the Boxer .cdmedia track copied and read: ' + out.strip())
     exe = cc(os.path.join(b, 'launchtest'), [os.path.join(HERE, 'launcher', 'launchtest.c')] + [
         os.path.join(RUNTIME, f) for f in ('launcher.c', 'textmode.c', 'pad.c', 'frame.c', 'vga.c',
                                            'plat_null.c', 'shot.c', 'sys.c')])
@@ -1685,6 +1883,12 @@ def main():
     out = run([exe])
     if 'hud ok' not in out:
         raise SystemExit('selftest FAILED: hud.c: ' + out)
+    print(out.strip())
+    exe = cc(os.path.join(b, 'opltest'), [os.path.join(HERE, 'opl', 'opltest.c'),
+                                           os.path.join(RUNTIME, 'opl.c')])
+    out = run([exe])
+    if 'opl ok' not in out:
+        raise SystemExit('selftest FAILED: opl.c: ' + out)
     print(out.strip())
     check_update(b)
     check_gogfind(b)
@@ -1756,6 +1960,7 @@ def main():
     print(out.stdout.strip())
     if out.returncode:
         raise SystemExit('selftest FAILED: check.py in the new project')
+    check_uninstall(new)
 
     gog = os.path.join(KIT, 'build', 'selftest-gog')
     if os.path.isdir(gog):

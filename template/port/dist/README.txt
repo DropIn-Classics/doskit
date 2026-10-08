@@ -75,6 +75,24 @@ next run. On macOS, U opens the release page; download and open the app
 yourself so Gatekeeper can check it. The settings, saves and the game's
 files stay in the data folder.
 
+Removing
+--------
+
+Everything {{SLUG}} wrote is in the data folder named above: the copy
+of the game's files, your saves and the settings. The script beside
+this file removes it and asks before each step: first whether to remove
+the copied game files, then whether to remove the saves and settings
+too. Nothing is removed unless you answer yes.
+
+    Windows  double click uninstall.cmd (the key Y is yes)
+    macOS    double click uninstall.command, or in the Terminal:
+             sh uninstall.command
+    Linux    in a terminal, in this folder: sh uninstall.sh
+
+Then delete this folder yourself (on a Mac the app too, wherever you
+moved it); the script leaves it alone. Your GOG release is never
+touched.
+
 Keys
 ----
 

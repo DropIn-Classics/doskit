@@ -44,7 +44,8 @@
  *                    by the clock; its interrupt comes at the end of the
  *                    batch the pass is in, as at a breakpoint's
  *   -keysat ADDR FILE  as -keyat for many keys: "N KEY+" or "N KEY-" a line
- *                    (# comments), the key at the Nth pass of ADDR
+ *                    (# comments), the key at the Nth pass of ADDR; may be
+ *                    given for several places, each with its own FILE
  *   -watch ADDR      print each write to the byte at ADDR (one -watch: the last)
  *   -rwatch ADDR LEN which instructions read the LEN bytes at ADDR (hex):
  *                    a count per reader at the end (data reads, not
@@ -236,14 +237,14 @@ static char shot_prefix[260];
 static unsigned shot_index = 0;
 
 /* stop: 0 -log, 1 -break, 2 -poke (pa, pb, pn: where and what it writes),
- * 3 -keyat (sc, down: the key event), 4 -keysat (the events in keysat[],
- * in the order of their passes) */
-typedef struct { Addr a; int stop; int count, hits; Addr pa; uint8_t pb[16]; int pn; int sc, down; } Brk;
+ * 3 -keyat (sc, down: the key event), 4 -keysat (its events keysat[kpos..kend),
+ * in the order of their passes, kpos the next one) */
+typedef struct { Addr a; int stop; int count, hits; Addr pa; uint8_t pb[16]; int pn; int sc, down; int kpos, kend; } Brk;
 static Brk brks[BRK_MAX];
 static int nbrks = 0;
 typedef struct { int pass, sc, down; } PassKey;
 static PassKey keysat[MAXEV];
-static int nkeysat = 0, keysat_pos = 0;
+static int nkeysat = 0;
 
 static Addr watch_addr;
 static int have_watch = 0;
@@ -337,6 +338,7 @@ static int passkey_cmp(const void *a, const void *b){
 static void read_keysat(const char *path){
     FILE *f = fopen(path, "r");
     char line[256];
+    int first = nkeysat;
     if(!f) die("cannot read %s", path);
     while(fgets(line, sizeof(line), f)){
         int n; char k[64];
@@ -349,7 +351,7 @@ static void read_keysat(const char *path){
         nkeysat++;
     }
     fclose(f);
-    qsort(keysat, (size_t)nkeysat, sizeof(PassKey), passkey_cmp);
+    qsort(keysat + first, (size_t)(nkeysat - first), sizeof(PassKey), passkey_cmp);
 }
 static int key_cmp(const void *a, const void *b){
     const KeyEv *x = (const KeyEv*)a, *y = (const KeyEv*)b;
@@ -579,8 +581,9 @@ int main(int argc, char **argv){
             b->a = parse_addr(spec);
             if(!strcmp(a,"-keyat")){ b->stop = 3; b->sc = key_updown(argv[++i], &b->down); }
             else {
-                if(nkeysat) die("one -keysat");
-                b->stop = 4; read_keysat(argv[++i]);
+                b->stop = 4; b->kpos = nkeysat;
+                read_keysat(argv[++i]);
+                b->kend = nkeysat;
             }
             brk_lin[nbrks] = b->a.lin;
             nbrks++; }
@@ -773,9 +776,9 @@ int main(int argc, char **argv){
                     if(brk_lin[i] != lin) continue;
                     b->hits++;
                     if(b->stop == 4){
-                        while(keysat_pos < nkeysat && keysat[keysat_pos].pass < b->hits) keysat_pos++;
-                        for(; keysat_pos < nkeysat && keysat[keysat_pos].pass == b->hits; keysat_pos++)
-                            kbd_key(keysat[keysat_pos].sc, keysat[keysat_pos].down);
+                        while(b->kpos < b->kend && keysat[b->kpos].pass < b->hits) b->kpos++;
+                        for(; b->kpos < b->kend && keysat[b->kpos].pass == b->hits; b->kpos++)
+                            kbd_key(keysat[b->kpos].sc, keysat[b->kpos].down);
                     } else if(b->stop == 3){
                         if(b->hits == b->count){
                             kbd_key(b->sc, b->down);

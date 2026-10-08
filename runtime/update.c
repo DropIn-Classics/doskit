@@ -266,22 +266,59 @@ int update_parse(const char *json, UpdateInfo *info)
     return 1;
 }
 
+/* the numbers of one version's core ("v1.2", ending at `ae`): -1, 0,
+ * 1.  "v1.2" and "v1.2.0" are the same, "v1.10" after "v1.9". */
+static int compare_core(const char *a, const char *ae, const char *b, const char *be)
+{
+    while (a < ae || b < be) {
+        long x = 0, y = 0;
+
+        while (a < ae && isdigit((unsigned char)*a))
+            x = x * 10 + (*a++ - '0');
+        while (b < be && isdigit((unsigned char)*b))
+            y = y * 10 + (*b++ - '0');
+        if (x != y)
+            return x < y ? -1 : 1;
+        while (a < ae && !isdigit((unsigned char)*a))
+            a++;
+        while (b < be && !isdigit((unsigned char)*b))
+            b++;
+    }
+    return 0;
+}
+
+/* the "-" that marks a release candidate ("v1.0-rc2"), or NULL: a dash
+ * before digits ("1-0") stays a separator as before */
+static const char *rc_dash(const char *s)
+{
+    const char *d = strchr(s, '-');
+
+    if (d && isalpha((unsigned char)d[1]))
+        return d;
+    return NULL;
+}
+
 int update_compare(const char *a, const char *b)
 {
+    const char *pa, *pb;
+    int r;
+
     if (*a == 'v' || *a == 'V')
         a++;
     if (*b == 'v' || *b == 'V')
         b++;
-    while (*a || *b) {
-        long x = strtol(a, (char **)&a, 10), y = strtol(b, (char **)&b, 10);
-        if (x != y)
-            return x < y ? -1 : 1;
-        while (*a && !isdigit((unsigned char)*a))
-            a++;
-        while (*b && !isdigit((unsigned char)*b))
-            b++;
-    }
-    return 0;
+    pa = rc_dash(a);
+    pb = rc_dash(b);
+    r = compare_core(a, pa ? pa : a + strlen(a), b, pb ? pb : b + strlen(b));
+    if (r)
+        return r;
+    if (!pa && !pb)
+        return 0;
+    if (!pa)
+        return 1;                       /* the bare version is newer */
+    if (!pb)
+        return -1;
+    return compare_core(pa + 1, pa + 1 + strlen(pa + 1), pb + 1, pb + 1 + strlen(pb + 1));
 }
 
 /* the kept latest.json read; `have` if it names a newer release */

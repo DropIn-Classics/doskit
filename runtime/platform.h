@@ -27,6 +27,11 @@ int plat_has_window(void);
 void plat_set_fullscreen(int on);
 int plat_fullscreen(void);
 
+/* tear-free presents at the panel's rate (1) or paced by the
+ * program's tick as before (0); needs a panel that keeps up with
+ * the emulated refresh rate, else the game runs slower */
+void plat_set_vsync(int on);
+
 /* shows width x height palette indexes with a 0x00RRGGBB palette, in the
  * 4:3 shape of a VGA screen; Alt+Enter switches to the whole monitor */
 void plat_present(const uint8_t *pixels, int width, int height, const uint32_t palette[256]);
@@ -48,6 +53,17 @@ int plat_read_control(void);
  * in *clicks (1 left, 2 right); 0 while it was not moved over the window
  * yet.  The system's pointer is not shown over the window. */
 int plat_mouse(int *x, int *y, int *clicks);
+
+/* The mouse as a device, for a program that read a mouse driver: the
+ * buttons held now in *buttons (1 left, 2 right, 4 middle) and how far
+ * it was moved since the last call in *dx and *dy (the system's counts,
+ * right and down positive); 0 while there was nothing from it yet.
+ * plat_mouse_grab(1) keeps it to the window and gives its movement
+ * without an end at the window's edges, 0 lets it go; without the grab
+ * the movement is that of the pointer over the window.  A window that
+ * loses the keyboard holds no button. */
+void plat_mouse_grab(int on);
+int plat_mouse_motion(int *dx, int *dy, int *buttons);
 
 /* monotonic clock in microseconds */
 uint64_t plat_micros(void);
