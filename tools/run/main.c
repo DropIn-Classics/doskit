@@ -62,6 +62,8 @@
  *                    pm_write has it, for tools/memcmp.py --base)
  *   -vram FILE       write the 256 KB of video memory (planes interleaved,
  *                    byte 4*o+p = plane p, offset o) at the end
+ *   -dac FILE        write the DAC's 256 colours at the end (768 bytes,
+ *                    red, green, blue of 0 to 3Fh each, as port 3C9h reads)
  *   -wav FILE        what the Sound Blaster played
  *   -sb              the Sound Blaster's resets, transfers and unknown DSP
  *                    commands on stderr
@@ -503,7 +505,7 @@ static void put_files(void){
 /* ---------------------------------------------------------------- main */
 int main(int argc, char **argv){
     const char *game = NULL, *state = "build/run/state";
-    const char *ram_file = NULL, *mem_file = NULL, *vram_file = NULL, *wav_file = NULL, *cue = NULL, *cdwav_file = NULL, *oplwav_file = NULL;
+    const char *ram_file = NULL, *mem_file = NULL, *vram_file = NULL, *dac_file = NULL, *wav_file = NULL, *cue = NULL, *cdwav_file = NULL, *oplwav_file = NULL;
     double until = 30.0;
     char prog[260] = "", tail[128] = "";
     const char *stop = "until";
@@ -605,6 +607,7 @@ int main(int argc, char **argv){
         else if(!strcmp(a,"-ram")){ NEED(1); ram_file = argv[++i]; }
         else if(!strcmp(a,"-mem")){ NEED(1); mem_file = argv[++i]; }
         else if(!strcmp(a,"-vram")){ NEED(1); vram_file = argv[++i]; }
+        else if(!strcmp(a,"-dac")){ NEED(1); dac_file = argv[++i]; }
         else if(!strcmp(a,"-wav")){ NEED(1); wav_file = argv[++i]; }
         else if(!strcmp(a,"-dos")) dos_log = 1;
         else if(!strcmp(a,"-cd")) cd_log = 1;
@@ -838,6 +841,7 @@ int main(int argc, char **argv){
     if(ram_file) write_file(ram_file, ram, 0xA0000);
     if(mem_file) write_file(mem_file, ram, RAM_SIZE);
     if(vram_file) write_file(vram_file, vga_vram, sizeof(vga_vram));
+    if(dac_file) write_file(dac_file, &vga_dac[0][0], sizeof(vga_dac));
     if(xtrace_fp) fclose(xtrace_fp);
     write_cover();
     sound_wav_close();
