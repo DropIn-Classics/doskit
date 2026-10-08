@@ -99,6 +99,34 @@ typedef struct {
 } PITCH;
 static PITCH pit[3];
 static uint8_t port61 = 0x00;
+
+/* the game port: the four one-shots' times in microseconds (X and Y of
+ * stick 0, of stick 1; below 0 with no stick), the buttons held and the
+ * instruction at which the port was written last (before the first write
+ * the one-shots have run out).  Counted in instructions, not by emu_now's
+ * sum, so that a program polling the port finds the same count for the
+ * same stick wherever in a run it asks: a one-shot of X microseconds is
+ * high for the X * ips / 1,000,000 instructions after the write. */
+static int joy_axis[4] = { -1, -1, -1, -1 };
+static uint8_t joy_buttons = 0;
+static uint64_t joy_started = 0;
+static int joy_running = 0;
+
+void joy_input(int stick, int x_us, int y_us, unsigned buttons){
+    stick = stick ? 2 : 0;
+    joy_axis[stick] = x_us < 0 ? -1 : x_us;
+    joy_axis[stick + 1] = x_us < 0 ? -1 : y_us;
+    joy_buttons = (uint8_t)((joy_buttons & ~(3 << stick)) | (x_us < 0 ? 0 : (buttons & 3) << stick));
+}
+
+static uint8_t joy_read(void){
+    uint8_t r = (uint8_t)(~joy_buttons << 4);
+    double since = (double)(cpu.cycles - joy_started) * 1e6;
+    int i;
+    for(i = 0; i < 4; i++)
+        if(joy_axis[i] < 0 || (joy_running && since < joy_axis[i] * emu_ips)) r |= (uint8_t)(1 << i);
+    return r;
+}
 static unsigned long pit0_irqs = 0;
 
 static void pit_init(void){
@@ -268,10 +296,10 @@ uint8_t io_r8(uint16_t p){
     case 0x70: return cmos_idx;
     case 0x71: return 0;
     case 0x92: return (uint8_t)(kbd_a20 ? 0x02 : 0x00);
-    case 0x201: return 0xFF;                    /* game port: nothing attached, the
-                                                   buttons up and the axis bits never
-                                                   falling (0 would be a stick at its
-                                                   upper left) */
+    case 0x201: return joy_read();              /* game port: with nothing attached
+                                                   FFh, the buttons up and the axis
+                                                   bits never falling (0 would be a
+                                                   stick at its upper left) */
     case 0x388: case 0x389: return opl_io_status();
     }
     if(dma_is_port(p)) return dma_read(p);
@@ -297,7 +325,7 @@ void io_w8(uint16_t p, uint8_t v){
     case 0x70: cmos_idx = v; return;
     case 0x71: return;
     case 0x92: a20_set(v & 2); return;
-    case 0x201: return;
+    case 0x201: joy_started = cpu.cycles; joy_running = 1; return;
     case 0x388: adlib_idx = v; return;
     case 0x389: opl_io_write(adlib_idx, v); return;
     }

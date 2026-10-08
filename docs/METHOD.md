@@ -162,7 +162,8 @@ run or marked as read from the code ("presumably", "not checked").
 in `dosrun`: a 386 CPU (real mode; protected mode without paging and
 task switches, V86 mode; see the top of "protected mode" in
 tools/run/cpu.c; INT 15h AH=87h/88h/89h), VGA (planar, chain-4, Mode X, the
-retrace), PIT/PIC/keyboard, a Microsoft-compatible INT 33h mouse, BIOS,
+retrace), PIT/PIC/keyboard, a Microsoft-compatible INT 33h mouse, a game
+port (201h; no stick unless `-joy` gives one), BIOS,
 both 8237 DMA controllers and a Sound Blaster 16
 (DSP and mixer configuration, so the game's own sound drivers run; `-wav`
 writes what it played, `-sb` its transfers), an OPL2 at 388h (its timers,
@@ -202,7 +203,12 @@ Linux; this change was not checked on Windows or macOS.
 Useful options (all at the top of `tools/run/main.c`): `-key T KEY`,
 `KEY+`/`KEY-`, `-keys FILE` (key scripts); `-mouse T X,Y,B`, `-mice FILE`
 (absolute virtual coordinates and a left/right/middle button mask; events,
-button counts and callbacks happen on the emulated clock); `-shot`, `-shotevery`
+button counts and callbacks happen on the emulated clock); `-joy T N,X,Y,B`,
+`-joys FILE` (stick N, 0 or 1, at the game port from T on: X and Y the
+microseconds its one-shots stay high after a write to 201h, some 570 for a
+PC's stick in the middle, B its two buttons; `N,off` takes it away. What a
+program counts in its polling loop then follows from the emulated clock,
+so from `-ips`); `-shot`, `-shotevery`
 (pictures); `-break ADDR[#N]` (stop at the Nth pass), `-log ADDR`
 (registers at each pass), `-keyat ADDR[#N] KEY+` (a key down or up at
 the Nth pass, input by a frame loop's passes; `-keysat ADDR FILE` for
