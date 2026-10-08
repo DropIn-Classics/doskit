@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Everything that must hold before a commit of a project.
 
-    check.py [HINTS...]
+    check.py [--fresh] [HINTS...]
 
   * every program with a hints file in src/ (or the ones named) rebuilds
-    byte for byte (build.py);
+    byte for byte (build.py). A rebuild that held is remembered in
+    build/check/ with a hash of what it depends on: the hints file, the
+    files it names (the program, an offrel list) and the kit's tools.
+    While none of them changed, the program is not built again (`ok ...
+    (cached)`); --fresh builds every one;
   * every hints file with a block carried over by xfer.py has it up to
     date;
   * every header written by symmap.py (found by its first line, anywhere
@@ -16,11 +20,11 @@
 
 Exit status 0 when all holds, and the last line says `all ok`.  The
 pre-commit hook (hooks/pre-commit) runs it."""
-import os, re, subprocess, sys, time
+import glob, hashlib, os, re, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from kit import hints_files, project_root
+from kit import build_dir, hints_files, project_root
 import symmap, xfer
 
 SKIP_DIRS = {'build', 'game', '.git', '__pycache__'}
@@ -38,6 +42,40 @@ def report(bad, what, rc, out):
         print(f'FAIL {what}\n' + '\n'.join('     ' + l for l in out.splitlines()[-15:]))
     else:
         print(f'ok   {last}')
+
+
+def build_key(hints):
+    """a hash of what a rebuild from these hints depends on"""
+    from disasm import program_path
+    h = hashlib.sha256()
+    files = [hints]
+    for line in open(hints, encoding='utf-8'):
+        f = line.split(';', 1)[0].split()
+        if len(f) > 1 and f[0] in ('exe', 'pmax', 'bin', 'le', 'offrel'):
+            files.append(program_path(f[1]))
+    files += sorted(glob.glob(os.path.join(HERE, '*.py')))
+    for path in files:
+        h.update(os.path.basename(path).encode() + b'\0')
+        with open(path, 'rb') as fh:
+            h.update(hashlib.sha256(fh.read()).digest())
+    return h.hexdigest()
+
+
+def cached(hints, key):
+    """the verdict of the last rebuild that held with this key, or None"""
+    try:
+        with open(build_dir('check', os.path.basename(hints)), encoding='utf-8') as f:
+            was, verdict = f.read().split('\n', 1)
+    except (OSError, ValueError):
+        return None
+    return verdict.strip() if was == key else None
+
+
+def remember(hints, key, verdict):
+    path = build_dir('check', os.path.basename(hints))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(key + '\n' + verdict + '\n')
 
 
 def provenance(root):
@@ -81,21 +119,29 @@ def symmap_headers(root):
 def main():
     t0 = time.time()
     root = project_root()
-    hints = sys.argv[1:] or hints_files()
+    fresh = '--fresh' in sys.argv[1:]
+    named = [a for a in sys.argv[1:] if a != '--fresh']
+    hints = named or hints_files()
     bad = []
     for h in hints:
+        name = os.path.basename(h)
+        key = build_key(h)
+        verdict = None if fresh else cached(h, key)
+        if verdict:
+            print(f'ok   {name}: {verdict} (cached)')
+            continue
         rc, out = run([os.path.join(HERE, 'build.py'), h])
         # build.py's verdict line; a list of instructions written as DB
         # may follow it
         last = next((l for l in reversed(out.splitlines())
                      if ': IDENTICAL (' in l or ': differs (' in l), '')
-        name = os.path.basename(h)
         if rc or 'IDENTICAL' not in last:
             bad.append(name)
             print(f'FAIL {name}\n' + '\n'.join('     ' + l for l in out.splitlines()[-15:]))
         else:
             print(f'ok   {name}: {last.split(";")[0]}')
-    if not sys.argv[1:]:
+            remember(h, key, last.split(';')[0])
+    if not named:
         why = provenance(root)
         report(bad, 'PROVENANCE.md', 1 if why else 0, why or 'PROVENANCE.md there and filled in')
         for src, dst in carried_blocks(hints):

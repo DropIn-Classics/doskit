@@ -1376,6 +1376,21 @@ def main():
     print(out)
     if not out.splitlines()[-1].startswith('all ok'):
         raise SystemExit('selftest FAILED: check.py')
+    # a second run takes the rebuilds that held from build/check/; a hints
+    # file changed since, or --fresh, builds again
+    again = run([py, os.path.join(TOOLS, 'check.py')])
+    if not re.search(r'HELLO\.hints: .* \(cached\)', again) or \
+            not again.splitlines()[-1].startswith('all ok'):
+        raise SystemExit('selftest FAILED: check.py did not take its cache\n' + again)
+    hello = os.path.join(PROJ, 'src', 'HELLO.hints')
+    with open(hello, 'a') as f:
+        f.write('; changed\n')
+    again = run([py, os.path.join(TOOLS, 'check.py'), 'src/HELLO.hints'])
+    if '(cached)' in again or not again.splitlines()[-1].startswith('all ok'):
+        raise SystemExit('selftest FAILED: check.py cached a changed hints file\n' + again)
+    again = run([py, os.path.join(TOOLS, 'check.py'), '--fresh', 'src/HELLO.hints'])
+    if '(cached)' in again:
+        raise SystemExit('selftest FAILED: check.py --fresh took its cache\n' + again)
     # MULTISEG's instructions as the assembler writes them, none as DB (a
     # far call in its own segment, the word forms, the full displacement)
     if not re.search(r'MULTISEG\.hints: .* 0 as DB', out):
