@@ -321,7 +321,20 @@ kept to the window by `plat_mouse_grab`, for a program that read a
 mouse driver).
 `plat_null.c` runs headless on a virtual clock for tests
 (`DK_FRAMES`, `DK_KEYS`, `DK_MOUSE`, `DK_MOUSEMOVE`, `DK_DUMP`, `DK_SHOTS` for PNG
-screenshots by picture number). Controllers become keys
+screenshots by picture number). It has no audio device unless
+`DK_AUDIO=1` or `DK_WAV=file` asks for a virtual one: the audio callback
+is then asked for the frames of the virtual clock's time each time
+`plat_sleep_ms` moves it on (on the program's own thread, a fraction of
+a frame carried), and `DK_WAV` writes them as a WAVE file. That clock
+moves only in `plat_sleep_ms`: what the program does between two sleeps
+takes no time, so the time the original spent inside a timer tick (its
+delays between register writes) is not modelled, a decision to look at
+again if listening shows a need. A port that makes its timer's
+interrupts on its own thread counts them by the samples played and
+stamps its OPL2 writes with their sample (`oplq.h`: `oplq_played`, the
+stamp that count plus a lead; `oplq_render` in the callback makes each
+write at its sample), which runs the same way headless and in a window.
+Controllers become keys
 (`pad.h`, a table per situation). `textmode.h` draws an 80x25 screen for
 a setup program in the style of DOS's. `cdimage.h` finds the GOG
 release and on the first start unpacks its CD image or, for a game
