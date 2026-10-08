@@ -47,6 +47,9 @@ and `doskit:git-committer` for every commit and push, so the checks and
 the message stay uniform. Delegate to them instead of doing their job
 inline. An agent is changed in the kit, not copied here.
 
+When one session leads other sessions working on their own machines and
+branches, the lead and the workers follow doskit/docs/LEAD.md.
+
 ## Provenance (permanent)
 
 PROVENANCE.md is part of the project and binding; it holds in full. In
