@@ -19,6 +19,7 @@ In build/selftest (a project as a game's would be, see kit.py):
      tests/gameport/GAMEPORT.ASM into game/GAMEPORT/GAMEPORT.EXE,
      tests/mouse/MOUSE.ASM into game/MOUSE/MOUSE.EXE,
      tests/rwatch/RWATCH.ASM into game/RWATCH/RWATCH.EXE,
+     tests/strreg/STRREG.ASM into game/STRREG/STRREG.EXE,
      tests/adlib/ADLIB.ASM into game/ADLIB/ADLIB.EXE,
      tests/sb16/SB16.ASM into game/SB16/SB16.EXE, tests/cdplay/CDPLAY.ASM
      into game/CDPLAY/CDPLAY.EXE, tests/country/COUNTRY.ASM into
@@ -81,7 +82,10 @@ In build/selftest (a project as a game's would be, see kit.py):
      in a PNG; RWATCH.EXE, whose
      table of 200 bytes -rwatch reports with all its 300 readers (an
      instruction and the byte it read; more than a fixed table of 64
-     kept); ADLIB.EXE, which
+     kept); STRREG.EXE, which checks the registers REP STOS and REP MOVS
+     leave (SI untouched by STOS, on the runner's block path of 16 and
+     more elements, in its loop and backwards) and says "strreg ok";
+     ADLIB.EXE, which
      probes the runner's OPL2 as drivers do (the timers' flags in the
      status, masked, cleared, not set before their time) and says "adlib
      ok"; SB16.EXE, which checks the runner's
@@ -1331,6 +1335,7 @@ def main():
           f'INT24.EXE {make_exe("INT24")} bytes; '
           f'COUNTRY.EXE {make_exe("COUNTRY")} bytes; '
           f'IVT.EXE {make_exe("IVT")} bytes; '
+          f'STRREG.EXE {make_exe("STRREG")} bytes; '
           f'REQ.EXE {make_exe("REQ")} bytes; '
           f'MULTISEG.EXE {make_multiseg()} bytes'
           % make_relmod())
@@ -1701,6 +1706,11 @@ def main():
         print(out)
         raise SystemExit('selftest FAILED: unused user interrupt vectors')
     print('IVT: unused user vectors share an IRET; DOS and mouse services still work')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', 'STRREG/STRREG.EXE'])
+    if 'con: strreg ok' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: the registers after REP STOS and REP MOVS')
+    print('REP STOS leaves SI, REP MOVS moves it: block path, loop and backwards')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-requirements', 'REQ/REQ.EXE'])
     want = ('requirements observed:', 'devices: VGA', 'memory: VGA read/write',
             'unknown ports: 123', 'unimplemented DOS: AH=66', 'unimplemented BIOS: INT 10h/AH=FF AL=00',

@@ -879,11 +879,14 @@ static void strop(int op, int sz){
                         ram[d0 + d*4 + 2] = (uint8_t)(v >> 16); ram[d0 + d*4 + 3] = (uint8_t)(v >> 24);
                     }
                 }
+                /* STOS has no source: SI is the program's own and stays. */
                 if(adsz == 16){
-                    REG16(R_ESI) += (uint16_t)len; REG16(R_EDI) += (uint16_t)len;
+                    if(op == 0) REG16(R_ESI) += (uint16_t)len;
+                    REG16(R_EDI) += (uint16_t)len;
                     REG16(R_ECX) = 0;
                 } else {
-                    REG32(R_ESI) += (uint32_t)len; REG32(R_EDI) += (uint32_t)len;
+                    if(op == 0) REG32(R_ESI) += (uint32_t)len;
+                    REG32(R_EDI) += (uint32_t)len;
                     REG32(R_ECX) = 0;
                 }
                 cpu.cycles += cnt;
