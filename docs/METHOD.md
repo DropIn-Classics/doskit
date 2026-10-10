@@ -184,6 +184,15 @@ US locale; other AH=63h subfunctions return AL=FFh and carry set.
 The pointer and byte-pair layout follow Microsoft's
 [MS-DOS Encyclopedia, Function 63h](https://www.pcjs.org/documents/books/mspl13/msdos/encyclopedia/section5/).
 
+`INT 21h AH=52h` returns ES:BX = F000:0EA0, a List of Lists in the MS-DOS 5
+layout of Ralf Brown's Interrupt List (table 01627) holding only what this
+DOS keeps: the first MCB segment at -02h, sector size 512, LASTDRIVE 26,
+boot drive C: and the NUL device header at 22h (attribute 8004h, the end
+of the driver chain, its entries a RETF). There are no DPBs, SFT, CDS,
+FCB table, buffers or CLOCK$/CON drivers in guest memory, so those
+pointers read FFFF:FFFF and their counts 0; a program that walks the SFT
+finds none.
+
 Unused user interrupt vectors (60h..FFh) point to a shared plain IRET
 handler. This lets a DOS extender locate free vectors by comparing their
 far pointers. BIOS, DOS and mouse services retain distinct callback stubs.
