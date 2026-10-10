@@ -62,8 +62,17 @@ frame_set_hud(hud_draw, hud_control);
 With a handler set, `frame.c` keeps the keypad's + - * / from the
 program; a game that needs them for itself cannot have the volume keys
 there.  The box lasts the pictures given (140: two seconds at 70 a
-second).  The volume changed in play is not written back to the settings
-file unless the port saves it at the end.
+second).
+
+Two rules hold for every port:
+
+- The volume changed in play must be written back to the settings file,
+  when it changes or at the latest at a clean exit (`launcher_save` with
+  the same pages, after putting `volume` into the item's value), so that
+  the setup screen shows it after a restart.
+- The mute lasts for the run only.  It is never written to the settings
+  file and is never an item on the setup screen; the silent setting is
+  volume 0.
 
 ## The headphone mix
 
