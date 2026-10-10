@@ -26,7 +26,10 @@ env:
 
 jobs:
   windows:
-    runs-on: windows-latest
+    # pinned to windows-2022: newer MSVCs on the CI runners have
+    # miscompiled ports built from this kit. Revisit only with a build
+    # from a newer compiler tested on Windows first (docs/RELEASE.md).
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
         with:
