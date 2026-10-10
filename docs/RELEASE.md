@@ -118,6 +118,10 @@ must still find its successors. The Mac app's identifier is
 
 - **Windows**: x64, MSVC, the C runtime linked in (`/MT`), the window
   subsystem (no console). SmartScreen: "More info", "Run anyway".
+  CI builds it on the pinned `windows-2022` runner (the template's
+  build.yml), never `windows-latest`: newer MSVCs on the runners have
+  miscompiled ports. Moving the pin needs a build from the newer
+  compiler tested on Windows first.
 - **Linux**: x86_64, built on the oldest Ubuntu runner there is (older
   glibcs); SDL2 built from SDL's release source (its X11, Wayland and
   sound backends loaded only when present), put beside the program,
