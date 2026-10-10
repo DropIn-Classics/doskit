@@ -57,6 +57,8 @@ static char game_root[512], state_root[512];
 
 #define MEM_FIRST 0x0060
 #define MEM_LAST  0x9FC0
+#define LOL_OFF   0x0EA0     /* the List of Lists in segment F000, lol_init */
+#define LOL_RETF  0x0EE8
 
 /* ------------------------------------------------------------------ MCB */
 static void mcb_init(void){
@@ -1121,6 +1123,7 @@ static void dos_int21(void){
             AL = 0; bios_set_cf(0);
         } else { AL = 0xFF; bios_set_cf(1); }
         break;
+    case 0x52: set_sreg(S_ES, 0xF000); BX = LOL_OFF; break;   /* see lol_init */
     case 0x54: AL = 0; break;
     case 0x57: {
         /* a file's date and time: the fixed day at midnight, as the
@@ -1162,6 +1165,42 @@ void dos_loadfix(void){
     mcb_alloc((uint16_t)(0x1000 - MEM_FIRST), 8, &largest);
 }
 
+/* INT 21h AH=52h: ES:BX to the "List of Lists", in the MS-DOS 5 layout
+ * Ralf Brown's Interrupt List gives (INT 21/AH=52h, table 01627), filled
+ * only with what this DOS keeps.  It sits beside the DBCS table at
+ * F000:0E90, from LOL_OFF-0Ch on.  Filled in:
+ *   -02h  first MCB segment (MEM_FIRST, the chain mcb_* walks)
+ *    10h  largest sector size, 512 (as AH=36h says)
+ *    21h  LASTDRIVE, 26 (as AH=0Eh says)
+ *    22h  the NUL device header itself: next FFFF:FFFF (the end of the
+ *         chain, no other driver is modelled), attribute 8004h (character
+ *         device, NUL), strategy and interrupt entries at a RETF, "NUL     "
+ *    43h  boot drive 3 (C:, where COMSPEC points)
+ * There is no DPB chain, SFT, CDS, FCB table, disk buffer, CLOCK$ or CON
+ * driver in guest memory (file handles live in the host side's fh[]), so
+ * their far pointers read FFFF:FFFF, the end-of-list value DOS itself
+ * uses, and the counts beside them 0; the SETVER list pointer is 0000:0000
+ * (none, as RBIL documents it) and everything else is 0.  A program that
+ * walks the SFT finds no table, not an invented one. */
+static void lol_init(void){
+    uint32_t b = 0xF0000 + LOL_OFF;
+    static const uint8_t none[] = { 0x00, 0x04, 0x08, 0x0C, 0x12, 0x16, 0x1A };
+    size_t i;
+    memset(&ram[b - 0x0C], 0, 0x0C + 0x47);
+    st16u(&ram[b - 0x02], MEM_FIRST);
+    st32u(&ram[b - 0x08], 0xFFFFFFFFu);
+    for(i = 0; i < sizeof(none); i++) st32u(&ram[b + none[i]], 0xFFFFFFFFu);
+    st16u(&ram[b + 0x10], 512);
+    ram[b + 0x21] = 26;
+    st32u(&ram[b + 0x22], 0xFFFFFFFFu);
+    st16u(&ram[b + 0x26], 0x8004);
+    st16u(&ram[b + 0x28], LOL_RETF);
+    st16u(&ram[b + 0x2A], LOL_RETF);
+    memcpy(&ram[b + 0x2C], "NUL     ", 8);
+    ram[b + 0x43] = 3;
+    ram[0xF0000 + LOL_RETF] = 0xCB;
+}
+
 void dos_init(const char *game_dir, const char *state_dir){
     size_t l;
     snprintf(game_root, sizeof(game_root), "%s", game_dir);
@@ -1172,6 +1211,7 @@ void dos_init(const char *game_dir, const char *state_dir){
     memset(fh,0,sizeof(fh));
     mcb_init();
     st16u(&ram[0xF0E90], 0);       /* empty DBCS lead-byte table */
+    lol_init();
     cur_psp = 0; nproc = 0;
     dta_seg = 0; dta_off = 0x80;
     for(l=0;l<26;l++) snprintf(cwds[l], sizeof(cwds[0]), "\\");
