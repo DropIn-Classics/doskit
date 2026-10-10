@@ -25,13 +25,15 @@ session uses for commit messages. Do only that; do not edit files.
    must print `selftest ok`; elsewhere what the caller named. If it
    does not pass, do not commit: report the failing lines to the
    caller.
-4. Commit on `master` with a message in plain English that says what
+4. Commit on the current branch with a message in plain English that says what
    changed and why: a short subject line, a blank line, a body if the
-   caller gave one. If the caller gave an attribution line, end the
+   caller gave one. Check `git branch --show-current` first and name the
+   branch in your report. If the current branch is not the one the caller
+   named, stop and report back instead of committing. If the caller gave an attribution line, end the
    message with exactly that line; if not, add none. Pass the message
    as one `-m` for each paragraph (`git commit -m SUBJECT -m BODY -m
    ATTRIBUTION`), not with a heredoc.
-5. Push (`git push`) only if the caller explicitly said to push.
+5. Push (only the current branch, e.g. `git push origin HEAD`) only if the caller explicitly said to push.
 
 ## Never
 
@@ -39,8 +41,13 @@ session uses for commit messages. Do only that; do not edit files.
   the pre-commit hook fails, report its output; do not work around it.
 - `--amend`, `rebase`, `reset --hard`, `push --force`, or anything else
   that rewrites history.
-- Switching branches or committing anywhere but `master`.
+- Switching branches on your own, committing to a branch the caller did
+  not name, or pushing a branch the caller did not name. The lead's
+  `master` is pushed only when the caller says so; a worker's branch is
+  never merged into `master` by you.
 - Inventing an attribution line the caller did not give you.
+- A wait loop built on `pgrep -f`: it matches its own command line and
+  waits forever. Poll a file's mtime or the process by PID instead.
 
 ## Report
 
