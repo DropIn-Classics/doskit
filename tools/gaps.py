@@ -9,15 +9,19 @@ through every segment of class CODE.  --cover takes the file of a run
 with the runner's -cover (run.py -cover FILE ...): a gap in which
 instructions began in that run is marked `RAN` with how many and the
 first of them, so code the analysis misses shows apart from code that
-did not run (the program's first load in the run is taken)."""
+did not run (the program's first load in the run is taken).  For an LE
+image the runner records where the extender mapped each object, and
+those addresses are used instead of the MZ load segment."""
 import argparse, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import disasm
 
 
-def read_cover(path, exe):
+def read_cover(path, p, exe):
     """the image offsets instructions began at in a -cover file's run of
-    the program named exe (its first load)"""
+    the program named exe (its first load).  An LE image (p.kind 'le') is
+    not at the MZ load segment but where the extender mapped its objects,
+    which the load line names as OBJ@LINEAR after the segment."""
     base = os.path.basename(exe.replace('\\', '/')).upper()
     load, lins = None, []
     for line in open(path):
@@ -26,14 +30,23 @@ def read_cover(path, exe):
             continue
         if f[0] == 'load':
             if load is None and f[1].upper() == base:
-                load = int(f[2], 16)
+                load = f[2:]
         else:
             lins.append(int(f[0], 16))
     if load is None:
         raise SystemExit(f'{path}: {base} was not loaded in that run')
-    start = load * 16
-    return {a - start for a in lins if a >= start}
-
+    if p.kind != 'le':
+        start = int(load[0], 16) * 16
+        return {a - start for a in lins if a >= start}
+    maps = []                   # (linear, size, image offset) per object
+    for m in load[1:]:
+        obj, lin = m.split('@')
+        ib, size = p.descs[int(obj) - 1]
+        maps.append((int(lin, 16), size, ib))
+    if not maps:
+        raise SystemExit(f'{path}: no LE object of {base} found in memory in that run '
+                         '(a cover file from an older runner, or the extender had not mapped it)')
+    return {ib + a - lin for a in lins for lin, size, ib in maps if lin <= a < lin + size}
 
 ap = argparse.ArgumentParser()
 ap.add_argument('hints')
@@ -44,7 +57,7 @@ a = ap.parse_args()
 an, em = disasm.generate(a.hints)
 md = an.md
 segs = [S for S in an.segs if S.cls == 'CODE'] if a.seg == 'all' else [an.byname[a.seg]]
-ran = read_cover(a.cover, an.h.exe) if a.cover else None
+ran = read_cover(a.cover, an.p, an.h.exe) if a.cover else None
 
 imm_at = {}
 for (s, o), ins in an.insns.items():

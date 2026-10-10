@@ -91,7 +91,10 @@
  *   -prof            the busiest CS:IP at the end
  *   -cover FILE      every linear address an instruction began at, and the
  *                    programs' load segments, at the end (tools/gaps.py
- *                    --cover tells which of a program's gaps ran)
+ *                    --cover tells which of a program's gaps ran): lines
+ *                    'load NAME SEG', for a program with an LE image that
+ *                    an extender mapped 'load NAME SEG OBJ@LINEAR...' (each
+ *                    LE object found in memory, 1-based, linear hex)
  *   -vgastate        the VGA's registers, DAC and what the CRTC shows, at the end
  *   -v               the devices' and DOS's trace on stderr
  */
@@ -271,10 +274,92 @@ static double dump_every = 0.0, dump_next = 0.0;
 static const char *trace_file = NULL;
 
 /* -cover FILE: the programs loaded (name, load segment) and every linear
- * address an instruction began at, written at the end */
+ * address an instruction began at, written at the end.  For a program
+ * whose file holds an LE image (one an extender such as DOS/4GW maps
+ * itself) each object's linear address is looked up in memory then. */
 static const char *cover_file = NULL;
-static struct { char name[16]; uint16_t load; } cover_loads[64];
+static struct { char name[16]; uint16_t load; char host[260]; } cover_loads[64];
 static int ncover_loads = 0;
+static uint32_t rd32(const uint8_t *p){
+    return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+/* the LE header in a file: the MZ pointer at 3Ch, else the one "LE\0\0"
+ * whose tables fit the file (a bound program); -1 for none */
+static long le_header(const uint8_t *d, long n){
+    long h, found = -1;
+    if(n >= 0x40){
+        h = (long)rd32(d + 0x3C);
+        if(h > 0 && h + 0xB0 <= n && !memcmp(d + h, "LE\0\0", 4)) return h;
+    }
+    for(h = 0; h + 0xB0 <= n; h++){
+        uint32_t obj, nobj, psz;
+        if(memcmp(d + h, "LE\0\0", 4)) continue;
+        obj = rd32(d + h + 0x40); nobj = rd32(d + h + 0x44); psz = rd32(d + h + 0x28);
+        if(!nobj || nobj > 255 || !psz || psz > 65536 || (psz & (psz - 1))) continue;
+        if(obj > (uint32_t)(n - h) || nobj * 24 > (uint32_t)(n - h) - obj) continue;
+        if(found >= 0) return -1;             /* ambiguous */
+        found = h;
+    }
+    return found;
+}
+/* how many instruction starts lie in [a, a+n) */
+static uint32_t cover_hits(uint32_t a, uint32_t n){
+    uint32_t k, c = 0;
+    for(k = 0; k < n && a + k < RAM_SIZE; k++)
+        if(cover_map[(a + k) >> 3] & (1u << ((a + k) & 7))) c++;
+    return c;
+}
+/* append ' OBJ@LINEAR' for each object of the LE image in host whose first
+ * file page is found in memory: at a 16-byte boundary where at least 3/4 of
+ * the page's nonzero bytes are equal (fixups change some), preferring the
+ * place where most instructions began (a staging copy runs none), then the
+ * closest match */
+static void cover_le(FILE *f, const char *host){
+    FILE *in = fopen(host, "rb");
+    uint8_t *d;
+    long n, h, origin = 0, s;
+    uint32_t i, nobj, psz, objoff, pmap, data;
+    if(!in) return;
+    fseek(in, 0, SEEK_END); n = ftell(in); fseek(in, 0, SEEK_SET);
+    if(n <= 0 || !(d = (uint8_t *)malloc((size_t)n))){ fclose(in); return; }
+    if(fread(d, 1, (size_t)n, in) != (size_t)n){ fclose(in); free(d); return; }
+    fclose(in);
+    h = le_header(d, n);
+    if(h < 0){ free(d); return; }
+    /* page data offsets count from the MZ program whose header points here */
+    for(s = 0; s + 0x40 <= h; s++)
+        if(d[s] == 'M' && d[s+1] == 'Z' && s + (long)rd32(d + s + 0x3C) == h){ origin = s; break; }
+    psz = rd32(d + h + 0x28); objoff = rd32(d + h + 0x40); nobj = rd32(d + h + 0x44);
+    pmap = rd32(d + h + 0x48); data = rd32(d + h + 0x80);
+    for(i = 0; i < nobj; i++){
+        const uint8_t *o = d + h + objoff + i * 24;
+        uint32_t size = rd32(o), first = rd32(o + 12), count = rd32(o + 16);
+        const uint8_t *pg, *ent;
+        uint32_t len, nz = 0, k, a, best = 0xFFFFFFFFu, bhits = 0, bscore = 0;
+        long at;
+        if(!count || !first) continue;
+        ent = d + h + pmap + (first - 1) * 4;
+        if(ent + 4 > d + n || ent[3] != 0) continue;          /* not a file page */
+        at = origin + (long)data + (long)(((uint32_t)ent[0] << 16 | ent[1] << 8 | ent[2]) - 1) * psz;
+        len = size < psz ? size : psz;
+        if(at < 0 || at + (long)len > n) continue;
+        pg = d + at;
+        for(k = 0; k < len; k++) if(pg[k]) nz++;
+        if(nz < 32) continue;                                 /* too little to tell */
+        for(a = 0; a + len <= RAM_SIZE; a += 16){
+            uint32_t eq = 0, bad = 0, lim = nz / 4, hits;
+            for(k = 0; k < len && bad <= lim; k++)
+                if(pg[k]){ if(ram[a + k] == pg[k]) eq++; else bad++; }
+            if(bad > lim) continue;
+            hits = cover_hits(a, size);
+            if(best == 0xFFFFFFFFu || hits > bhits || (hits == bhits && eq > bscore)){
+                best = a; bhits = hits; bscore = eq;
+            }
+        }
+        if(best != 0xFFFFFFFFu) fprintf(f, " %u@%X", (unsigned)(i + 1), (unsigned)best);
+    }
+    free(d);
+}
 static void write_cover(void){
     FILE *f;
     uint32_t a;
@@ -282,10 +367,14 @@ static void write_cover(void){
     if(!cover_file) return;
     f = fopen(cover_file, "w");
     if(!f) die("cannot write %s", cover_file);
-    fprintf(f, "# dosrun -cover: 'load NAME SEG' for each program, then the linear\n"
-               "# addresses (hex) instructions began at, ascending\n");
-    for(i = 0; i < ncover_loads; i++)
-        fprintf(f, "load %s %04X\n", cover_loads[i].name, (unsigned)cover_loads[i].load);
+    fprintf(f, "# dosrun -cover: 'load NAME SEG [OBJ@LINEAR...]' for each program (the\n"
+               "# LE objects an extender mapped), then the linear addresses (hex)\n"
+               "# instructions began at, ascending\n");
+    for(i = 0; i < ncover_loads; i++){
+        fprintf(f, "load %s %04X", cover_loads[i].name, (unsigned)cover_loads[i].load);
+        if(cover_loads[i].host[0]) cover_le(f, cover_loads[i].host);
+        fprintf(f, "\n");
+    }
     for(a = 0; a < RAM_SIZE; a += 8){
         uint8_t m = cover_map[a >> 3];
         int k;
@@ -504,7 +593,10 @@ static void on_load(const char *dospath, uint16_t load){
     printf("load %s at %04X t=%.6f\n", dospath, load, emu_now());
     if(cover_file && ncover_loads < 64){
         snprintf(cover_loads[ncover_loads].name, sizeof(cover_loads[0].name), "%s", b);
-        cover_loads[ncover_loads++].load = load;
+        cover_loads[ncover_loads].load = load;
+        if(!dos_host_path(dospath, cover_loads[ncover_loads].host, sizeof(cover_loads[0].host), 0))
+            cover_loads[ncover_loads].host[0] = 0;
+        ncover_loads++;
     }
     if(!first_prog[0]) snprintf(first_prog, sizeof(first_prog), "%s", b);
     for(i=0;i<nbrks;i++){

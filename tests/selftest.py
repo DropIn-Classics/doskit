@@ -1662,6 +1662,44 @@ def main():
         print(out)
         raise SystemExit('selftest FAILED: gaps.py --cover without HELLO\'s words hint')
     print('-cover: the routines of HELLO\'s table ran; gaps.py --cover shows them once unreached')
+    # an LE image runs where its extender mapped the objects, not at the MZ
+    # stub's load segment: the load line names each object's linear
+    # address (OBJ@LINEAR), and gaps.py takes the image offsets from those.
+    # A made-up run of LE.EXE without its words hint: the table's three
+    # routines ran with CODE at 178000h, MORE at 190000h.
+    with open(os.path.join(PROJ, 'src', 'LE.hints')) as f:
+        whole = f.read()
+    nowords = os.path.join(b, 'LENOWORDS.hints')
+    with open(nowords, 'w') as f:
+        f.write(re.sub(r'^words .*\n', '', whole, count=1, flags=re.M))
+    previous_project = os.environ.get('DOSKIT_PROJECT')
+    os.environ['DOSKIT_PROJECT'] = PROJ
+    try:
+        le = disasm.load_program(disasm.Hints(nowords))
+    finally:
+        if previous_project is None:
+            os.environ.pop('DOSKIT_PROJECT', None)
+        else:
+            os.environ['DOSKIT_PROJECT'] = previous_project
+    code_base = le.descs[0][0]
+    targets = [int.from_bytes(le.img[code_base + 6 + 4 * i:code_base + 10 + 4 * i], 'little')
+               for i in range(3)]
+    lecov = os.path.join(b, 'le.cover')
+    with open(lecov, 'w') as f:
+        f.write('load LE.EXE 1234 1@178000 2@190000\n')
+        f.write(''.join(f'{0x178000 + t:X}\n' for t in sorted(targets)))
+    out = run([py, os.path.join(TOOLS, 'gaps.py'), nowords, '--cover', lecov])
+    first = min(targets)
+    if (not re.search(rf'RAN: \d+ instructions, the first at CODE:{first:04X}$', out, re.M)
+            or out.endswith('0 gaps ran in that run')):
+        print(out)
+        raise SystemExit('selftest FAILED: gaps.py --cover does not use the LE objects\' linear addresses')
+    with open(lecov, 'w') as f:
+        f.write('load LE.EXE 1234\n' + ''.join(f'{0x178000 + t:X}\n' for t in targets))
+    out = run([py, os.path.join(TOOLS, 'gaps.py'), nowords, '--cover', lecov], check=False)
+    if 'no LE object' not in out:
+        raise SystemExit('selftest FAILED: gaps.py --cover takes an LE run without object addresses')
+    print('-cover: an LE image\'s gaps ran at the objects\' linear addresses, not the MZ load segment')
     # -rwatch: the table of two pointers is read by one CALL, a word each;
     # counter by INC and ADD (not by the fetches, not by DOS's AH=9)
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-rwatch', 'counter', '6',
