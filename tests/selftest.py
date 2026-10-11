@@ -894,6 +894,84 @@ def check_xfer(py):
     return len(exe)
 
 
+def check_segment_order(py):
+    """Code after data stays there when rebuilding an explicit image layout."""
+    path = os.path.join(PROJ, 'build', 'INTERLEAVE.ASM')
+    with open(path, 'w') as f:
+        f.write(".186\nCODE SEGMENT PARA PUBLIC 'CODE'\n"
+                "entry: MOV AX,DATA\nMOV DS,AX\nCALL FAR PTR tail\nRETF\nCODE ENDS\n"
+                "DATA SEGMENT PARA PUBLIC 'DATA'\nDW 1234H\nDATA ENDS\n"
+                "LAST SEGMENT PARA PUBLIC 'CODE'\ntail: MOV AX,5678H\nRETF\nLAST ENDS\n"
+                "STACK SEGMENT PARA STACK 'STACK'\nDB 10H DUP(?)\nSTACK ENDS\nEND entry\n")
+    assembler = tasm.Assembler(path)
+    assembler.assemble()
+    out = tlink.link([tlink.module_from_asm(assembler, 'INTERLEAVE')], group_classes=False)
+    if (out.order != ['CODE', 'DATA', 'LAST', 'STACK'] or out.byname['DATA']['frame'] != 1 or
+            out.byname['LAST']['frame'] != 2 or out.img[16:18] != b'\x34\x12' or
+            out.img[32:36] != b'\xb8\x78\x56\xcb'):
+        raise SystemExit('selftest FAILED: explicit segment image order')
+    # Ordinary linking must retain class grouping for callers that use it.
+    grouped = tlink.link([tlink.module_from_asm(assembler, 'GROUPED')])
+    if grouped.order != ['CODE', 'LAST', 'DATA', 'STACK']:
+        raise SystemExit('selftest FAILED: default linker class grouping changed')
+    with open(os.path.join(PROJ, 'build', 'files', 'INTERLEAVE.EXE'), 'wb') as f:
+        f.write(tlink.write_mz(out, version=0x30))
+    hints = os.path.join(PROJ, 'build', 'INTERLEAVE.hints')
+    with open(hints, 'w') as f:
+        f.write('exe build/files/INTERLEAVE.EXE\nsegment CODE 0000 CODE\n'
+                'segment DATA 0001 DATA\nsegment LAST 0002 CODE prefix=LAST_\n'
+                'segment STACK 0003 STACK stack size=10\n'
+                'linker tlink 30\nrelocorder original\n')
+    result = run([py, os.path.join(TOOLS, 'build.py'), hints])
+    if 'IDENTICAL' not in result:
+        raise SystemExit('selftest FAILED: interleaved code/data rebuild: ' + result)
+    return len(out.img)
+
+
+def check_compact_tlink(py):
+    """Construct a compact header independently, then rebuild through hints."""
+    with open(os.path.join(PROJ, 'game', 'MULTISEG', 'MULTISEG.EXE'), 'rb') as f:
+        extended = f.read()
+    old_hdr = struct.unpack_from('<H', extended, 8)[0] * 16
+    count = struct.unpack_from('<H', extended, 6)[0]
+    image = extended[old_hdr:]
+    relocs = extended[0x3e:0x3e + 4 * count]
+    header_size = (0x22 + len(relocs) + 511) // 512 * 512
+    for extra in (0, 512):
+        size = header_size + extra
+        header = bytearray(size)
+        header[:0x1c] = extended[:0x1c]
+        struct.pack_into('<HH', header, 2, (size + len(image)) % 512,
+                         (size + len(image) + 511) // 512)
+        struct.pack_into('<H', header, 8, size // 16)
+        struct.pack_into('<H', header, 0x18, 0x22)
+        struct.pack_into('<HBBH', header, 0x1c, 1, 0xfb, 0x20, 0x6a72)
+        header[0x22:0x22 + len(relocs)] = relocs
+        with open(os.path.join(PROJ, 'build', 'files', 'COMPACT.EXE'), 'wb') as f:
+            f.write(header + image)
+        with open(os.path.join(HERE, 'multiseg', 'src', 'MULTISEG.hints')) as f:
+            text = f.read().replace('exe MULTISEG/MULTISEG.EXE', 'exe build/files/COMPACT.EXE')
+        opts = 'layout=compact' + (' header=original' if extra else '')
+        hints = os.path.join(PROJ, 'build', 'COMPACT.hints')
+        with open(hints, 'w') as f:
+            f.write(text.replace('linker tlink 30', 'linker tlink 20 ' + opts))
+        result = run([py, os.path.join(TOOLS, 'build.py'), hints])
+        if 'IDENTICAL' not in result:
+            raise SystemExit('selftest FAILED: compact TLINK rebuild: ' + result)
+    # This count fits a compact header in 512 bytes but forces the extended
+    # header to 1024 bytes. Relocation sites contain only synthetic data.
+    out = tlink.Image()
+    out.img, out.init = bytearray(300), bytearray([1] * 300)
+    out.ss = out.sp = out.cs = out.ip = 0
+    out.relocs = [(i * 2, 0, '') for i in range(114)]
+    encoded = tlink.write_mz(out, version=0x20, layout='compact')
+    if (struct.unpack_from('<H', encoded, 8)[0] != 32 or
+            encoded[0x22:0x22 + 456] != b''.join(struct.pack('<HH', i * 2, 0) for i in range(114)) or
+            any(encoded[0x22 + 456:512]) or encoded[512:] != bytes(out.img)):
+        raise SystemExit('selftest FAILED: compact TLINK size and relocation table')
+    return len(encoded)
+
+
 def check_hdrpad(py):
     """MULTISEG with 512 more zero bytes in its header (as TLINK 5.0 leaves
     at times): rebuilt identical with `linker tlink 30 header=original`,
@@ -1254,6 +1332,47 @@ def check_pmem(py, b):
     print('memcmp.py --base: a changed byte found at COUNT+2')
 
 
+def check_memory_shifts():
+    """Format synthetic byte/word/dword shifts by CL and reassemble them."""
+    import capstone
+    from types import SimpleNamespace
+    from disasm import Formatter, Insn
+    total = 0
+    for bits in (16, 32):
+        # All shift/rotate operations except the duplicate SAL opcode.
+        for width in ((1, 2) if bits == 16 else (1, 2, 4)):
+            image = b''
+            for operation in (0, 1, 2, 3, 4, 5, 7):
+                prefix = b'\x66' if width != 1 and width != bits // 8 else b''
+                image += prefix + bytes([0xd2 if width == 1 else 0xd3,
+                                         0x40 | operation << 3 | (7 if bits == 16 else 3), 4])
+            md = capstone.Cs(capstone.CS_ARCH_X86,
+                             capstone.CS_MODE_16 if bits == 16 else capstone.CS_MODE_32)
+            md.detail = True
+            analysis = SimpleNamespace(w=bits // 8, dflt_ds='CODE',
+                                       p=SimpleNamespace(img=image),
+                                       byname={'CODE': SimpleNamespace(base=0)})
+            formatter = Formatter(analysis)
+            lines = []
+            for ci in md.disasm(image, 0):
+                text = formatter.fmt(Insn('CODE', ci.address, ci, 'CODE', None))
+                lines.append(text)
+            if len(lines) != 7:
+                raise SystemExit('selftest FAILED: memory shifts decoded count')
+            path = os.path.join(PROJ, 'build', 'MEMSHIFT.ASM')
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w') as f:
+                f.write('.386\nCODE SEGMENT ' + ('USE32 ' if bits == 32 else '') +
+                        "PUBLIC 'CODE'\n" + '\n'.join(lines) + '\nCODE ENDS\nEND\n')
+            assembler = tasm.Assembler(path)
+            assembler.assemble()
+            if bytes(assembler.segments['CODE'].data) != image:
+                raise SystemExit(f'selftest FAILED: memory shifts {bits}-bit width {width}: '
+                                 f'{bytes(assembler.segments["CODE"].data).hex()} / {image.hex()}')
+            total += len(lines)
+    return total
+
+
 def check_enc32():
     """tests/enc32/ENC32.ASM: what capstone reads from each 32-bit
     instruction tasm.py makes, and its length, as the line's comment says."""
@@ -1375,6 +1494,7 @@ def main():
 
     step('0. 32-bit instructions (tests/enc32)')
     print(f'{check_enc32()} lines as capstone reads them')
+    print(f'{check_memory_shifts()} memory shifts by CL preserve their width')
 
     step('1. HELLO.EXE assembled and linked')
     print(f'{make_exe()} bytes; FLAT.386 {make_flat()} bytes; LE.EXE {make_le()} bytes; '
@@ -1466,6 +1586,8 @@ def main():
     print('MULTISEG: routines reached through pointers into FOUR, a segment not named CODE')
     print(f'MULTIS2.EXE ({check_xfer(py)} bytes): MULTISEG\'s hints carried by xfer.py '
           'into renamed and shifted code segments, IDENTICAL')
+    print(f'interleaved code/data ({check_segment_order(py)} image bytes): IDENTICAL')
+    print(f'compact TLINK header ({check_compact_tlink(py)} bytes): IDENTICAL')
     print(f'MULTIPAD.EXE ({check_hdrpad(py)} bytes, a longer header): IDENTICAL with '
           'header=original, differs without')
     with open(os.path.join(PROJ, 'build', 'FLAT.ASM')) as f:

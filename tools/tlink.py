@@ -59,17 +59,19 @@ class Image:
     pass
 
 
-def layout(modules):
+def layout(modules, group_classes=True):
     """Assign every piece an absolute offset.  Returns (segments, order) where
     segments maps segname -> dict(start, frame, pieces, cls)."""
     classes = []
     segs_in_class = {}
     segs = {}
+    appearance = []
     for m in modules:
         for p in m.pieces:
             key = p.seg if p.combine != 'PRIVATE' else (p.seg, id(m))
             if key not in segs:
                 segs[key] = {'name': p.seg, 'cls': p.cls, 'pieces': []}
+                appearance.append(key)
                 if p.cls not in segs_in_class:
                     classes.append(p.cls)
                     segs_in_class[p.cls] = []
@@ -77,21 +79,21 @@ def layout(modules):
             segs[key]['pieces'].append(p)
     pos = 0
     order = []
-    for c in classes:
-        for key in segs_in_class[c]:
-            sg = segs[key]
-            first = True
-            for p in sg['pieces']:
-                a = p.align
-                pos = (pos + a - 1) // a * a
-                if first:
-                    sg['start'] = pos
-                    sg['frame'] = pos >> 4
-                    first = False
-                p.base = pos
-                pos += len(p.data)
-            sg['end'] = pos
-            order.append(key)
+    keys = [key for c in classes for key in segs_in_class[c]] if group_classes else appearance
+    for key in keys:
+        sg = segs[key]
+        first = True
+        for p in sg['pieces']:
+            a = p.align
+            pos = (pos + a - 1) // a * a
+            if first:
+                sg['start'] = pos
+                sg['frame'] = pos >> 4
+                first = False
+            p.base = pos
+            pos += len(p.data)
+        sg['end'] = pos
+        order.append(key)
     return segs, order
 
 
@@ -132,8 +134,8 @@ def record_of(starts, off):
     return bisect.bisect_right(starts, off) - 1
 
 
-def link(modules, stack_from=None):
-    segs, order = layout(modules)
+def link(modules, stack_from=None, group_classes=True):
+    segs, order = layout(modules, group_classes=group_classes)
     byname = {}
     for key in order:
         byname.setdefault(segs[key]['name'], segs[key])
@@ -237,9 +239,12 @@ def link(modules, stack_from=None):
     return out
 
 
-def write_mz(out, path=None, reloc_order=None, version=0x50, hdr_len=None):
+def write_mz(out, path=None, reloc_order=None, version=0x50, hdr_len=None, layout='extended'):
     """Build the EXE bytes the way TLINK lays out its header (hdr_len: a
     longer header than the next 512 bytes after the relocations, zeros)"""
+    if layout not in ('extended', 'compact'):
+        raise ValueError(f'unknown TLINK header layout {layout}')
+    rel_start = 0x22 if layout == 'compact' else 0x3E
     img = out.img
     # trailing uninitialised bytes are not stored
     end = len(img)
@@ -249,7 +254,7 @@ def write_mz(out, path=None, reloc_order=None, version=0x50, hdr_len=None):
     uninit = len(img) - end
     rel = out.relocs if reloc_order is None else reloc_order
     nrel = len(rel)
-    need = (0x3E + 4 * nrel + 511) // 512 * 512
+    need = (rel_start + 4 * nrel + 511) // 512 * 512
     if hdr_len is None or hdr_len < need or hdr_len % 16:
         hdr_len = need
     size = hdr_len + len(stored)
@@ -258,10 +263,13 @@ def write_mz(out, path=None, reloc_order=None, version=0x50, hdr_len=None):
     minalloc = (uninit + 15) // 16
     h = bytearray(hdr_len)
     struct.pack_into('<2s13H', h, 0, b'MZ', last, pages, nrel, hdr_len // 16, minalloc,
-                     0xFFFF, out.ss, out.sp, 0, out.ip, out.cs, 0x3E, 0)
-    h[0x1C:0x22] = bytes([0x01, 0x00, 0xFB, version, 0x6A, 0x72])   # TLINK's signature
+                     0xFFFF, out.ss, out.sp, 0, out.ip, out.cs, rel_start, 0)
+    h[0x1C:0x20] = bytes([0x01, 0x00, 0xFB, version])
+    # The compact header stores the marker as a little-endian word;
+    # the extended layout has the marker's two bytes in the other order.
+    h[0x20:0x22] = bytes([0x72, 0x6A] if layout == 'compact' else [0x6A, 0x72])
     for i, (a, fr, _) in enumerate(rel):
-        struct.pack_into('<HH', h, 0x3E + 4 * i, a - fr * 16, fr)
+        struct.pack_into('<HH', h, rel_start + 4 * i, a - fr * 16, fr)
     data = bytes(h) + stored
     if path:
         open(path, 'wb').write(data)

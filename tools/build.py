@@ -177,7 +177,8 @@ def build_once(hints, raw):
     if refused:
         return an, em, a, None, None, refused, name
     m = tlink.module_from_asm(a, name)
-    out = tlink.link([m])
+    # Hints describe the original image order, which may interleave classes.
+    out = tlink.link([m], group_classes=False)
     # line by line, independent of where earlier lines put it: a line is
     # wrong if it has another length, or other bytes outside the fields
     # that hold addresses (those follow from the lines before)
@@ -231,7 +232,8 @@ def build_once(hints, raw):
         rel = reloc_order(out, an)
         if an.h.linker:
             exe = tlink.write_mz(out, reloc_order=rel, version=an.h.linker[1],
-                                 hdr_len=len(an.p.hdr) if an.h.linker[2] else None)
+                                 hdr_len=len(an.p.hdr) if an.h.linker[2] else None,
+                                 layout=an.h.linker[3])
         else:
             exe = write_mz(out, an.p, rel=rel)
     if an.h.keeptail:

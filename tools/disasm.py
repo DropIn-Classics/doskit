@@ -133,6 +133,9 @@ Hints syntax (one per line, ';' starts a comment, numbers are hex):
                                        leaves room after the relocations
                                        beyond the next 512 bytes, as 5.0
                                        does at times: zeros)
+    linker     tlink VER layout=compact    compact header: relocations from
+                                       22h, marker word 6A72h at 20h;
+                                       may also take header=original
     asm        OPTION=VALUE...         how the original's assembler encoded
                                        what has two encodings (tasm.py's
                                        defaults otherwise):
@@ -495,7 +498,7 @@ class Hints:
         self.stop = set()
         self.relocorder = []
         self.keeptail = False
-        self.linker = None        # None: Microsoft LINK's header; ('tlink', VER)
+        self.linker = None        # None: LINK; ('tlink', version, keep_header_size, layout)
         self.noentry = False
         self.offrel, self.offflags = None, 0
         self.asm = {}             # assembler switches (see the docstring)
@@ -589,9 +592,13 @@ class Hints:
                 elif k == 'relocorder':
                     self.relocorder = f[1:]
                 elif k == 'linker':
-                    if f[1] != 'tlink' or len(f) not in (3, 4) or f[3:] not in ([], ['header=original']):
-                        raise ValueError('linker tlink VER [header=original] is the only one')
-                    self.linker = ('tlink', int(f[2], 16), f[3:] == ['header=original'])
+                    opts = f[3:]
+                    if (len(f) < 3 or f[1] != 'tlink' or
+                            len(set(opts)) != len(opts) or
+                            any(o not in ('header=original', 'layout=compact') for o in opts)):
+                        raise ValueError('expected linker tlink VER [header=original] [layout=compact]')
+                    self.linker = ('tlink', int(f[2], 16), 'header=original' in opts,
+                                   'compact' if 'layout=compact' in opts else 'extended')
                 elif k == 'asm':
                     for o in f[1:]:
                         key, val = o.split('=', 1)
@@ -1307,6 +1314,9 @@ class Formatter:
                 out.append(self.imm(ins, op, size))
             elif op.type == x86.X86_OP_MEM:
                 need = m not in ('lea', 'les', 'lds') and (regsize is None or m in ('movzx', 'movsx'))
+                # CL supplies the count, not the memory operand's width.
+                if m in ('shl', 'shr', 'sar', 'sal', 'rol', 'ror', 'rcl', 'rcr'):
+                    need = True
                 if m in ('les', 'lds', 'lea', 'lfs', 'lgs', 'lss'):
                     need = False
                 # a segment register stored with 66h: WORD PTR makes the

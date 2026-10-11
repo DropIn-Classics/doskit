@@ -43,7 +43,11 @@ segment in image order. Where they are: the relocation table's values
 stack segment), what `build.py` reports when a segment is missing, and
 debug information if there is any (`cv4.py` reads CodeView NB08). The
 code segment must be called `CODE`, the one DS normally holds `DATA`
-(the generated ASSUME uses the names). `relocorder` gives the order of
+(the generated ASSUME uses the names). Rebuilding preserves the hints'
+image order even when code follows data; the standalone linker's default
+still groups by class. An independent code/data/code program checks both
+orders and byte-identical rebuilding on Windows (not yet Linux/macOS).
+`relocorder` gives the order of
 the relocation table by the segment holding the site (read it from the
 original's table). `keeptail` keeps what follows
 the image (debug information) as it is.
@@ -65,7 +69,19 @@ default. Borland's TLINK writes 01 00 FB VER 6A 72 at 1Ch and the
 relocations from 3Eh (`linker tlink VER`), in the order it meets the
 fixups in the object records, which the source does not say:
 `relocorder original` takes the order from the original's table (the
-set of relocations is still compared).
+set of relocations is still compared). `layout=compact` selects a shorter
+TLINK header with relocations from 22h and a little-endian marker word
+6A72h at 20h. The version remains explicit; it does not select a layout
+implicitly. The compact option also accepts `header=original` for extra
+zero padding. Synthetic headers check both compact forms on Windows;
+Linux and macOS have not been checked for this option.
+
+Memory shifts and rotates by CL keep an explicit BYTE/WORD/DWORD PTR in
+generated source: CL is the count and cannot determine the operand's
+width. Synthetic instructions verify every shift and rotate operation
+at byte/word widths in 16-bit mode and byte/word/dword widths in 32-bit
+mode by formatting and reassembling. Dword shifts in 16-bit mode have
+not been added to the 16-bit encoder.
 
 **The assembler.** The original was assembled with some assembler whose
 choices `tasm.py` must repeat where an instruction has two encodings.
