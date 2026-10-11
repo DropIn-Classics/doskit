@@ -223,6 +223,70 @@ wait_release:
 	XOR AH,40H
 	OR [failed_flag],AH
 
+	; AX=002FH is MOUSE HARDWARE RESET: it must keep the driver
+	; state, unlike the 0021H software reset. Position and the
+	; 000CH handler set above have to survive it. The position is
+	; set fresh here: the harness moves above already left 123,77
+	; behind.
+	MOV AX,4
+	MOV CX,200
+	MOV DX,100
+	INT 33H
+	MOV AX,2FH
+	INT 33H
+	CMP AX,0FFFFH
+	LAHF
+	AND AH,40H
+	XOR AH,40H
+	OR [failed_flag],AH
+	CMP BX,3
+	LAHF
+	AND AH,40H
+	XOR AH,40H
+	OR [failed_flag],AH
+	MOV AX,3
+	INT 33H
+	CMP CX,200
+	LAHF
+	AND AH,40H
+	XOR AH,40H
+	OR [failed_flag],AH
+	CMP DX,100
+	LAHF
+	AND AH,40H
+	XOR AH,40H
+	OR [failed_flag],AH
+	MOV AX,CODE
+	MOV ES,AX
+	PUSH AX
+	MOV DX,OFFSET mouse_callback
+	XOR CX,CX
+	MOV AX,14H
+	INT 33H
+	CMP CX,7FH
+	LAHF
+	AND AH,40H
+	XOR AH,40H
+	OR [failed_flag],AH
+	CMP DX,OFFSET mouse_callback
+	LAHF
+	AND AH,40H
+	XOR AH,40H
+	OR [failed_flag],AH
+	POP BX
+	MOV AX,ES
+	CMP AX,BX
+	LAHF
+	AND AH,40H
+	XOR AH,40H
+	OR [failed_flag],AH
+	MOV AX,CODE
+	MOV ES,AX
+	MOV DX,OFFSET mouse_callback
+	MOV CX,7FH
+	MOV AX,14H
+	INT 33H
+
 	MOV AX,0BH
 	INT 33H
 	OR CX,DX

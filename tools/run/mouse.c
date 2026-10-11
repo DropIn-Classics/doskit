@@ -440,7 +440,11 @@ static void mouse_int33(void){
         if(BL) copy_to_guest(cpu.sbase[S_ES] + SI, m.profile_names, sizeof(m.profile_names));
         else copy_from_guest(m.profile_names, cpu.sbase[S_ES] + SI, sizeof(m.profile_names));
         AX = 0; break;
-    case 0x002F: reset_driver(1); AX = 0xFFFF; BX = MOUSE_BUTTONS; break;
+    /* 0x002F is MOUSE HARDWARE RESET: it resets the mouse hardware,
+       not the driver state, so unlike 0x0021 it keeps the 0x000C
+       handler, the ranges and the position (RBIL 33002F; a game that
+       registers 0x000C and then calls 0x002F relies on this). */
+    case 0x002F: AX = 0xFFFF; BX = MOUSE_BUTTONS; break;
     case 0x0030: AX = 0xFFFF; break;
     case 0x0031: AX = m.min_x; BX = m.min_y; CX = m.max_x; DX = m.max_y; break;
     case 0x0032: AX = 0xFFF8; BX = 0; CX = 0xE000; DX = 0; break;
