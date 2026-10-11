@@ -19,6 +19,7 @@ In build/selftest (a project as a game's would be, see kit.py):
      tests/gameport/GAMEPORT.ASM into game/GAMEPORT/GAMEPORT.EXE,
      tests/joy/JOY.ASM into game/JOY/JOY.EXE,
      tests/mouse/MOUSE.ASM into game/MOUSE/MOUSE.EXE,
+     tests/pmmouse/PMMOUSE.ASM into game/PMMOUSE/PMMOUSE.EXE,
      tests/rwatch/RWATCH.ASM into game/RWATCH/RWATCH.EXE,
      tests/strreg/STRREG.ASM into game/STRREG/STRREG.EXE,
      tests/adlib/ADLIB.ASM into game/ADLIB/ADLIB.EXE,
@@ -84,7 +85,10 @@ In build/selftest (a project as a game's would be, see kit.py):
      "joy ok"; MOUSE.EXE, which
      checks the INT 33h driver's ranges, position, sensitivity, saved state,
      movement and button callbacks from three scripted events, and its cursor
-     in a PNG; RWATCH.EXE, whose
+     in a PNG; PMMOUSE.EXE, which waits in protected mode for the same
+     events and gets them in its real-mode handler through IRQ 12, the
+     interrupt taken to real mode and back as a DOS extender does, and
+     says "pmmouse ok"; RWATCH.EXE, whose
      table of 200 bytes -rwatch reports with all its 300 readers (an
      instruction and the byte it read; more than a fixed table of 64
      kept); STRREG.EXE, which checks the registers REP STOS and REP MOVS
@@ -1380,6 +1384,7 @@ def main():
           f'GAMEPORT.EXE {make_exe("GAMEPORT")} bytes; '
           f'JOY.EXE {make_exe("JOY")} bytes; '
           f'MOUSE.EXE {make_exe("MOUSE")} bytes; '
+          f'PMMOUSE.EXE {make_exe("PMMOUSE")} bytes; '
           f'RWATCH.EXE {make_exe("RWATCH")} bytes; '
           f'ADLIB.EXE {make_exe("ADLIB")} bytes; '
           f'SB16.EXE {make_exe("SB16")} bytes; CDPLAY.EXE {make_exe("CDPLAY")} bytes; '
@@ -1859,6 +1864,13 @@ def main():
     lit = [(i % w, i // w) for i in range(w * h) if rgb[i*3:i*3+3] != b'\0\0\0']
     if (w, h) != (320, 200) or not (5 <= len(lit) <= 100) or not all(115 <= x <= 138 and 58 <= y <= 80 for x, y in lit):
         raise SystemExit(f'selftest FAILED: the mouse-cursor shot: {w}x{h}, {len(lit)} lit pixels')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1',
+               '-mouse', '0.02', '100,60,0', '-mouse', '0.04', '120,70,1',
+               '-mouse', '0.06', '120,70,0', 'PMMOUSE/PMMOUSE.EXE'])
+    print('\n'.join(l for l in out.splitlines() if l.startswith('con:')))
+    if 'con: pmmouse ok' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: PMMOUSE.EXE (the mouse handlers of a program in protected mode)')
     oplwav = os.path.join(b, 'adlib.wav')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '2', '-oplwav', oplwav, 'ADLIB/ADLIB.EXE'])
     print('\n'.join(l for l in out.splitlines() if l.startswith('con:')))

@@ -136,6 +136,7 @@ double emu_now(void);                 /* instruction-exact emulated time */
 void emu_advance(void);
 void pic_raise(int irq);
 void pic_lower(int irq);
+void pic_unmask(int irq);
 int  pic_pending(void);               /* returns vector or -1 */
 void kbd_key(int scancode, int down); /* scancode | 0xE000 for E0-prefixed */
 void dev_report(void);

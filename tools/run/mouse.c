@@ -5,6 +5,16 @@
  * interface through Microsoft Mouse 7.05.  The cursor is composed onto PNG
  * output rather than written into VGA memory: looking at the screen must not
  * change a run, just as -shot never changes one without it.
+ *
+ * The event handlers (functions 0Ch, 14h, 18h) are real-mode far routines.
+ * With the processor in real or V86 mode they are called on the spot.  In
+ * protected mode they cannot be: there the event is raised as IRQ 12, as a
+ * PS/2 mouse raises it, and the handlers are called from the driver's
+ * INT 74h routine in real mode (the vector and the interrupt are taken
+ * when the first handler is installed).  How the interrupt gets from protected to
+ * real mode is the running program's business (a DOS extender reflects
+ * hardware interrupts it has no handler for, and its real-mode handler
+ * address is one that switches back).
  */
 #include "dosrun.h"
 
@@ -28,6 +38,10 @@
 #define NOTIFY_QUEUE 64
 #define RETURN_CB 0xFE
 #define RETURN_OFF 0x1A00
+#define IRQ_CB 0x74                   /* the INT 74h routine's own callback */
+#define IRQ_OFF 0x1A10
+#define IRQ_LOOP (IRQ_OFF + 8)
+#define MOUSE_IRQ 12
 #define DATA_SEG 0xF000
 #define DATA_OFF 0x1800
 
@@ -77,8 +91,9 @@ typedef struct {
 static MouseState m;
 static int ready;
 static Notify queue[NOTIFY_QUEUE], current;
-static int q_head, q_tail, dispatch_index, callback_active;
+static int q_head, q_tail, dispatch_index, callback_active, irq_active;
 static CPU callback_cpu;
+static uint32_t unused_vector;        /* INT 74h as the BIOS left it */
 
 extern void (*cb_table[256])(void);
 
@@ -229,34 +244,44 @@ static int handler_matches(const Handler *h, const Notify *n, int alternate){
     return 1;
 }
 
-static void far_call_handler(const Handler *h, const Notify *n){
+/* a far CALL of the handler in real or V86 mode, returning to F000:ret */
+static void far_call_handler(const Handler *h, const Notify *n, uint16_t ret){
     uint16_t sp;
-    callback_cpu = cpu;
     sp = (uint16_t)(REG16(R_ESP) - 4);
     REG16(R_ESP) = sp;
-    mem_w16(cpu.sbase[S_SS] + sp, RETURN_OFF);
+    mem_w16(cpu.sbase[S_SS] + sp, ret);
     mem_w16(cpu.sbase[S_SS] + (uint16_t)(sp + 2), DATA_SEG);
     AX = n->condition; BX = n->buttons; CX = n->x; DX = n->y;
     SI = (uint16_t)n->dx; DI = (uint16_t)n->dy;
     set_sreg(S_CS, h->seg); cpu.eip = h->off; cpu.halted = 0;
-    callback_active = 1;
 }
 
-static void dispatch(void){
-    while(!callback_active){
-        Handler *h = NULL;
+/* the next handler that wants the event being delivered, going on to the
+ * next queued event when its handlers are through; NULL when none is left */
+static const Handler *next_handler(void){
+    for(;;){
+        const Handler *h;
+        int alternate = dispatch_index != 0;
         if(dispatch_index == 0) h = &m.handler;
         else if(dispatch_index <= ALT_HANDLERS) h = &m.alt[dispatch_index-1];
         else {
-            if(q_head == q_tail) return;
+            if(q_head == q_tail) return NULL;
             current = queue[q_head]; q_head = (q_head + 1) % NOTIFY_QUEUE;
             dispatch_index = 0; continue;
         }
-        if(handler_matches(h, &current, dispatch_index != 0)){
-            far_call_handler(h, &current); return;
-        }
         dispatch_index++;
+        if(handler_matches(h, &current, alternate)) return h;
     }
+}
+
+/* real or V86 mode: the handlers are called where the program is, and the
+ * processor's state is put back when each returns */
+static void dispatch(void){
+    const Handler *h;
+    if(callback_active || !(h = next_handler())) return;
+    callback_cpu = cpu;
+    far_call_handler(h, &current, RETURN_OFF);
+    callback_active = 1;
 }
 
 static void callback_return(void){
@@ -267,11 +292,37 @@ static void callback_return(void){
         cpu_state_restored();
         cpu.cycles = cycles;
         if(shutdown) cpu.shutdown = 1;
-        callback_active = 0; dispatch_index++;
+        callback_active = 0;
         dispatch();
         cpu_no_iret();
     }
 }
+
+/* The INT 74h routine's callback, reached in real mode at IRQ_LOOP with
+ * the registers saved: calls the next handler, which returns to IRQ_LOOP,
+ * or falls through to the end of interrupt when none is left.  An
+ * interrupt that finds the handlers being called on the spot leaves the
+ * events to that. */
+static void irq_callback(void){
+    const Handler *h;
+    cpu_no_iret();
+    if(callback_active) return;
+    if(!(h = next_handler())){ irq_active = 0; return; }
+    irq_active = 1;
+    far_call_handler(h, &current, IRQ_LOOP);
+}
+
+/* A handler is installed: the driver takes INT 74h and enables IRQ 12.
+ * Until then the vector stays the unused one it was (a DOS extender looks
+ * for free vectors by comparing them), and one the program has set itself
+ * is left alone. */
+static void irq_enable(void){
+    uint32_t mine = ((uint32_t)DATA_SEG<<16) | IRQ_OFF;
+    if(ld32u(&ram[0x74*4]) == unused_vector) st32u(&ram[0x74*4], mine);
+    if(ld32u(&ram[0x74*4]) == mine) pic_unmask(MOUSE_IRQ);
+}
+
+static int protected_mode(void){ return (cpu.cr0 & 1) && !cpu.vm; }
 
 static void notify(uint16_t condition, int16_t dx, int16_t dy){
     int next = (q_tail + 1) % NOTIFY_QUEUE;
@@ -283,7 +334,9 @@ static void notify(uint16_t condition, int16_t dx, int16_t dy){
     n->x = m.x; n->y = m.y; n->dx = dx; n->dy = dy;
     n->modifiers = (shift & 3 ? 0x20 : 0) | (shift & 4 ? 0x40 : 0) |
                    (shift & 8 ? 0x80 : 0);
-    dispatch();
+    if(callback_active || irq_active) return;  /* delivered when the handler returns */
+    if(protected_mode()) pic_raise(MOUSE_IRQ);
+    else dispatch();
 }
 
 void mouse_input(uint16_t x, uint16_t y, uint16_t buttons){
@@ -351,7 +404,9 @@ static void mouse_int33(void){
         else { m.text_screen = CX; m.text_cursor = DX; }
         break;
     case 0x000B: CX = (uint16_t)m.motion_x; DX = (uint16_t)m.motion_y; m.motion_x = m.motion_y = 0; break;
-    case 0x000C: m.handler.mask = CX; m.handler.seg = cpu.sreg[S_ES]; m.handler.off = DX; break;
+    case 0x000C:
+        m.handler.mask = CX; m.handler.seg = cpu.sreg[S_ES]; m.handler.off = DX;
+        irq_enable(); break;
     case 0x000D: m.light_pen = 1; break;
     case 0x000E: m.light_pen = 0; break;
     case 0x000F: if(CX) m.ratio_x = CX; if(DX) m.ratio_y = DX; break;
@@ -373,7 +428,8 @@ static void mouse_int33(void){
     case 0x0014: {
         Handler old = m.handler;
         m.handler.mask = CX; m.handler.seg = cpu.sreg[S_ES]; m.handler.off = DX;
-        CX = old.mask; set_sreg(S_ES, old.seg); DX = old.off; break; }
+        CX = old.mask; set_sreg(S_ES, old.seg); DX = old.off;
+        irq_enable(); break; }
     case 0x0015: BX = (uint16_t)sizeof(m); break;
     case 0x0016: state_save(cpu.sbase[S_ES] + DX); break;
     case 0x0017: AX = state_restore(cpu.sbase[S_ES] + DX) ? 0x0017 : 0xFFFF; break;
@@ -381,7 +437,8 @@ static void mouse_int33(void){
         AX = 0xFFFF;
         if(CX == 0){ memset(m.alt, 0, sizeof(m.alt)); AX = 0x0018; break; }
         for(i=0;i<ALT_HANDLERS;i++) if(m.alt[i].mask == CX || (!m.alt[i].seg && !m.alt[i].off)){
-            m.alt[i].mask = CX; m.alt[i].seg = cpu.sreg[S_ES]; m.alt[i].off = DX; AX = 0x0018; break;
+            m.alt[i].mask = CX; m.alt[i].seg = cpu.sreg[S_ES]; m.alt[i].off = DX; AX = 0x0018;
+            irq_enable(); break;
         }
         break;
     case 0x0019:
@@ -400,7 +457,7 @@ static void mouse_int33(void){
     case 0x0024: BX = 0x0705; CH = 4; CL = 0; break;
     case 0x0025:
         AX = m.cursor_kind == 2 ? 0x2000 : m.cursor_kind == 1 ? 0x1000 : 0;
-        BX = 0; CX = 1; DX = callback_active ? 1 : 0; break;
+        BX = 0; CX = 1; DX = callback_active || irq_active ? 1 : 0; break;
     case 0x0026: BX = m.enabled ? 0 : 1; CX = m.abs_max_x; DX = m.abs_max_y; break;
     case 0x0027:
         AX = m.cursor_kind == 1 ? m.text_start : m.text_screen;
@@ -508,4 +565,23 @@ void mouse_init(void){
     ram[(uint32_t)DATA_SEG*16 + RETURN_OFF + 1] = 0xFF;
     ram[(uint32_t)DATA_SEG*16 + RETURN_OFF + 2] = RETURN_CB;
     ram[(uint32_t)DATA_SEG*16 + RETURN_OFF + 3] = 0xF4;
+    {   /* INT 74h, IRQ 12: the handlers for the queued events, called with
+           every register saved, then the end of interrupt to both PICs */
+        static const uint8_t irq[] = {
+            0x66,0x60,               /* pushad           */
+            0x1E, 0x06,              /* push ds, es      */
+            0x0F,0xA0, 0x0F,0xA8,    /* push fs, gs      */
+            0x0F,0xFF,IRQ_CB,        /* IRQ_LOOP: a handler, back to here */
+            0xB0,0x20,               /* mov al,20h       */
+            0xE6,0xA0,               /* out 0A0h,al      */
+            0xE6,0x20,               /* out 20h,al       */
+            0x0F,0xA9, 0x0F,0xA1,    /* pop gs, fs       */
+            0x07, 0x1F,              /* pop es, ds       */
+            0x66,0x61,               /* popad            */
+            0xCF                     /* iret             */
+        };
+        cb_table[IRQ_CB] = irq_callback;
+        memcpy(&ram[(uint32_t)DATA_SEG*16 + IRQ_OFF], irq, sizeof(irq));
+        unused_vector = ld32u(&ram[0x74*4]);
+    }
 }

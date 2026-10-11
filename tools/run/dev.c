@@ -40,6 +40,12 @@ void pic_lower(int irq){
     if(irq<8) pic[0].irr &= (uint8_t)~(1<<irq);
     else pic[1].irr &= (uint8_t)~(1<<(irq-8));
 }
+/* a driver enabling its interrupt: its line, and the cascade for a line of
+ * the second PIC */
+void pic_unmask(int irq){
+    if(irq<8) pic[0].imr &= (uint8_t)~(1<<irq);
+    else { pic[1].imr &= (uint8_t)~(1<<(irq-8)); pic[0].imr &= (uint8_t)~0x04; }
+}
 int pic_pending(void){
     int i;
     uint8_t act = pic[0].irr & ~pic[0].imr;
