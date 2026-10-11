@@ -41,13 +41,16 @@ Kinds of program:
     dwords are offsets: an instruction's immediate or displacement
     there, else a DD; every other number stays a number.  build.py
     checks that the rebuilt source puts its offsets at exactly those
-    places.
+    places.  With `use16` the image is 16-bit real-mode code instead
+    (offsets, near pointers and `words` tables 16 bits wide, no USE32);
+    `offrel` is for 32-bit images only.
 
 Hints syntax (one per line, ';' starts a comment, numbers are hex):
     exe        GAME/GAME.EXE           an MZ program
     pmax       GAME/GAME.386           a pMAX image
     le         GAME/GAME.EXE           an LE image
-    bin        GAME/GAME.DRV [noentry] a raw 32-bit image
+    bin        GAME/GAME.DRV [noentry] [use16]
+                                       a raw 32-bit (use16: 16-bit) image
     offrel     GAME/GAME.REL [flags=MASK]   the image's offset relocations:
                                        little-endian 32-bit image offsets,
                                        each of a dword holding an offset;
@@ -449,12 +452,18 @@ class LEProgram(PmaxProgram):
 
 
 class RawProgram(PmaxProgram):
-    """A raw 32-bit image: the file itself, one descriptor (base 0, the
-    file's size), entered at 0, no relocations."""
+    """A raw 32-bit (or, with use16, 16-bit) image: the file itself, one
+    descriptor (base 0, the file's size), entered at 0, no relocations."""
     kind = 'bin'
 
-    def __init__(self, path, noentry=False, offrel=None):
+    def __init__(self, path, noentry=False, offrel=None, use16=False):
         d = open(path, 'rb').read()
+        if use16:
+            if offrel is not None:
+                raise SystemExit('offrel lists 32-bit offsets; it is not for a use16 image')
+            if len(d) > 0x10000:
+                raise SystemExit(f'{path}: a use16 image is at most 64 KiB ({len(d)} bytes)')
+            self.bits = 16
         self.file = self.img = d
         self.word0 = self.alloc = self.version = 0
         self.ip = None if noentry else 0
@@ -499,7 +508,7 @@ class Hints:
         self.relocorder = []
         self.keeptail = False
         self.linker = None        # None: LINK; ('tlink', version, keep_header_size, layout)
-        self.noentry = False
+        self.noentry = self.use16 = False
         self.offrel, self.offflags = None, 0
         self.asm = {}             # assembler switches (see the docstring)
         carried = False
@@ -526,6 +535,7 @@ class Hints:
                 if k in ('exe', 'pmax', 'bin', 'le'):
                     self.exe, self.kind = f[1], 'mz' if k == 'exe' else k
                     self.noentry = 'noentry' in f[2:]
+                    self.use16 = 'use16' in f[2:]
                 elif k == 'offrel':
                     self.offrel = f[1]
                     self.offflags = next((int(x[6:], 16) for x in f[2:] if x.startswith('flags=')), 0)
@@ -1588,9 +1598,9 @@ def load_program(h):
     """the program the hints describe, read from the player's files"""
     if h.kind == 'bin':
         return RawProgram(program_path(h.exe), h.noentry,
-                          program_path(h.offrel) if h.offrel else None)
-    if h.offrel or h.noentry:
-        raise SystemExit('offrel and noentry are for a raw image (bin)')
+                          program_path(h.offrel) if h.offrel else None, h.use16)
+    if h.offrel or h.noentry or h.use16:
+        raise SystemExit('offrel, noentry and use16 are for a raw image (bin)')
     return {'pmax': PmaxProgram, 'le': LEProgram}.get(h.kind, Program)(program_path(h.exe))
 
 

@@ -11,7 +11,8 @@ In build/selftest (a project as a game's would be, see kit.py):
      32-bit, the same way into a pMAX image, build/files/FLAT.386 (as a
      project's tool would unpack it) and an LE image with page maps and
      selector fixups, build/files/LE.EXE; tests/raw/RAWDRV.ASM into a raw
-     32-bit image, build/files/RAWDRV.DRV, tests/relmod/RELMOD.ASM into a
+     32-bit image, build/files/RAWDRV.DRV, tests/raw16/RAW16.ASM into a
+     raw 16-bit one, build/files/RAW16.DRV, tests/relmod/RELMOD.ASM into a
      relocatable one, build/files/RELMOD.MOD with its offrel list
      RELMOD.REL (the linker's OFF32 fixups); tests/pmode/PMODE.ASM into
      game/PMODE/PMODE.EXE, tests/cdrom/CDROM.ASM into game/CDROM/CDROM.EXE,
@@ -31,7 +32,8 @@ In build/selftest (a project as a game's would be, see kit.py):
      in reverse order;
   2. check.py: disasm.py makes their sources from tests/hello/src/HELLO.hints
      and tests/flat/src/FLAT.hints, tests/raw/RAWDRV.ASM's raw image from
-     tests/raw/src/RAWDRV.hints, RELMOD's from tests/relmod/src/RELMOD.hints
+     tests/raw/src/RAWDRV.hints, RAW16's (use16, noentry) from
+     tests/raw16/src/RAW16.hints, RELMOD's from tests/relmod/src/RELMOD.hints
      (its offsets exactly the offrel list's, the numbers that look like
      offsets left numbers), build.py rebuilds them byte for byte; RELMOD
      with a dword of a words table taken out of its offrel list fails
@@ -762,6 +764,16 @@ def make_raw():
     a.assemble()
     out = tlink.link([tlink.module_from_asm(a, 'RAWDRV')])
     with open(os.path.join(PROJ, 'build', 'files', 'RAWDRV.DRV'), 'wb') as f:
+        f.write(bytes(out.img))
+    return len(out.img)
+
+
+def make_raw16():
+    """tests/raw16/RAW16.ASM as a raw 16-bit image: the linked image alone"""
+    a = tasm.Assembler(os.path.join(HERE, 'raw16', 'RAW16.ASM'))
+    a.assemble()
+    out = tlink.link([tlink.module_from_asm(a, 'RAW16')])
+    with open(os.path.join(PROJ, 'build', 'files', 'RAW16.DRV'), 'wb') as f:
         f.write(bytes(out.img))
     return len(out.img)
 
@@ -1498,7 +1510,7 @@ def main():
 
     step('1. HELLO.EXE assembled and linked')
     print(f'{make_exe()} bytes; FLAT.386 {make_flat()} bytes; LE.EXE {make_le()} bytes; '
-          f'RAWDRV.DRV {make_raw()} bytes; '
+          f'RAWDRV.DRV {make_raw()} bytes; RAW16.DRV {make_raw16()} bytes; '
           f'RELMOD.MOD %d bytes, %d offsets; PMODE.EXE {make_exe("PMODE")} bytes; '
           f'CDROM.EXE {make_exe("CDROM")} bytes; VGAMODE.EXE {make_exe("VGAMODE")} bytes; '
           f'GAMEPORT.EXE {make_exe("GAMEPORT")} bytes; '
@@ -1540,6 +1552,7 @@ def main():
     with open(os.path.join(PROJ, 'build', 'files', 'REGFORM.BIN'), 'wb') as f:
         f.write(form.segments['CODE'].data)
     shutil.copy(os.path.join(HERE, 'raw', 'src', 'RAWDRV.hints'), os.path.join(PROJ, 'src'))
+    shutil.copy(os.path.join(HERE, 'raw16', 'src', 'RAW16.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'relmod', 'src', 'RELMOD.hints'), os.path.join(PROJ, 'src'))
     shutil.copy(os.path.join(HERE, 'multiseg', 'src', 'MULTISEG.hints'), os.path.join(PROJ, 'src'))
     # every project carries PROVENANCE.md (check.py insists)
@@ -1652,6 +1665,23 @@ def main():
         print(out)
         raise SystemExit('selftest FAILED: RELMOD with a shorter offrel list')
     print('RELMOD with a words table\'s dword left out of its offrel list: build.py refuses it')
+    with open(os.path.join(PROJ, 'build', 'RAW16.ASM')) as f:
+        text = f.read()
+    for want in ('DW L0025', 'DW L002F', 'DW L003B', 'IRQ:', 'MOV AL,[BP+6]', 'IRET'):
+        if want not in text:
+            raise SystemExit(f'selftest FAILED: RAW16.ASM has no {want} (use16)')
+    if 'USE32' in text or 'EAX' in text:
+        raise SystemExit('selftest FAILED: RAW16.ASM read as 32-bit code')
+    print('RAW16: a raw image read as 16-bit code, its entries from a words table')
+    bad = os.path.join(PROJ, 'build', 'RAW16REL.hints')
+    with open(bad, 'w') as f:
+        f.write('bin build/files/RAW16.DRV use16\noffrel build/files/RELMOD.REL\n'
+                'segment CODE 0 CODE\n')
+    out = run([py, os.path.join(TOOLS, 'disasm.py'), bad], check=False)
+    if 'not for a use16 image' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: offrel with a use16 image')
+    print('RAW16 with an offrel list: disasm.py refuses it')
     hints = os.path.join(PROJ, 'src', 'MULTISEG.hints')
     with open(hints) as f:
         whole = f.read()

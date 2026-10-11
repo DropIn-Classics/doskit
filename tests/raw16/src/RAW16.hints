@@ -1,0 +1,13 @@
+; The kit's test of a raw 16-bit image (tests/selftest.py): tests/raw16/RAW16.ASM,
+; written as the image alone into the build folder by the selftest.
+bin        build/files/RAW16.DRV noentry use16
+segment    CODE 0 CODE
+
+words      CODE:001C 3 CODE
+code       CODE:0045 IRQ           ; reached only through the interrupt table
+
+name       CODE:0000 HEADER
+name       CODE:001C ENTRIES
+name       CODE:0022 STATE
+name       CODE:0024 VOLUME
+comment    CODE:001C the host's entry offsets, each entry returns far
