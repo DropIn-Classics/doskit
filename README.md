@@ -87,6 +87,9 @@ agent session leads others working on it.
     out); `frame.h`: pacing at the mode's refresh, keys to the program's
     INT 9 handler (through the player's keymap), a tick callback, a key
     recorder.
+  - `unlzexe.h`: a program packed with LZEXE 0.91 unpacked, as
+    `tools/unlzexe.py` does it; `rm_load_exe` uses it, so a port
+    compiles it with `rmem.c`;
   - `modplay.h` (MOD playback, micromod), `cdaudio.h` (a CD's audio
     tracks from GOG's cue sheet, Ogg Vorbis through stb_vorbis: the table
     of contents, the plays an MSCDEX program asks for, mixed into the

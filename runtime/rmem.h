@@ -44,7 +44,9 @@ extern uint16_t rm_psp, rm_arena;
  * `paras` paragraphs from its PSP on (what it keeps with INT 21h 4Ah), one
  * free block follows up to RM_TOP.  With want_size/want_sha256 (hex, lower
  * case; NULL: not checked) the file must be the one the hints describe
- * (symmap.py's KEY_SIZE, KEY_SHA256).  0, or -1 with a message in err. */
+ * (symmap.py's KEY_SIZE, KEY_SHA256).  A program packed with LZEXE 0.91
+ * is unpacked first (unlzexe.h; size and SHA-256 are the packed file's,
+ * the one the player has).  0, or -1 with a message in err. */
 int rm_load_exe(const char *path, size_t want_size, const char *want_sha256,
                 uint16_t psp, uint16_t paras, char *err, size_t n);
 

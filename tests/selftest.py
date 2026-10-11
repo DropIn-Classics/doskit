@@ -2324,7 +2324,7 @@ def main():
 
     step('4. the C port over the runtime, compared (memcmp.py)')
     srcs = [os.path.join(HERE, 'hello', 'port.c')] + [
-        os.path.join(RUNTIME, f) for f in ('rmem.c', 'vga.c', 'sys.c', 'sha256.c', 'shot.c',
+        os.path.join(RUNTIME, f) for f in ('rmem.c', 'unlzexe.c', 'vga.c', 'sys.c', 'sha256.c', 'shot.c',
                                            'plat_null.c')]
     exe = cc(os.path.join(b, 'port'), srcs, incs=[os.path.join(PROJ, 'port')])
     out = subprocess.run(
@@ -2336,6 +2336,11 @@ def main():
     if out.returncode or 'con: hello from doskit' not in out.stdout:
         print(out.stderr)
         raise SystemExit('selftest FAILED: the port')
+    # a packed program is loaded as the program it unpacks to
+    exe = cc(os.path.join(b, 'unlztest'), [os.path.join(HERE, 'unlzexe', 'unlztest.c')] + [
+        os.path.join(RUNTIME, f) for f in ('rmem.c', 'unlzexe.c', 'sys.c', 'sha256.c')])
+    print(run([exe, os.path.join(PROJ, 'game', 'MULTILZ', 'MULTILZ.EXE'),
+               os.path.join(PROJ, 'build', 'unpacked', 'MULTILZ.EXE')]))
     w, h, rgb = read_png(os.path.join(b, 'port.png'))
     ppm = open(os.path.join(b, 'port.ppm'), 'rb').read()
     if ppm != b'P6\n%d %d\n255\n' % (w, h) + rgb:

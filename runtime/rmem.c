@@ -5,6 +5,7 @@
 #include "rmem.h"
 #include "sha256.h"
 #include "sys.h"
+#include "unlzexe.h"
 
 /* initialized, so not a common symbol: macOS's ld aligns a common one of
  * 1 MB to 32 KB, beyond its segments' 16 KB, and warns */
@@ -41,6 +42,16 @@ int rm_load_exe(const char *path, size_t want_size, const char *want_sha256,
         snprintf(err, n, "%s is not an MZ program.", path);
         free(f);
         return -1;
+    }
+    if (lzexe_packed(f, size)) {
+        /* packed on the disc: the image and relocations it unpacks to */
+        uint8_t *plain = lzexe_unpack(f, size, &size);
+        free(f);
+        f = plain;
+        if (!f) {
+            snprintf(err, n, "%s is packed with LZEXE and damaged.", path);
+            return -1;
+        }
     }
 
     memset(mem, 0, sizeof mem);
