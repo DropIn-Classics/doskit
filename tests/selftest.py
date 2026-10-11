@@ -1248,6 +1248,18 @@ def check_unlzexe(py):
     import disasm
     if disasm.Hints(hints).packed != 'MULTILZ/MULTILZ.EXE':
         raise SystemExit('selftest FAILED: the hints do not keep the packed program\'s name')
+    # the names header describes the packed file, the one a port loads
+    import hashlib
+    run([py, os.path.join(TOOLS, 'symmap.py'), 'build/multilz_names.h', 'MULTILZ',
+         'MULTILZ=build/MULTILZ.hints'])
+    with open(os.path.join(PROJ, 'build', 'multilz_names.h')) as f:
+        names = f.read()
+    for want in ('#define MULTILZ_EXE "MULTILZ/MULTILZ.EXE"', f'#define MULTILZ_SIZE {len(h + packed + stub)}u',
+                 '#define MULTILZ_SHA256 "%s"' % hashlib.sha256(h + packed + stub).hexdigest()):
+        if want not in names:
+            print(names)
+            raise SystemExit(f'selftest FAILED: symmap.py did not write {want!r} for a packed program')
+    os.remove(os.path.join(PROJ, 'build', 'multilz_names.h'))
     far = [3, 0x20, 0x11F, 0x1234, 0x30000, 0x30002]
     got = unlzexe.unpack_relocs(lz_relocs(far), 0, 1000)
     if [o + s * 16 for o, s in got] != far:
