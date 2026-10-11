@@ -151,7 +151,9 @@ lies and by the relocated words in it, so B's segments may have other
 frames and names. B.hints needs its own exe, segment, linker,
 relocorder, asm and keeptail lines (those are not carried). B.hints keeps its own lines above the carried block;
 the block is written by xfer.py only; check.py tells when it is out of
-date.
+date. A.hints may lie in a folder below B.hints' (`src/old/A.hints`, a
+build no longer worked on: check.py builds `src/*.hints` only); the
+block's first line names it from B.hints' folder.
 
 **Names for the C.** `tools/symmap.py port/src/gen/names.h PREFIX
 KEY=src/A.hints ...` writes where every name is in each program, the
@@ -402,7 +404,10 @@ linked by Microsoft LINK, 186/386 instructions in 16-bit code. Not tried:
   with LZEXE 0.91 ("LZ91" at 1Ch) is unpacked by `tools/unlzexe.py` into
   build/unpacked/; its hints name that file (`exe build/unpacked/...`)
   and say `linker unpacked`, as the packer kept neither the header's
-  layout nor the relocations' segments. Check the unpacked image against
+  layout nor the relocations' segments. With the packed program named
+  (`linker unpacked GAME/GAME.EXE`) build.py and check.py unpack it
+  themselves when the file is not there, and run.py takes the hints'
+  names for the packed program it runs. Check the unpacked image against
   the packed program stopped at its own entry in the runner (`-break`,
   `-ram`). One game's two programs were unpacked and checked this way;
   LZEXE 0.90 is refused;

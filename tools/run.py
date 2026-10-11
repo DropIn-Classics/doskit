@@ -82,12 +82,15 @@ def same_program(exe, program):
 
 
 def hints_for(program, base_only=False):
-    """The hints file whose `exe` is this program (or, base_only, whose
-    exe has this base name), or None.  A loader finds its image's hints
+    """The hints file whose `exe` is this program (or was unpacked from
+    it: `linker unpacked PROGRAM`; or, base_only, whose exe has this base
+    name), or None.  A loader finds its image's hints
     too (see same_program)."""
     for f in hints_files():
         h = Hints(f)
         exe = (h.exe or '').replace('\\', '/').upper()
+        if (h.packed or '').replace('\\', '/').upper() == program.replace('\\', '/').upper():
+            return h
         if exe and (exe == program.replace('\\', '/').upper() or
                     base_only and os.path.basename(exe) == os.path.basename(program.replace('\\', '/').upper())):
             return h

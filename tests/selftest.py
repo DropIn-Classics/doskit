@@ -882,6 +882,21 @@ def check_xfer(py):
         raise SystemExit('selftest FAILED: MULTIS2 from the carried hints')
     out = run([py, os.path.join(TOOLS, 'xfer.py'), 'src/MULTISEG.hints', 'src/MULTIS2.hints',
                '--check'])
+    # hints carried from a folder below the target's are named from the
+    # target's folder, where check.py looks for them
+    os.makedirs(os.path.join(PROJ, 'build', 'xf', 'old'))
+    with open(os.path.join(HERE, 'multiseg', 'src', 'MULTISEG.hints')) as f:
+        text = f.read()
+    with open(os.path.join(PROJ, 'build', 'xf', 'old', 'MULTISEG.hints'), 'w') as f:
+        f.write(text)
+    with open(os.path.join(PROJ, 'build', 'xf', 'MULTIS2.hints'), 'w') as f:
+        f.write(carried.split(xfer_mark)[0])
+    for more in ([], ['--check']):
+        run([py, os.path.join(TOOLS, 'xfer.py'), 'build/xf/old/MULTISEG.hints',
+             'build/xf/MULTIS2.hints'] + more)
+    with open(os.path.join(PROJ, 'build', 'xf', 'MULTIS2.hints')) as f:
+        if xfer_mark + 'old/MULTISEG.hints by ' not in f.read():
+            raise SystemExit('selftest FAILED: xfer.py did not name its source from the target\'s folder')
     # a name of the file's own lines is not replaced by a carried one at the
     # same address, nor given again at another (the sibling may use that data
     # otherwise)
@@ -1141,6 +1156,20 @@ def check_unlzexe(py):
         if want not in out:
             print(out)
             raise SystemExit(f'selftest FAILED: MULTILZ with "{linker}" not {want}')
+    # with the packed program named the unpacked file is made when it is
+    # not there, and run.py finds the hints for the packed program
+    unpacked = os.path.join(PROJ, 'build', 'unpacked', 'MULTILZ.EXE')
+    os.remove(unpacked)
+    with open(hints, 'w') as f:
+        f.write(text.replace('linker tlink 30', 'linker unpacked MULTILZ/MULTILZ.EXE'))
+    out = run([py, os.path.join(TOOLS, 'build.py'), hints], check=False)
+    with open(unpacked, 'rb') as f:
+        if 'IDENTICAL' not in out or f.read() != u:
+            print(out)
+            raise SystemExit('selftest FAILED: MULTILZ not unpacked by `linker unpacked PACKED`')
+    import disasm
+    if disasm.Hints(hints).packed != 'MULTILZ/MULTILZ.EXE':
+        raise SystemExit('selftest FAILED: the hints do not keep the packed program\'s name')
     far = [3, 0x20, 0x11F, 0x1234, 0x30000, 0x30002]
     got = unlzexe.unpack_relocs(lz_relocs(far), 0, 1000)
     if [o + s * 16 for o, s in got] != far:

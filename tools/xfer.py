@@ -247,7 +247,9 @@ def main():
                 return False
         return True
 
-    out = [MARK + os.path.basename(args.src) + ' by tools/xfer.py; check, then keep or edit']
+    # the source as check.py finds it again: from the target's folder
+    rel = os.path.relpath(args.src, os.path.dirname(args.dst) or '.').replace(os.sep, '/')
+    out = [MARK + rel + ' by tools/xfer.py; check, then keep or edit']
     skip = ('exe', 'segment', 'relocorder', 'asm', 'linker', 'keeptail')
     n_ok = n_bad = 0
     lines = []                  # (source line, its words mapped or None)

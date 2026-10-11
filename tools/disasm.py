@@ -139,12 +139,16 @@ Hints syntax (one per line, ';' starts a comment, numbers are hex):
     linker     tlink VER layout=compact    compact header: relocations from
                                        22h, marker word 6A72h at 20h;
                                        may also take header=original
-    linker     unpacked                a program a kit tool unpacked
+    linker     unpacked [PACKED]       a program a kit tool unpacked
                                        (unlzexe.py): LINK's header, each
                                        relocation's offset below 10h (the
                                        packer kept no more) and the memory
                                        asked for (0Ah, 0Ch) as in the file,
-                                       not made from the segments' sizes
+                                       not made from the segments' sizes.
+                                       With PACKED (of the game's files)
+                                       the file `exe` names is unpacked
+                                       from it when it is not there, and
+                                       run.py takes these hints for PACKED
     asm        OPTION=VALUE...         how the original's assembler encoded
                                        what has two encodings (tasm.py's
                                        defaults otherwise):
@@ -513,6 +517,7 @@ class Hints:
         self.stop = set()
         self.relocorder = []
         self.keeptail = False
+        self.packed = None        # `linker unpacked PACKED`: the packed program exe was made from
         self.linker = None        # None: LINK; ('unpacked',); ('tlink', version, keep_header_size, layout)
         self.noentry = self.use16 = False
         self.offrel, self.offflags = None, 0
@@ -609,8 +614,9 @@ class Hints:
                     self.relocorder = f[1:]
                 elif k == 'linker':
                     opts = f[3:]
-                    if f[1:] == ['unpacked']:
+                    if f[1:2] == ['unpacked'] and len(f) <= 3:
                         self.linker = ('unpacked',)
+                        self.packed = f[2] if len(f) == 3 else None
                         continue
                     if (len(f) < 3 or f[1] != 'tlink' or
                             len(set(opts)) != len(opts) or
@@ -1603,8 +1609,29 @@ class Emitter:
         return body.count(',') + 1
 
 
+def ensure_unpacked(h):
+    """`linker unpacked PACKED`: the file `exe` names is made from PACKED
+    of the game's files when it is not there or PACKED is newer"""
+    if not h.packed:
+        return
+    import unlzexe
+    src, out = program_path(h.packed), program_path(h.exe)
+    if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(src):
+        return
+    with open(src, 'rb') as f:
+        data = f.read()
+    try:
+        plain = unlzexe.unpack(data)
+    except (ValueError, struct.error, IndexError) as e:
+        raise SystemExit(f'{src}: {e}')
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out, 'wb') as f:
+        f.write(plain)
+
+
 def load_program(h):
     """the program the hints describe, read from the player's files"""
+    ensure_unpacked(h)
     if h.kind == 'bin':
         return RawProgram(program_path(h.exe), h.noentry,
                           program_path(h.offrel) if h.offrel else None, h.use16)
