@@ -90,7 +90,11 @@ int rm_load_exe(const char *path, size_t want_size, const char *want_sha256,
     }
     free(f);
 
-    /* the arena: one free block from the program's end to RM_TOP */
+    /* the program's own block, then the arena: one free block from the
+     * program's end to RM_TOP */
+    fwb((uint16_t)(psp - 1), 0, 'M');
+    fww((uint16_t)(psp - 1), 1, psp);
+    fww((uint16_t)(psp - 1), 3, paras);
     rm_arena = (uint16_t)(psp + paras);
     fwb(rm_arena, 0, 'Z');
     fww(rm_arena, 1, 0);
@@ -158,5 +162,50 @@ int dos_free(uint16_t seg)
             mcb = next;
         }
     }
+    return 0;
+}
+
+int dos_resize(uint16_t seg, uint16_t paras, uint16_t *most)
+{
+    uint16_t mcb = (uint16_t)(seg - 1), size = frw(mcb, 3);
+    uint8_t kind = frb(mcb, 0);
+
+    if (paras > size) {
+        /* grow into the free block behind, if it is large enough */
+        uint16_t next = (uint16_t)(seg + size);
+        uint16_t total = size;
+        if (kind == 'M' && frw(next, 1) == 0)
+            total = (uint16_t)(size + 1 + frw(next, 3));
+        if (total < paras) {
+            if (most)
+                *most = total;
+            return -1;
+        }
+        kind = frb(next, 0);
+        size = total;
+        fwb(mcb, 0, kind);
+        fww(mcb, 3, size);
+    }
+    if (paras < size) {
+        /* the rest becomes a free block, joined with a free one behind it */
+        uint16_t rest = (uint16_t)(seg + paras);
+        uint16_t rest_size = (uint16_t)(size - paras - 1);
+        if (kind == 'M') {
+            uint16_t next = (uint16_t)(seg + size);
+            if (frw(next, 1) == 0) {
+                rest_size = (uint16_t)(rest_size + 1 + frw(next, 3));
+                kind = frb(next, 0);
+            }
+        }
+        fwb(rest, 0, kind);
+        fww(rest, 1, 0);
+        fww(rest, 3, rest_size);
+        fwb(mcb, 0, 'M');
+        fww(mcb, 3, paras);
+    }
+    if (seg == rm_psp && frb(mcb, 0) == 'M')
+        rm_arena = (uint16_t)(seg + paras);     /* the arena begins behind the program */
+    if (most)
+        *most = paras;
     return 0;
 }

@@ -93,5 +93,10 @@ static inline void wd(uint16_t off, uint32_t v)
 uint16_t dos_alloc(uint16_t paras);
 /* 0 on success */
 int dos_free(uint16_t seg);
+/* INT 21h 4Ah: the block at `seg` (the program's own at rm_psp, or one of
+ * dos_alloc) made `paras` paragraphs long: shorter, the rest becomes a
+ * free block (joined with a free one behind it); longer, into a free
+ * block behind it.  0, or -1 with the most it can have in *most. */
+int dos_resize(uint16_t seg, uint16_t paras, uint16_t *most);
 
 #endif

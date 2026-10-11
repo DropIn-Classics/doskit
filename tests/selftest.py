@@ -2353,6 +2353,10 @@ def main():
         os.path.join(RUNTIME, f) for f in ('rmem.c', 'unlzexe.c', 'sys.c', 'sha256.c')])
     print(run([exe, os.path.join(PROJ, 'game', 'MULTILZ', 'MULTILZ.EXE'),
                os.path.join(PROJ, 'build', 'unpacked', 'MULTILZ.EXE')]))
+    # the DOS memory blocks: the program's own and those behind it
+    exe = cc(os.path.join(b, 'memtest'), [os.path.join(HERE, 'rmem', 'memtest.c')] + [
+        os.path.join(RUNTIME, f) for f in ('rmem.c', 'unlzexe.c', 'sys.c', 'sha256.c')])
+    print(run([exe, os.path.join(PROJ, 'game', 'HELLO', 'HELLO.EXE')]))
     w, h, rgb = read_png(os.path.join(b, 'port.png'))
     ppm = open(os.path.join(b, 'port.ppm'), 'rb').read()
     if ppm != b'P6\n%d %d\n255\n' % (w, h) + rgb:
