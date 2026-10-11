@@ -23,6 +23,7 @@ In build/selftest (a project as a game's would be, see kit.py):
      tests/pmmouse/PMMOUSE.ASM into game/PMMOUSE/PMMOUSE.EXE,
      tests/rwatch/RWATCH.ASM into game/RWATCH/RWATCH.EXE,
      tests/strreg/STRREG.ASM into game/STRREG/STRREG.EXE,
+     tests/latch/LATCH.ASM into game/LATCH/LATCH.EXE,
      tests/adlib/ADLIB.ASM into game/ADLIB/ADLIB.EXE,
      tests/sb16/SB16.ASM into game/SB16/SB16.EXE, tests/cdplay/CDPLAY.ASM
      into game/CDPLAY/CDPLAY.EXE, tests/country/COUNTRY.ASM into
@@ -96,6 +97,9 @@ In build/selftest (a project as a game's would be, see kit.py):
      kept); STRREG.EXE, which checks the registers REP STOS and REP MOVS
      leave (SI untouched by STOS, on the runner's block path of 16 and
      more elements, in its loop and backwards) and says "strreg ok";
+     LATCH.EXE, which checks in mode 0Dh that a write takes the bits its
+     bit mask leaves out from the latches of the last read and says
+     "latch ok";
      ADLIB.EXE, which
      probes the runner's OPL2 as drivers do (the timers' flags in the
      status, masked, cleared, not set before their time) and says "adlib
@@ -1665,6 +1669,7 @@ def main():
           f'LOL.EXE {make_exe("LOL")} bytes; '
           f'IVT.EXE {make_exe("IVT")} bytes; '
           f'STRREG.EXE {make_exe("STRREG")} bytes; '
+          f'LATCH.EXE {make_exe("LATCH")} bytes; '
           f'REQ.EXE {make_exe("REQ")} bytes; '
           f'MULTISEG.EXE {make_multiseg()} bytes'
           % make_relmod())
@@ -2105,6 +2110,11 @@ def main():
         print(out)
         raise SystemExit('selftest FAILED: the registers after REP STOS and REP MOVS')
     print('REP STOS leaves SI, REP MOVS moves it: block path, loop and backwards')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', 'LATCH/LATCH.EXE'])
+    if 'con: latch ok' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: a planar write takes its masked-out bits from the latches')
+    print('VGA latches: a write\'s masked-out bits are the last read\'s, bit mask 0 copies four planes')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-requirements', 'REQ/REQ.EXE'])
     want = ('requirements observed:', 'devices: VGA', 'memory: VGA read/write',
             'unknown ports: 123', 'unimplemented DOS: AH=66', 'unimplemented BIOS: INT 10h/AH=FF AL=00',

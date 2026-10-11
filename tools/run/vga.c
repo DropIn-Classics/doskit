@@ -110,7 +110,9 @@ static void write_planes(uint32_t o, uint8_t data[4], uint8_t mask, uint8_t plan
     int p;
     for(p=0;p<4;p++){
         if(!((planemask>>p)&1)) continue;
-        vga_vram[o*4+p] = (uint8_t)((vga_vram[o*4+p] & ~mask) | (data[p] & mask));
+        /* the bits the bit mask leaves out come from the latches (the
+         * last read), not from the byte written over */
+        vga_vram[o*4+p] = (uint8_t)((latch[p] & ~mask) | (data[p] & mask));
     }
 }
 
