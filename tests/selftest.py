@@ -925,6 +925,84 @@ def check_xfer(py):
     return len(exe)
 
 
+TWIN_ASM = """; a test program of the kit's own (tests/selftest.py, check_xfer_alike)
+.186
+CODE SEGMENT PARA PUBLIC 'CODE'
+	ASSUME CS:CODE
+start:
+	CALL one
+	CALL two
+	MOV AX,4C00H
+	INT 21H
+one:
+	PUSH AX
+	PUSH BX
+	PUSH CX
+	PUSH DX
+	XOR AX,AX
+	INC BX
+	DEC CX
+	MOV DX,AX
+	POP DX
+	POP CX
+	POP BX
+	POP AX
+	MOV AX,1
+	RET
+two:
+	PUSH AX
+	PUSH BX
+	PUSH CX
+	PUSH DX
+	XOR %s
+	INC BX
+	DEC CX
+	MOV DX,AX
+	POP DX
+	POP CX
+	POP BX
+	POP AX
+	MOV BX,2
+	ADD BX,BX
+	RET
+CODE ENDS
+STACK SEGMENT PARA STACK 'STACK'
+	DB 100H DUP (?)
+STACK ENDS
+	END start
+"""
+
+
+def check_xfer_alike(py):
+    """two routines that begin with the same twelve instructions, the
+    second's beginning changed in the sibling: xfer.py leaves the second's
+    hint not mapped instead of carrying it to the first, the one place in
+    the sibling that still looks like it"""
+    own = 'segment CODE 0000 CODE\nsegment STACK 0004 STACK stack size=100\n'
+    for name, fifth in (('TWINA', 'AX,AX'), ('TWINB', 'SI,SI')):
+        src = os.path.join(PROJ, 'build', name + '.ASM')
+        with open(src, 'w') as f:
+            f.write(TWIN_ASM % fifth)
+        a = tasm.Assembler(src)
+        a.assemble()
+        out = tlink.link([tlink.module_from_asm(a, name)])
+        os.makedirs(os.path.join(PROJ, 'game', name))
+        with open(os.path.join(PROJ, 'game', name, name + '.EXE'), 'wb') as f:
+            f.write(build.write_mz(out, None, [0]))
+        with open(os.path.join(PROJ, 'build', name + '.hints'), 'w') as f:
+            f.write(f'exe {name}/{name}.EXE\n' + own)
+            if name == 'TWINA':
+                f.write('code CODE:0000 start\ncomment CODE:000B the first\n'
+                        'comment CODE:001D the second\n')
+    run([py, os.path.join(TOOLS, 'xfer.py'), 'build/TWINA.hints', 'build/TWINB.hints'])
+    with open(os.path.join(PROJ, 'build', 'TWINB.hints')) as f:
+        carried = f.read()
+    if ('\ncomment CODE:000B the first\n' not in carried or 'CODE:000B the second' in carried
+            or '(not mapped) comment CODE:001D the second' not in carried):
+        print(carried)
+        raise SystemExit('selftest FAILED: xfer.py carried a routine\'s hint to another that begins alike')
+
+
 def check_segment_order(py):
     """Code after data stays there when rebuilding an explicit image layout."""
     path = os.path.join(PROJ, 'build', 'INTERLEAVE.ASM')
@@ -1771,6 +1849,7 @@ def main():
             raise SystemExit(f'selftest FAILED: MULTISEG.ASM has no {want!r} (ptr and words '
                              'hints into a code segment other than CODE)')
     print('MULTISEG: routines reached through pointers into FOUR, a segment not named CODE')
+    check_xfer_alike(py)
     print(f'MULTIS2.EXE ({check_xfer(py)} bytes): MULTISEG\'s hints carried by xfer.py '
           'into renamed and shifted code segments, IDENTICAL')
     print(f'interleaved code/data ({check_segment_order(py)} image bytes): IDENTICAL')
