@@ -39,11 +39,13 @@ def reloc_order(out, an):
     return rel
 
 
-def write_mz(out, prog, reloc_segs=(), rel=None):
+def write_mz(out, prog, reloc_segs=(), rel=None, unpacked=False):
     """The EXE the way Microsoft LINK lays it out: word 1 at 1Ch, the
     relocations from 1Eh, the header padded to 512 bytes; the relocations
     by the frames of the segments holding them (reloc_segs), or as rel
-    (reloc_order's list) has them."""
+    (reloc_order's list) has them.  unpacked: as unlzexe.py wrote the
+    program (`linker unpacked`): each relocation's offset below 10h, the
+    memory asked for as the file has it."""
     img = out.img
     end = len(img)
     while end > 0 and not out.init[end - 1]:
@@ -61,9 +63,11 @@ def write_mz(out, prog, reloc_segs=(), rel=None):
     struct.pack_into('<2s13H', h, 0, b'MZ', size % 512, (size + 511) // 512, len(rel),
                      hdr_len // 16, minalloc, 0xFFFF, out.ss, out.sp, 0, out.ip, out.cs, 0x1E, 0)
     struct.pack_into('<H', h, 0x1C, 1)
+    if unpacked:
+        struct.pack_into('<HH', h, 0x0A, prog.minalloc, prog.maxalloc)
     fr_of = {a: fr for a, fr, _ in out.relocs}
     for i, a in enumerate(rel):
-        fr = fr_of[a]
+        fr = a >> 4 if unpacked else fr_of[a]
         struct.pack_into('<HH', h, 0x1E + 4 * i, a - fr * 16, fr)
     return bytes(h) + stored
 
@@ -230,7 +234,9 @@ def build_once(hints, raw):
         exe = bytes(out.img)
     else:
         rel = reloc_order(out, an)
-        if an.h.linker:
+        if an.h.linker and an.h.linker[0] == 'unpacked':
+            exe = write_mz(out, an.p, rel=rel, unpacked=True)
+        elif an.h.linker:
             exe = tlink.write_mz(out, reloc_order=rel, version=an.h.linker[1],
                                  hdr_len=len(an.p.hdr) if an.h.linker[2] else None,
                                  layout=an.h.linker[3])

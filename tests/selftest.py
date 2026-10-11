@@ -1010,6 +1010,146 @@ def check_hdrpad(py):
     return len(d)
 
 
+class LzBits:
+    """the writer of unlzexe.py's stream: bits in 16-bit words, each word's
+    place taken when the one before is full, whole bytes in between"""
+    def __init__(self):
+        self.out = bytearray(2)
+        self.at, self.n = 0, 0
+
+    def bit(self, b):
+        self.out[self.at + self.n // 8] |= b << (self.n % 8)
+        self.n += 1
+        if self.n == 16:
+            self.at, self.n = len(self.out), 0
+            self.out += bytes(2)
+
+    def byte(self, b):
+        self.out.append(b)
+
+
+def lz_pack(img):
+    """img packed for unlzexe.py with a packer of our own (the longest copy
+    at each place): every form of the stream, a segment mark included"""
+    w = LzBits()
+    i, marked = 0, False
+    while i < len(img):
+        best, dist = 0, 0
+        for j in range(max(0, i - 8192), i):
+            n = 0
+            while n < 256 and i + n < len(img) and img[j + n] == img[i + n]:
+                n += 1
+            if n >= best:
+                best, dist = n, i - j
+        if 2 <= best <= 5 and dist <= 256:
+            for b in (0, 0, (best - 2) >> 1, (best - 2) & 1):
+                w.bit(b)
+            w.byte(256 - dist)
+        elif best >= 3:
+            w.bit(0)
+            w.bit(1)
+            far = 8192 - dist
+            w.byte(far & 255)
+            if best <= 9:
+                w.byte((far >> 8) << 3 | best - 2)
+            else:
+                w.byte((far >> 8) << 3)
+                w.byte(best - 1)
+            if not marked:              # a mark has no effect
+                marked = True
+                w.bit(0)
+                w.bit(1)
+                w.byte(0)
+                w.byte(0)
+                w.byte(1)
+        else:
+            best = 1
+            w.bit(1)
+            w.byte(img[i])
+        i += best
+    w.bit(0)
+    w.bit(1)
+    w.byte(0)
+    w.byte(0)
+    w.byte(0)
+    return bytes(w.out)
+
+
+def lz_relocs(rel):
+    """the relocations (linear addresses, ascending) as a packed file has them"""
+    out = bytearray()
+    seg, off = 0, 0
+    for a in rel:
+        while a - (seg * 16 + off) > 0xFFFF:
+            out += bytes(3)
+            seg += 0x0FFF
+        span = a - (seg * 16 + off)
+        out += bytes([span]) if 0 < span < 256 else struct.pack('<BH', 0, span)
+        off += span
+        seg, off = seg + (off >> 4), off & 15
+    return bytes(out) + struct.pack('<BH', 0, 1)
+
+
+def check_unlzexe(py):
+    """MULTISEG.EXE packed as LZEXE 0.91 lays a file out (by lz_pack, the
+    unpacker's place filled with zeros: no packer's code is here) and
+    unpacked by unlzexe.py: the image, the relocations, the entry and the
+    stack are MULTISEG's, and build.py makes the unpacked file again with
+    `linker unpacked` only; relocations far apart come back too"""
+    sys.path.insert(0, TOOLS)
+    import unlzexe
+    with open(os.path.join(PROJ, 'game', 'MULTISEG', 'MULTISEG.EXE'), 'rb') as f:
+        d = f.read()
+    nrel, hdr, minalloc = struct.unpack_from('<3H', d, 6)
+    ss, sp, _, ip, cs, relat = struct.unpack_from('<6H', d, 0x0E)
+    img = d[hdr * 16:]
+    rel = sorted(o + s * 16 for o, s in (struct.unpack_from('<HH', d, relat + 4 * i)
+                                         for i in range(nrel)))
+    packed = lz_pack(img)
+    packed += bytes(-len(packed) % 16)
+    stub = bytes(unlzexe.RELOCS_AT - 14) + lz_relocs(rel)
+    grows = (len(img) - len(packed) + 15) // 16
+    stub = struct.pack('<7H', ip, cs, sp, ss, len(packed) // 16, grows, 14 + len(stub)) + stub
+    size = 32 + len(packed) + len(stub)
+    h = struct.pack('<2s13H4s', b'MZ', size % 512, (size + 511) // 512, 0, 2,
+                    minalloc + grows + (len(stub) + 15) // 16 + 9, 0xFFFF, 0, 0x80, 0, 14,
+                    len(packed) // 16, 0x1C, 0, b'LZ91')
+    os.makedirs(os.path.join(PROJ, 'game', 'MULTILZ'))
+    with open(os.path.join(PROJ, 'game', 'MULTILZ', 'MULTILZ.EXE'), 'wb') as f:
+        f.write(h + packed + stub)
+    run([py, os.path.join(TOOLS, 'unlzexe.py'), 'MULTILZ/MULTILZ.EXE'])
+    with open(os.path.join(PROJ, 'build', 'unpacked', 'MULTILZ.EXE'), 'rb') as f:
+        u = f.read()
+    nrel2, hdr2, min2 = struct.unpack_from('<3H', u, 6)
+    rel2 = [o + s * 16 for o, s in (struct.unpack_from('<HH', u, 0x1E + 4 * i)
+                                    for i in range(nrel2))]
+    if (u[hdr2 * 16:] != img or rel2 != rel or min2 != minalloc
+            or struct.unpack_from('<5H', u, 0x0E) != (ss, sp, 0, ip, cs)):
+        raise SystemExit('selftest FAILED: unlzexe.py did not give MULTISEG.EXE back')
+    # and build.py makes the unpacked file again with `linker unpacked`
+    with open(os.path.join(HERE, 'multiseg', 'src', 'MULTISEG.hints')) as f:
+        text = f.read().replace('exe MULTISEG/MULTISEG.EXE', 'exe build/unpacked/MULTILZ.EXE')
+    for linker, want in (('linker unpacked', 'IDENTICAL'), ('', 'differs')):
+        hints = os.path.join(PROJ, 'build', 'MULTILZ.hints')
+        with open(hints, 'w') as f:
+            f.write(text.replace('linker tlink 30', linker))
+        out = run([py, os.path.join(TOOLS, 'build.py'), hints], check=False)
+        if want not in out:
+            print(out)
+            raise SystemExit(f'selftest FAILED: MULTILZ with "{linker}" not {want}')
+    far = [3, 0x20, 0x11F, 0x1234, 0x30000, 0x30002]
+    got = unlzexe.unpack_relocs(lz_relocs(far), 0, 1000)
+    if [o + s * 16 for o, s in got] != far:
+        raise SystemExit('selftest FAILED: unlzexe.py reads relocations far apart wrongly')
+    for bad in (d, h[:0x1C] + b'LZ09' + packed + stub):
+        try:
+            unlzexe.unpack(bad)
+        except ValueError:
+            continue
+        raise SystemExit('selftest FAILED: unlzexe.py took a file that is not LZEXE 0.91')
+    return len(packed), len(img)
+
+
 def check_update(b):
     """tests/update/updatetest.c in a data folder of its own: a first start
     fetching a latest.json made here, then one the same day using the kept
@@ -1603,6 +1743,8 @@ def main():
     print(f'compact TLINK header ({check_compact_tlink(py)} bytes): IDENTICAL')
     print(f'MULTIPAD.EXE ({check_hdrpad(py)} bytes, a longer header): IDENTICAL with '
           'header=original, differs without')
+    print('MULTILZ.EXE (%d bytes packed as LZEXE 0.91, %d unpacked by unlzexe.py): '
+          'MULTISEG\'s image and relocations, IDENTICAL with linker unpacked' % check_unlzexe(py))
     with open(os.path.join(PROJ, 'build', 'FLAT.ASM')) as f:
         text = f.read()
     for want in ('DW L00D5-C00D6', 'DW L00DE-C00D6', 'DW L00E5-C00D6', '[EDI+C00D6]'):

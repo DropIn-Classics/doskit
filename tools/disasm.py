@@ -139,6 +139,12 @@ Hints syntax (one per line, ';' starts a comment, numbers are hex):
     linker     tlink VER layout=compact    compact header: relocations from
                                        22h, marker word 6A72h at 20h;
                                        may also take header=original
+    linker     unpacked                a program a kit tool unpacked
+                                       (unlzexe.py): LINK's header, each
+                                       relocation's offset below 10h (the
+                                       packer kept no more) and the memory
+                                       asked for (0Ah, 0Ch) as in the file,
+                                       not made from the segments' sizes
     asm        OPTION=VALUE...         how the original's assembler encoded
                                        what has two encodings (tasm.py's
                                        defaults otherwise):
@@ -507,7 +513,7 @@ class Hints:
         self.stop = set()
         self.relocorder = []
         self.keeptail = False
-        self.linker = None        # None: LINK; ('tlink', version, keep_header_size, layout)
+        self.linker = None        # None: LINK; ('unpacked',); ('tlink', version, keep_header_size, layout)
         self.noentry = self.use16 = False
         self.offrel, self.offflags = None, 0
         self.asm = {}             # assembler switches (see the docstring)
@@ -603,6 +609,9 @@ class Hints:
                     self.relocorder = f[1:]
                 elif k == 'linker':
                     opts = f[3:]
+                    if f[1:] == ['unpacked']:
+                        self.linker = ('unpacked',)
+                        continue
                     if (len(f) < 3 or f[1] != 'tlink' or
                             len(set(opts)) != len(opts) or
                             any(o not in ('header=original', 'layout=compact') for o in opts)):

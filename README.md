@@ -63,6 +63,8 @@ agent session leads others working on it.
     game.gog); `inno.py`: lists and unpacks an Inno Setup installer (GOG's
     Windows setup_*.exe, with its .bin files; GOG Galaxy's parts put back
     together); `flifiles.py`: reads and checks Autodesk FLI animations.
+  - `unlzexe.py`: unpacks a program packed with LZEXE 0.91 into a plain
+    MZ program for the analysis (the hints then say `linker unpacked`).
   - `new_project.py`: a new port's repository from `template/`, for a
     game chosen from those installed from GOG (`goglist.py` lists them:
     name, product ID, folder, CD image).

@@ -398,7 +398,14 @@ linked by Microsoft LINK, 186/386 instructions in 16-bit code. Not tried:
   many, and the compiler's idioms (switch tables, far pointers in data)
   will want more hints and probably new analysis;
 - COM programs (no MZ header), overlays, EXEPACK/PKLITE-packed programs
-  (unpack first; the runner runs them as they are);
+  (unpack first; the runner runs them as they are). A program packed
+  with LZEXE 0.91 ("LZ91" at 1Ch) is unpacked by `tools/unlzexe.py` into
+  build/unpacked/; its hints name that file (`exe build/unpacked/...`)
+  and say `linker unpacked`, as the packer kept neither the header's
+  layout nor the relocations' segments. Check the unpacked image against
+  the packed program stopped at its own entry in the runner (`-break`,
+  `-ram`). One game's two programs were unpacked and checked this way;
+  LZEXE 0.90 is refused;
 - protected mode: the analysis and build.py take pMAX flat images
   (`pmax` in the hints: 32-bit code, USE32 source, the descriptors as
   segments; tests/flat, and one game's main program rebuilt byte for
