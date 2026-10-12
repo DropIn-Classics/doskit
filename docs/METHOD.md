@@ -1,9 +1,8 @@
 # The method
 
 How a DOS game is taken from its shipped programs to a native port with
-the kit, and what was learned doing it for the first game.
-Each step says what the tools do and what they leave to the person (or
-agent) doing it.
+the kit, and what was learned doing it. Each step says what the tools do
+and what they leave to the person (or agent) doing it.
 
 A project (a game) is its own repository (docs/NEW-PROJECT.md):
 
@@ -11,23 +10,27 @@ A project (a game) is its own repository (docs/NEW-PROJECT.md):
     game/               the game's unpacked files (ignored; never committed)
     build/              everything the tools write (ignored)
     port/               the C port, on the kit's runtime
+    tools/              the project's own tools (its file formats)
     docs/HANDOFF.md     the state, what was learned, what is next
     doskit/             the kit (a git submodule) or $DOSKIT
 
 The tools find the project from the current folder and the game in
 `game/` (tools/kit.py; `$DOSKIT_PROJECT`, `$DOSKIT_GAME` override).
+`tools/check.py` rebuilds every program from its hints (skipping those
+whose inputs have not changed) and checks the generated headers and
+carried blocks; it must say `all ok` before a commit.
 
 ## 0. The game's files
 
-`tools/isox.py IMAGE` unpacks a CD image (a plain ISO or raw 2352-byte
-sectors; GOG's `game.gog` is one) into `game/`. A game on floppies or
-installed from a GOG DOSBox folder is copied as it is. A game GOG sells
-for Windows only comes as its installer: `tools/inno.py SETUP.exe -x
-game` unpacks what it would install (on any system, without running
-it; the image or the files are then in `game/`). Look at what is
-there: which programs (`.EXE`, `.COM`, drivers), how they call each
-other (batch files, EXEC), which files are data. Write it into
-HANDOFF.md as a table.
+`tools/new_project.py` makes the project and finds the GOG release
+(`goglist.py`). `tools/isox.py IMAGE` unpacks a CD image (a plain ISO or
+raw 2352-byte sectors; GOG's `game.gog` is one) into `game/`. A game on
+floppies or installed from a GOG DOSBox folder is copied as it is. A
+game GOG sells for Windows only comes as its installer: `tools/inno.py
+SETUP.exe -x game` unpacks what it would install (on any system,
+without running it). Look at what is there: which programs (`.EXE`,
+`.COM`, drivers), how they call each other (batch files, EXEC), which
+files are data. Write it into HANDOFF.md as a table.
 
 Nothing of `game/` or `build/` goes into the repository, and no bytes
 of them into sources or documents: the pre-commit hook refuses the usual
@@ -36,124 +39,118 @@ cases, the rule holds beyond them.
 ## 1. Source from the programs (stage 1)
 
 Goal: `tools/build.py src/NAME.hints` says IDENTICAL for every program.
+The hints' syntax is the docstring of tools/disasm.py.
 
-**Segments.** Start the hints with `exe` and one `segment` line per
-segment in image order. Where they are: the relocation table's values
-(each relocated word is a segment's frame), the header's SS:SP (the
-stack segment), what `build.py` reports when a segment is missing, and
-debug information if there is any (`cv4.py` reads CodeView NB08). The
-code segment must be called `CODE`, the one DS normally holds `DATA`
-(the generated ASSUME uses the names). Rebuilding preserves the hints'
-image order even when code follows data; the standalone linker's default
-still groups by class. An independent code/data/code program checks both
-orders and byte-identical rebuilding on Windows (not yet Linux/macOS).
-`relocorder` gives the order of
-the relocation table by the segment holding the site (read it from the
-original's table). `keeptail` keeps what follows
-the image (debug information) as it is.
+**The image.** `exe` (MZ), `pmax` (a pMAX flat image), `le` (an LE
+image, also inside a DOS/4GW MZ file) or `bin` (a raw image without a
+header, 32-bit or with `use16` 16-bit: a driver a program loads and
+calls). A packed program is unpacked first; the runner runs it as it
+is. LZEXE 0.91 ("LZ91" at 1Ch; 0.90 is refused) is the kit's:
+`tools/unlzexe.py` writes the program to build/unpacked/, its hints
+name that file (`exe build/unpacked/...`) and say `linker unpacked
+GAME/GAME.EXE`, as the packer kept neither the header's layout nor the
+relocations' segments; build.py and check.py then unpack it themselves
+when the file is not there, run.py takes the hints' names for the
+packed program it runs, and the port loads the packed file as the
+program it unpacks to (`rmem.h`). Check the unpacked image against the
+packed program stopped at its own entry in the runner (`-break`,
+`-ram`). EXEPACK and PKLITE need an unpacker from elsewhere.
+
+**Segments.** One `segment` line per segment in image order. Where they
+are: the relocation table's values (each relocated word is a segment's
+frame), the header's SS:SP (the stack segment), what `build.py` reports
+when a segment is missing, and debug information if there is any
+(`cv4.py` reads CodeView NB08). The code segment must be called `CODE`,
+the one DS normally holds `DATA` (the generated ASSUME uses the names).
+The rebuild keeps the hints' image order, also when code follows data.
+`keeptail` keeps what follows the image (debug information) as it is.
 
 **Many code segments.** A program made of modules (a compiled one, or
 assembly in many source files) has a code segment per module, BYTE or
 WORD aligned: each begins where the one before ends, in the middle of a
 paragraph, and its frame is that paragraph. `start=N` on the segment
-line says at which offset of its frame it begins; the lowest offset a far
-CALL/JMP enters it by is the first guess (build.py then reports a jump
-to a label that is not there, or a segment grown by a paragraph, where
-the guess is wrong: an instruction running past the next segment's
-start). Labels are the segment's first letter and the offset, code
-labels L and the offset, so two code segments' labels collide: give each
-segment its own `prefix=` (disasm.py stops and says so).
+line says at which offset of its frame it begins; the lowest offset a
+far CALL/JMP enters it by is the first guess (build.py then reports a
+jump to a label that is not there, or a segment grown by a paragraph,
+where the guess is wrong). Labels are the segment's first letter and the
+offset, so two code segments' labels collide: give each segment its own
+`prefix=` (disasm.py stops and says so).
 
 **The linker.** Microsoft LINK's header (relocations from 1Eh) is the
-default. Borland's TLINK writes 01 00 FB VER 6A 72 at 1Ch and the
-relocations from 3Eh (`linker tlink VER`), in the order it meets the
+default. Borland's TLINK (`linker tlink VER`) writes its mark 01 00 FB
+VER 6A 72 at 1Ch and the relocations from 3Eh; `layout=compact` is the
+shorter form with the relocations from 22h and the marker word 6A72h at
+20h; `header=original` keeps the original's zero padding after the
+relocations. TLINK writes the relocations in the order it meets the
 fixups in the object records, which the source does not say:
 `relocorder original` takes the order from the original's table (the
-set of relocations is still compared). `layout=compact` selects a shorter
-TLINK header with relocations from 22h and a little-endian marker word
-6A72h at 20h. The version remains explicit; it does not select a layout
-implicitly. The compact option also accepts `header=original` for extra
-zero padding. Synthetic headers check both compact forms on Windows;
-Linux and macOS have not been checked for this option.
+set is still compared); `relocorder SEG...` gives it by the segment
+holding the site.
 
-Memory shifts and rotates by CL keep an explicit BYTE/WORD/DWORD PTR in
-generated source: CL is the count and cannot determine the operand's
-width. Synthetic instructions verify every shift and rotate operation
-at byte/word widths in 16-bit mode and byte/word/dword widths in 32-bit
-mode by formatting and reassembling. Dword shifts in 16-bit mode have
-not been added to the 16-bit encoder.
-
-**The assembler.** The original was assembled with some assembler whose
-choices `tasm.py` must repeat where an instruction has two encodings.
-`build.py` reports each instruction encoded otherwise; the pattern tells
-which assembler it was:
+**The assembler or compiler.** The original was made by some assembler
+or compiler whose choices `tasm.py` must repeat where an instruction has
+two encodings. `build.py` reports each instruction encoded otherwise;
+the pattern tells which it was and the `asm` line follows it:
 
 - every jump in its shortest form, no NOP padding: a multi-pass
   assembler (MASM 6, or TASM with /m);
-- `LEA reg,[addr]` kept as LEA: MASM (`asm lea_smart=0`);
-- `ADD AX,5` as `83 C0 05`: MASM (`asm alu_ax_short=0`);
-- `TEST r1,r2` with r1 in r/m: MASM (`asm test_form=rm_reg`).
+- `LEA reg,[addr]` kept as LEA: MASM (`lea_smart=0`);
+- `ADD AX,5` as `83 C0 05`: MASM (`alu_ax_short=0`);
+- `TEST r1,r2` with r1 in r/m (`test_form=rm_reg`); register-to-register
+  ALU and MOV with the destination in r/m (`regreg_form=rm_reg`);
+- Borland C: `AND`/`OR` with a small constant in the word form
+  (`imm8_alu=add,adc,sbb,sub,cmp,xor`), `XCHG AX,reg` as 87h /r
+  (`xchg_ax_short=0`), `test_form=rm_reg`.
 
-`asm regreg_form=rm_reg` selects the destination-in-r/m encoding for
-register-to-register ALU and MOV instructions; the default is `reg_rm`.
-`test_form` can select TEST's form separately. Both options are checked
-with independent synthetic instructions and a byte-identical rebuild.
-
-A compiler writes machine code itself and has its own choices; Borland
-C (1991): `AND`/`OR` with a small constant in the word form (`asm
-imm8_alu=add,adc,sbb,sub,cmp,xor`), `XCHG AX,reg` as 87h /r (`asm
-xchg_ax_short=0`), `TEST r1,r2` with r1 in r/m; a jump at the edge of
-the short range sized otherwise than TASM's estimate (`raw`). The run
-time library's assembly modules in the same program keep the
-assembler's forms: `raw` for those.
-
-Single instructions encoded by hand (a DB in the original source) are
-`raw` hints; build.py lists them as candidates each round.
+What does not follow a rule is a `raw` hint on the instruction: a DB in
+the original source, a compiler's jump at the edge of the short range
+sized otherwise than TASM's estimate, a run time library's assembly
+module among compiled code. build.py lists the candidates each round.
 
 **Reaching the code.** disasm.py follows jumps and calls from the entry
 points, tracking what DS and ES hold. Then `tools/gaps.py` lists what of
 CODE is not reached: every gap is either code reached through a pointer
 or data. For code, find the pointer and say where it comes from in a
-comment: `code` (an entry point), `words` (a table of near pointers;
-with `stride=N` one pointer in each record of N bytes), `rwords` (a compiled switch: 16-bit
-offsets from the table's own start, `LEA reg,[reg+table]; JMP reg`;
-`stride=N` and `from=OFF` for offsets in records, counted from elsewhere),
-`ptr` (an immediate that is a code offset: `MOV DX,offset handler`
-before INT 21h AH=25h), `coderange` (a run of handlers). gaps.py shows
-where each gap's address appears as a word, which usually is the
-pointer. Whether a gap is code the analysis misses or code that
-never runs, a run tells: `run.py -cover FILE ...` writes where
-instructions began, `gaps.py --seg all --cover FILE` marks the gaps
+comment: `code` (an entry point; also names the label), `words` (a table
+of near pointers; `stride=N` for one in each record of N bytes),
+`rwords` (a compiled switch: 16-bit offsets from the table's own start;
+`stride=N`, `from=OFF`), `ptr` (an immediate that is a code offset: `MOV
+DX,offset handler` before INT 21h AH=25h), `coderange` (a run of
+handlers). gaps.py shows where each gap's address appears as a word,
+which usually is the pointer. Whether a gap is code the analysis misses
+or code that never runs, a run tells: `run.py -cover FILE ...` writes
+where instructions began (for an LE program also where the extender
+mapped its objects), `gaps.py --seg all --cover FILE` marks the gaps
 that ran (`RAN`, with the first address); a `-break` there gives SS:SP,
-a second run with `-dump SS:SP N` the return address of its caller. Leave data as data. Code that runs into data after a call
-that never returns (an exit through a service the analysis does not
-know) gets a `stop` hint on that instruction.
+a second run with `-dump SS:SP N` the return address of its caller.
+Leave data as data. Code that runs into data after a call that never
+returns (an exit through a service the analysis does not know) gets a
+`stop` hint on that instruction.
 
 **Addresses written as numbers.** An immediate or displacement that is
 really an address does not show in the byte comparison, only once code
 is translated or data moves. `tools/ptrscan.py` finds MOV r16,imm whose
 register is then used as a base; check each by eye before adding a
 `dptr`. A `dptr`/`ptr` on an instruction without an immediate names its
-displacement (`CALL [SI+table]`). A small displacement with a register
-(below 100h) is taken for a field offset unless such a hint says
-otherwise, or unless it is written in two bytes though it fits one (the
-assembler did not know it: an address, a compiler's `array[BX]`); so is one with a register that lands in reached code (at an
-instruction or inside one), as a flat program's records and buffers
-have offsets far beyond 100h.
+displacement (`CALL [SI+table]`). A displacement with a register below
+100h is taken for a field offset unless such a hint says otherwise, or
+it is written in two bytes though it fits one (the assembler did not
+know it: an address, a compiler's `array[BX]`), or it lands in reached
+code.
 
 **Two programs, one engine.** When a game ships two builds of one
-engine (two episodes, a demo and the full game), analyse one,
-then `tools/xfer.py A.hints B.hints` carries its hints to the other by
+engine (two episodes, a demo and the full game), analyse one, then
+`tools/xfer.py A.hints B.hints` carries its hints to the other by
 aligning the instruction streams (a code address only when the next ten
 instructions match). A program of many code segments is aligned as all
 of them in image order; the segment names map by where the matched code
-lies and by the relocated words in it, so B's segments may have other
-frames and names. B.hints needs its own exe, segment, linker,
-relocorder, asm and keeptail lines (those are not carried). B.hints keeps its own lines above the carried block;
-the block is written by xfer.py only; check.py tells when it is out of
-date. A.hints may lie in a folder below B.hints' (`src/old/A.hints`, a
-build no longer worked on: check.py builds `src/*.hints` only); the
-block's first line names it from B.hints' folder.
+lies and by the relocated words in it. B.hints keeps its own lines
+(exe, segment, linker, relocorder, asm, keeptail and its own names) above
+the carried block; the block is written by xfer.py only, and check.py
+tells when it is out of date. A.hints may lie in a folder below
+B.hints' (`src/old/A.hints`, a build no longer worked on: check.py
+builds `src/*.hints` only); the block's first line names it from
+B.hints' folder.
 
 **Names for the C.** `tools/symmap.py port/src/gen/names.h PREFIX
 KEY=src/A.hints ...` writes where every name is in each program, the
@@ -164,7 +161,9 @@ What was learned:
 
 - capstone names 98h/99h `cwde`/`cdq` in 16-bit mode; disasm.py renames
   them to CBW/CWD.
-- A `code SEG:OFF NAME` also names the label.
+- Shifts and rotates of memory by CL keep an explicit BYTE/WORD/DWORD
+  PTR: CL cannot tell the operand's width.
+- A name given twice is refused; give each place its own.
 - The source is regenerated from the hints every time; never edit
   build/*.ASM.
 - Hints and docs may have CRLF line ends (Windows); tools that write
@@ -177,80 +176,67 @@ Goal: names, records and rules in the hints, each claim checked by a
 run or marked as read from the code ("presumably", "not checked").
 
 **The runner.** `tools/run.py [options] PROGRAM [ARGS]` runs a program
-in `dosrun`: a 386 CPU (real mode; protected mode without paging and
-task switches, V86 mode; see the top of "protected mode" in
-tools/run/cpu.c; INT 15h AH=87h/88h/89h), VGA (planar, chain-4, Mode X, the
-retrace), PIT/PIC/keyboard, a Microsoft-compatible INT 33h mouse, a game
-port (201h; no stick unless `-joy` gives one), BIOS,
-both 8237 DMA controllers and a Sound Blaster 16
-(DSP and mixer configuration, so the game's own sound drivers run; `-wav`
-writes what it played, `-sb` its transfers), an OPL2 at 388h (its timers,
-so that a driver's probe finds an AdLib; `-oplwav` writes what it played,
-through runtime/opl.c: 49716 Hz mono from t=0, the chip's sound, not its
-exact samples), and a small DOS whose drives are
-all the game's files with a writable layer in `build/run/state`, each
-drive with its own current directory; programs start on D:. Everything
-runs on an emulated clock (6 M instructions a second by default):
-nothing reads the host's clock, the same arguments give the same run,
-and the report ends with hashes of memory and video memory.
+in `dosrun`, on an emulated clock (6 M instructions a second by default,
+`-ips`): nothing reads the host's clock, the same arguments give the
+same run, and the report ends with hashes of memory and video memory.
+It has:
 
-The DOS layer's `INT 21h AH=38h` returns a fixed US country-information
-block (DOS 3+ layout) and country code 1; a request for a specific country
-returns DOS error 2. It does not load a host or game locale.
-`INT 21h AX=6300h` returns an empty DBCS lead-byte table for the same
-US locale; other AH=63h subfunctions return AL=FFh and carry set.
-The pointer and byte-pair layout follow Microsoft's
-[MS-DOS Encyclopedia, Function 63h](https://www.pcjs.org/documents/books/mspl13/msdos/encyclopedia/section5/).
+- a 386 CPU: real mode, protected mode without paging and task
+  switches, V86 mode (see "protected mode" in tools/run/cpu.c), INT 15h
+  AH=87h/88h/89h; no x87;
+- VGA (planar, chain-4, Mode X, the retrace) and as much VESA as a
+  program needs that sets a mode and then programs the card itself
+  (4F00h..4F03h, modes 100h, 101h, 103h, 256 KB, no bank switching);
+- PIT, PIC, keyboard, BIOS; a Microsoft-compatible INT 33h mouse (its
+  event handlers called on the spot in real mode, through IRQ 12 when
+  the program is in protected mode); a game port (201h; no stick unless
+  `-joy` gives one);
+- both 8237 DMA controllers, a Sound Blaster 16 (DSP and mixer
+  configuration, so a game's own drivers run) and an OPL2 at 388h with
+  its timers;
+- MSCDEX for D:, a disc of one data track or, with `-cue`, the tracks
+  of a cue sheet such as GOG's `game.inst` (Ogg Vorbis through
+  third_party/stb_vorbis);
+- a small DOS whose drives are all the game's files with a writable
+  layer (`-state`, default `build/run/state`), each drive with its own
+  current directory; programs start on D:. It answers what programs ask
+  of DOS's internals with fixed values: a US country block (AH=38h), an
+  empty DBCS table (AX=6300h), a List of Lists at F000:0EA0 with only
+  the first MCB, LASTDRIVE, the boot drive and the NUL device (AH=52h:
+  no DPBs, SFT or CDS, those pointers FFFF:FFFF). Unused vectors
+  60h..FFh share one IRET, so an extender finds free ones by comparing
+  them.
 
-`INT 21h AH=52h` returns ES:BX = F000:0EA0, a List of Lists in the MS-DOS 5
-layout of Ralf Brown's Interrupt List (table 01627) holding only what this
-DOS keeps: the first MCB segment at -02h, sector size 512, LASTDRIVE 26,
-boot drive C: and the NUL device header at 22h (attribute 8004h, the end
-of the driver chain, its entries a RETF). There are no DPBs, SFT, CDS,
-FCB table, buffers or CLOCK$/CON drivers in guest memory, so those
-pointers read FFFF:FFFF and their counts 0; a program that walks the SFT
-finds none.
+Options (all at the top of `tools/run/main.c`):
 
-Unused user interrupt vectors (60h..FFh) point to a shared plain IRET
-handler. This lets a DOS extender locate free vectors by comparing their
-far pointers. BIOS, DOS and mouse services retain distinct callback stubs.
-Protected-mode stops also print full registers, cached segment bases,
-the linear instruction address, CR0 and the GDT location. Use these with
-`-mem` rather than interpreting selectors as real-mode segment addresses.
-The requirements report retains copies of unsupported CPU descriptions,
-including descriptions formatted temporarily during instruction decoding.
+- input: `-key T KEY`, `KEY+`/`KEY-`, `-keys FILE`; `-mouse T X,Y,B`,
+  `-mice FILE`; `-joy T N,X,Y,B`, `-joys FILE` (X and Y the microseconds
+  the one-shots stay high, some 570 for a centred stick; `N,off` takes
+  it away); `-keyat ADDR[#N] KEY+`, `-keysat ADDR FILE` (keys by the
+  passes of a frame loop, not by time); `-put GUEST HOST` (a
+  configuration file the set-up program would have written);
+- stopping and watching: `-until T`, `-break ADDR[#N]`, `-log ADDR`,
+  `-poke ADDR[#N] TARGET HEX`, `-watch ADDR` (who writes a byte),
+  `-rwatch ADDR LEN` (who reads), `-trace FILE N`, `-dos` (every INT 21h
+  call), `-intwatch NN`, `-prof`, `-cover FILE`, `-criterr AH ERR` (the
+  next such call fails through INT 24h), `-requirements` (which devices
+  and memory interfaces the run used), `-v`;
+- results: `-dump ADDR LEN`, `-dumpevery DT`, `-ram`, `-mem` (all 16 MB
+  linear), `-vram`, `-dac`, `-vgastate`, `-shot`, `-shotevery`, `-wav`
+  and `-sb` (the Sound Blaster), `-oplwav` (the OPL2 through
+  runtime/opl.c: the chip's sound, not its exact samples), `-cd`,
+  `-cdwav` (from t=0, not mixed with `-wav`, which starts at the first
+  transfer);
+- `-loadfix` (load above 64 KB: EXEPACK's unpacker fails below it).
 
-Named segment offsets in run.py accept up to eight hexadecimal digits;
-generated labels accept four through eight. This includes 32-bit image
-offsets with +N and #N suffixes. LE translation adds the object's declared
-base and the supplied -base; the actual loader mapping must still be
-established from a run. The synthetic translation tests passed on Debian
-Linux; this change was not checked on Windows or macOS.
-
-Useful options (all at the top of `tools/run/main.c`): `-key T KEY`,
-`KEY+`/`KEY-`, `-keys FILE` (key scripts); `-mouse T X,Y,B`, `-mice FILE`
-(absolute virtual coordinates and a left/right/middle button mask; events,
-button counts and callbacks happen on the emulated clock); `-joy T N,X,Y,B`,
-`-joys FILE` (stick N, 0 or 1, at the game port from T on: X and Y the
-microseconds its one-shots stay high after a write to 201h, some 570 for a
-PC's stick in the middle, B its two buttons; `N,off` takes it away. What a
-program counts in its polling loop then follows from the emulated clock,
-so from `-ips`); `-shot`, `-shotevery`
-(pictures); `-break ADDR[#N]` (stop at the Nth pass), `-log ADDR`
-(registers at each pass), `-keyat ADDR[#N] KEY+` (a key down or up at
-the Nth pass, input by a frame loop's passes; `-keysat ADDR FILE` for
-many), `-watch ADDR` (who writes a byte, when),
-`-dump ADDR LEN`, `-dumpevery DT` (a time series), `-trace FILE N`,
-`-dos` (every INT 21h call with its file), `-intwatch NN`, `-prof`,
-`-ram`/`-vram` (memory for memcmp.py), `-dac` (the 256 colours), `-wav`, `-cdwav`, `-oplwav`, `-put GUEST HOST` (a
-configuration file the set-up program would have written), `-loadfix`
-(load above 64 KB: EXEPACK's unpacker fails in a program loaded below
-it, e.g. a driver EXECed by a small program). run.py translates
-addresses by the hints' names (`CODE:1387`, `DATA:9AA0+4`, `L13B2`, a
-`name`, `PROG:name` for another program's hints); a loader shares its
-base name with the image it loads, whose addresses translate with
-run.py's own `-base LIN` (the image's linear base, e.g. where the
-emulated loader put it).
+run.py translates addresses by the hints' names (`CODE:1387`,
+`DATA:9AA0+4`, `L13B2`, a `name`, `PROG:name` for another program's
+hints, offsets up to eight digits for 32-bit images); a loader shares
+its base name with the image it loads, whose addresses translate with
+`-base LIN` (the image's linear base, found in a run). A stop in
+protected mode prints the registers, the cached segment bases, the
+linear address, CR0 and the GDT: use those with `-mem`, not selectors
+as real-mode segments.
 
 To get the game somewhere without a window (a place in a level, a rare
 event): key scripts with random presses, many seeds in parallel, a
@@ -258,22 +244,15 @@ event): key scripts with random presses, many seeds in parallel, a
 got there with `-dump`/`-shot`.
 
 Not in the runner: paging and task switches (so no extender that needs
-them), VCPI/DPMI hosts, x87 instructions, EMS/XMS,
-the PC speaker's sound, the OPL at the Sound Blaster's ports (2x8h,
-2x9h; only 388h/389h), savestates, a window. VESA is there as little as a program that sets a mode and then
-programs the card itself needs: 4F00h..4F03h, modes 100h, 101h and 103h
-in 256 colours with an SVGA card's registers (8 pixels a character
-clock, 800x600 on a 40 MHz clock), 256 KB of video memory and no bank
-switching. CD audio is there as a file: MSCDEX answers for D:, a disc of one
-data track or, with `-cue`, the tracks of a cue sheet such as GOG's
-`game.inst`; `-cd` prints the plays and the channel settings,
-`-cdwav` writes what the drive played (44.1 kHz stereo from t=0, the
-tracks' Ogg Vorbis through third_party/stb_vorbis), not mixed with
-`-wav` (which starts at the Sound Blaster's first transfer).
+them), VCPI/DPMI hosts, x87 instructions, EMS/XMS, the PC speaker's
+sound, the OPL at the Sound Blaster's ports (2x8h, 2x9h), savestates, a
+window.
 
-**Files.** Each data format gets a tool in the project (`tools/NAMEfiles.py`)
-that parses the files and writes them back to identical bytes, and shows
-them (pictures as PNG). A format understood this way is understood.
+**Files.** Each data format gets a tool in the project
+(`tools/NAMEfiles.py`) that parses the files and writes them back to
+identical bytes, and shows them (pictures as PNG). A format understood
+this way is understood. Formats many games share are the kit's
+(`flifiles.py` for FLI/FLC).
 
 What was learned:
 
@@ -297,27 +276,28 @@ point, then free to modernise.
 
 **Over the memory image first.** The port loads the player's program
 file into a megabyte of real-mode memory where dosrun loads it
-(`rm_load_exe` with `RM_LOAD_PSP`, the SHA-256 from symmap.py's header)
-and translates routine by routine; the C reads and writes that memory
-through `rb`/`rw`/`frb`... by the hints' names, so records that point at
-each other with 16-bit offsets keep working, and a routine not yet
-translated can stop the program with its name. Video goes through
-`vga.c` (the same ports and planes the assembly used), the frame wait
-through `frame.c`. Both are stepping stones: once everything is C, data
-moves into structures and pictures into bitmaps, one at a time.
+(`rmem.h`: `rm_load_exe` with `RM_LOAD_PSP`, the SHA-256 from symmap.py's
+header; the BIOS data area filled as the runner fills it) and translates
+routine by routine; the C reads and writes that memory through
+`rb`/`rw`/`frb`... by the hints' names, so records that point at each
+other with 16-bit offsets keep working, and a routine not yet translated
+can stop the program with its name. Video goes through `vga.c` (the same
+ports and planes the assembly used; it starts in text mode 3, as DOS
+leaves the card), the frame wait through `frame.c`. Both are stepping
+stones: once everything is C, data moves into structures and pictures
+into bitmaps, one at a time.
 
-A protected-mode program (a pMAX image) goes into `pmem.h`'s 16 MB of
-linear memory instead: `pm_load` puts the image where the extender put
-it in dosrun and gives each descriptor's selector relocations the
-selector the extender gave (both found once in a run: `-break` at the
-image's entry, `-mem`, the image's bytes searched for), and the C reads
-by 32-bit offsets at `pm_ds` (`rb`/`rw`/`rd`...) or by linear address
-(`lrb`...). The extender's own tables and heap are not modelled; compare
-with `-mem A` in dosrun, `pm_write` in the port and `memcmp.py ... --base
-LINEAR`.
+A protected-mode program goes into `pmem.h`'s 16 MB of linear memory
+instead: `pm_load` puts the image where the extender put it in dosrun
+and gives its selector relocations the selectors the extender gave
+(both found once in a run: `-break` at the image's entry, `-mem`, the
+image's bytes searched for), and the C reads by 32-bit offsets at
+`pm_ds` (`rb`/`rw`/`rd`...) or by linear address (`lrb`...). The
+extender's own tables and heap are not modelled; compare with `-mem A`
+in dosrun, `pm_write` in the port and `memcmp.py ... --base LINEAR`.
 
-**Compare.** Stop the original in dosrun at a routine (`-break
-name#N -ram A -vram AV`) and the port at the same pass (its own counter;
+**Compare.** Stop the original in dosrun at a routine (`-break name#N
+-ram A -vram AV`) and the port at the same pass (its own counter;
 `rm_write`, `vga_write_planes`), then `tools/memcmp.py HINTS A B --vram
 AV BV --skip STACK`: the runs of differing bytes with the name at or
 before each. Equal but for what has no reason to be (the stack, a saved
@@ -325,24 +305,27 @@ vector, a driver's scratch space) is the goal; write down where and how
 each check was made. The same keys: `frame_record` writes each key byte
 with its picture number, which becomes a key script for dosrun (time =
 start + picture / rate: find the start and the rate once with `-log` on
-the original's frame wait).
-A project may want a `portcmp.py` that does all this for one key script
-(not in the kit yet: the one made so far is tied to its game).
+the original's frame wait), or `-keysat` on the frame wait directly.
+A script that does all this for one key script belongs to the project.
 
 **The frame.** A DOS game's frame is paced by the retrace or a timer
 tick (often a sound driver's callback). frame.c keeps the video mode's
 refresh rate, runs a tick callback and hands the keys over first; for a
-loop that waits on the keyboard alone `frame_wait_keys` lets the
-program go on before the tick, as a fast PC did. Measure the rate the
-original's tick has in dosrun before trusting 70 Hz.
+loop that waits on the keyboard alone `frame_wait_keys` lets the program
+go on before the tick, as a fast PC did. Measure the rate the original's
+tick has in dosrun before trusting 70 Hz.
 
 **Sound.** Music modules play through `modplay.c` (micromod) with the
-driver's timing where the game depends on it (positions, pattern-jump
-callbacks: modplay_jump, modplay_set_jump_hook); effects as notes put
-into a channel (modplay_note). Other formats need their own player.
-CD audio (MSCDEX's plays) comes from the release's cue sheet through
-`cdaudio.c`; the port answers the program's requests from it and mixes
-it into its audio callback (cda_mix).
+driver's timing where the game depends on it (`modplay_jump`,
+`modplay_set_jump_hook`); effects as notes put into a channel
+(`modplay_note`). AdLib music goes through `opl.h` (the OPL2) and
+`oplq.h`: a port that makes its timer's interrupts on its own thread
+counts them by the samples played and stamps each register write with
+its sample (`oplq_played` plus a lead), and `oplq_render` in the audio
+callback makes each write at its sample, the same headless and in a
+window. CD audio (MSCDEX's plays) comes from the release's cue sheet
+through `cdaudio.c`, mixed in the audio callback (`cda_mix`). Other
+formats need their own player.
 
 **Keys through the BIOS.** A program with no INT 9 handler of its own
 asked INT 16h: `bioskey.c` is that keyboard (hand `bioskey_put` to
@@ -351,45 +334,35 @@ AH=0), with the characters the runner's BIOS gives, so a key script
 means the same in the port.
 
 **The platform.** `platform.h`: a window showing an indexed picture in
-the 4:3 of a VGA screen (Alt+Enter full screen; Print Screen writes the
-picture shown as screenshot_NNNN.png, `shot.h`; full screen on a Steam
-Deck), PC scan codes, a monotonic clock, an audio callback, the mouse
-(as a pointer on the picture with its clicks, `plat_mouse`, or as a
-device with the buttons held and its movement, `plat_mouse_motion`,
-kept to the window by `plat_mouse_grab`, for a program that read a
-mouse driver).
-`plat_null.c` runs headless on a virtual clock for tests
-(`DK_FRAMES`, `DK_KEYS`, `DK_MOUSE`, `DK_MOUSEMOVE`, `DK_DUMP`, `DK_SHOTS` for PNG
-screenshots by picture number). It has no audio device unless
-`DK_AUDIO=1` or `DK_WAV=file` asks for a virtual one: the audio callback
-is then asked for the frames of the virtual clock's time each time
-`plat_sleep_ms` moves it on (on the program's own thread, a fraction of
-a frame carried), and `DK_WAV` writes them as a WAVE file. That clock
-moves only in `plat_sleep_ms`: what the program does between two sleeps
-takes no time, so the time the original spent inside a timer tick (its
-delays between register writes) is not modelled, a decision to look at
-again if listening shows a need. A port that makes its timer's
-interrupts on its own thread counts them by the samples played and
-stamps its OPL2 writes with their sample (`oplq.h`: `oplq_played`, the
-stamp that count plus a lead; `oplq_render` in the callback makes each
-write at its sample), which runs the same way headless and in a window.
-Controllers become keys
-(`pad.h`, a table per situation). `textmode.h` draws an 80x25 screen for
-a setup program in the style of DOS's. `cdimage.h` finds the GOG
-release and on the first start unpacks its CD image or, for a game
-installed as a folder, copies that folder (`sys_find_game` then finds
-it in the data folder).
+the 4:3 of a VGA screen (Alt+Enter full screen; tear-free presents with
+`plat_set_vsync`; Print Screen writes screenshot_NNNN.png, `shot.h`;
+full screen on a Steam Deck), PC scan codes, a monotonic clock, an audio
+callback, the mouse (as a pointer on the picture, `plat_mouse`, or as a
+device with buttons held and movement, `plat_mouse_motion`, kept to the
+window by `plat_mouse_grab`). `plat_null.c` runs headless on a virtual
+clock for tests (`DK_FRAMES`, `DK_KEYS`, `DK_MOUSE`, `DK_MOUSEMOVE`,
+`DK_DUMP`, `DK_SHOTS`); with `DK_AUDIO=1` or `DK_WAV=file` it has a
+virtual audio device whose callback is asked for the clock's samples
+each time `plat_sleep_ms` moves it on. That clock moves only in
+`plat_sleep_ms`: what the program does between two sleeps takes no time.
+Controllers become keys (`pad.h`, a table per situation). `textmode.h`
+draws an 80x25 screen in the style of DOS's; `hud.h` a box at the top of
+the picture (the volume keys, docs/PLAYER-SETTINGS.md); `fli.h` plays
+FLI/FLC. `cdimage.h` finds the GOG release and on the first start
+unpacks its CD image or copies its folder; `inno.h` reads a Windows
+installer; `update.h` offers a newer release when the player agrees.
 
 **Modernising.** Once equal: the common launcher (setup screen: options,
-sound, controller) described by docs/LAUNCHER.md, with the port supplying
-only its pages and items; quality of life fixes (switchable, off in
-comparisons), skipping intros, the original's bugs fixed only where they
-bother, each such change documented as a change from the original.
+sound, controller) described by docs/LAUNCHER.md, with the port
+supplying only its pages and items; quality of life fixes (switchable,
+off in comparisons), skipping intros, the original's bugs fixed where
+they bother, each such change documented as a change from the original.
 
 **Releases.** Every port ships the same way on every platform, as
 docs/RELEASE.md says: one program to double click (on a Mac one app),
 nothing to install, the GOG release found by itself, a README.txt for
-players. The template's workflow builds these packages.
+players, uninstall scripts. The template's workflow builds these
+packages.
 
 **Wording.** A port made this way is a native compatibility
 implementation requiring an installed copy of the game: it contains only
@@ -398,57 +371,20 @@ data at run time. Never "standalone" or "completely native".
 
 ## Limits
 
-Worked through for real-mode MZ programs written in assembly (MASM/TASM),
-linked by Microsoft LINK, 186/386 instructions in 16-bit code. Not tried:
+Worked through to a port: real-mode MZ programs written in assembly
+(MASM/TASM), linked by LINK, 186/386 instructions in 16-bit code;
+pMAX flat images (the port on `pmem.h`); raw 32-bit modules (`offrel`)
+and 16-bit drivers (`use16`); Watcom C. Rebuilt byte for byte, port
+under way: compiled Borland C programs of many code segments linked by
+TLINK. Not, or only in part:
 
-- compiled programs (Borland C, Microsoft C, Watcom): disasm.py handles
-  their code, but the C library is large, far calls and data segments
-  many, and the compiler's idioms (switch tables, far pointers in data)
-  will want more hints and probably new analysis;
-- COM programs (no MZ header), overlays, EXEPACK/PKLITE-packed programs
-  (unpack first; the runner runs them as they are). A program packed
-  with LZEXE 0.91 ("LZ91" at 1Ch) is unpacked by `tools/unlzexe.py` into
-  build/unpacked/; its hints name that file (`exe build/unpacked/...`)
-  and say `linker unpacked`, as the packer kept neither the header's
-  layout nor the relocations' segments. With the packed program named
-  (`linker unpacked GAME/GAME.EXE`) build.py and check.py unpack it
-  themselves when the file is not there, and run.py takes the hints'
-  names for the packed program it runs. Check the unpacked image against
-  the packed program stopped at its own entry in the runner (`-break`,
-  `-ram`). One game's two programs were unpacked and checked this way;
-  LZEXE 0.90 is refused;
-- protected mode: the analysis and build.py take pMAX flat images
-  (`pmax` in the hints: 32-bit code, USE32 source, the descriptors as
-  segments; tests/flat, and one game's main program rebuilt byte for
-  byte) and raw 32-bit images (`bin`: no header, entered at 0, as a
-  program's loadable driver; tests/raw; with `offrel` a module the host
-  relocates by adding its base to the dwords of a list, which then says
-  exactly where the offsets are and build.py checks it; tests/relmod),
-  and little-endian LE images (`le` in the hints), including LE images
-  embedded in an MZ/DOS/4GW file. LE objects and uncompressed legal,
-  zero-filled and invalid pages are mapped; fixup records are preserved,
-  internal selector fixups are used by the analysis, and the LE writer
-  preserves the original bytes in selector-fixup fields. Iterated and
-  compressed LE pages are refused. The analysis locates an embedded LE
-  header by validating its tables when the MZ extended-header pointer is
-  not usable. When a preceding MZ header points to that LE header, its
-  beginning is the origin of file-relative page offsets; a bound DOS
-  program before that MZ image is preserved by the writer. Independent
-  synthetic images check ordinary, fallback and bound header discovery
-  and byte-identical rebuilding. The runner
-  emulates the 386's protected mode (tests/pmode: the BIOS's way in, a
-  fault, an interrupt, ring 3, a call gate, V86 mode) for an extender
-  that switches by itself; no real extender run through yet. The port's
-  side is `pmem.h` (tests/flat/port.c, compared with memory made by the
-  test, not with a run: dosrun does not load a pMAX image by itself). LE
-  has a selftest image with multiple objects and nonzero selector-fixup
-  fields; the
-  real DOS/4GW image has been parsed, but its reconstructed hints have
-  not yet been built. A 32-bit instruction with a 16-bit address and no
-  register (67h) is written with TASM's address-size operator,
-  `DS:[SMALL 27H]` (tasm.py takes it; tests/enc32, tests/relmod);
-- other linkers' header layouts (`build.py`'s write_mz is Microsoft
-  LINK's; TLINK's is there, `linker tlink`).
+- Microsoft C: not tried; expect other idioms and new `asm` options;
+- overlays: not tried;
+- LE images: objects with uncompressed pages are read and rebuilt,
+  internal selector fixups used; iterated and compressed pages are
+  refused. LE programs have been rebuilt byte for byte from their
+  hints; a DOS/4GW program runs in the runner as far as its extender
+  needs no paging.
 
 Each new game will stretch one of these; extend the kit (with a test in
 tests/) rather than the project.
