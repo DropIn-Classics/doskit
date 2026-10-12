@@ -354,24 +354,20 @@ data at run time. Never "standalone" or "completely native".
 ## Limits
 
 Worked through to a port: real-mode MZ programs written in assembly
-(MASM/TASM), linked by LINK, 186/386 instructions in 16-bit code.
-Rebuilt byte for byte, port under way: compiled Borland C programs of
-many code segments linked by TLINK. Rebuilt but not ported: a pMAX
-program;
-raw 32-bit modules (`offrel`) and 16-bit drivers (`use16`) in tests.
-Not, or only in part:
+(MASM/TASM), linked by LINK, 186/386 instructions in 16-bit code;
+pMAX flat images (the port on `pmem.h`); raw 32-bit modules (`offrel`)
+and 16-bit drivers (`use16`); Watcom C. Rebuilt byte for byte, port
+under way: compiled Borland C programs of many code segments linked by
+TLINK. Not, or only in part:
 
-- Microsoft C and Watcom: not tried; expect other idioms and new `asm`
-  options;
+- Microsoft C: not tried; expect other idioms and new `asm` options;
 - COM programs (no MZ header) and overlays: not supported by the
   analysis;
 - LE images: objects with uncompressed pages are read and rebuilt,
   internal selector fixups used; iterated and compressed pages are
-  refused. A DOS/4GW program runs in the runner as far as its
-  extender needs no paging; no LE program has been rebuilt from hints
-  yet;
-- the port's side of protected mode (`pmem.h`) is checked only against
-  memory made by a test (tests/flat), not against a run.
+  refused. LE programs have been rebuilt byte for byte from their
+  hints; a DOS/4GW program runs in the runner as far as its extender
+  needs no paging.
 
 Each new game will stretch one of these; extend the kit (with a test in
 tests/) rather than the project.
