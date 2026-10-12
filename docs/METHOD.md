@@ -361,8 +361,7 @@ under way: compiled Borland C programs of many code segments linked by
 TLINK. Not, or only in part:
 
 - Microsoft C: not tried; expect other idioms and new `asm` options;
-- COM programs (no MZ header) and overlays: not supported by the
-  analysis;
+- overlays: not tried;
 - LE images: objects with uncompressed pages are read and rebuilt,
   internal selector fixups used; iterated and compressed pages are
   refused. LE programs have been rebuilt byte for byte from their
