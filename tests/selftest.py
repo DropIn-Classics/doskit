@@ -23,6 +23,7 @@ In build/selftest (a project as a game's would be, see kit.py):
      tests/pmmouse/PMMOUSE.ASM into game/PMMOUSE/PMMOUSE.EXE,
      tests/rwatch/RWATCH.ASM into game/RWATCH/RWATCH.EXE,
      tests/strreg/STRREG.ASM into game/STRREG/STRREG.EXE,
+     tests/latch/LATCH.ASM into game/LATCH/LATCH.EXE,
      tests/adlib/ADLIB.ASM into game/ADLIB/ADLIB.EXE,
      tests/sb16/SB16.ASM into game/SB16/SB16.EXE, tests/cdplay/CDPLAY.ASM
      into game/CDPLAY/CDPLAY.EXE, tests/country/COUNTRY.ASM into
@@ -96,6 +97,9 @@ In build/selftest (a project as a game's would be, see kit.py):
      kept); STRREG.EXE, which checks the registers REP STOS and REP MOVS
      leave (SI untouched by STOS, on the runner's block path of 16 and
      more elements, in its loop and backwards) and says "strreg ok";
+     LATCH.EXE, which checks in mode 0Dh that a write takes the bits its
+     bit mask leaves out from the latches of the last read and says
+     "latch ok";
      ADLIB.EXE, which
      probes the runner's OPL2 as drivers do (the timers' flags in the
      status, masked, cleared, not set before their time) and says "adlib
@@ -124,7 +128,10 @@ In build/selftest (a project as a game's would be, see kit.py):
      files: the copy taken, declined, the two messages, the bar) says
      "dialog ok"; tests/hud/hudtest.c
      (hud.c: the box, a letter, the bar, the size at 800x600, the
-     pictures shown) says "hud ok"; tests/opl/opltest.c (opl.c: a
+     pictures shown) says "hud ok"; tests/bioskey/keytest.c (bioskey.c:
+     a letter plain and with Shift, keys without a character, an E0
+     key, fifteen keys of room, the shift states) says "bioskey ok";
+     tests/opl/opltest.c (opl.c: a
      note's frequency and level with the rhythm mode off and on, the
      tom-tom a sine, the cymbal a mixture of high frequencies at its
      envelope's level, the hi-hat noise, the snare tone and noise, each
@@ -878,6 +885,21 @@ def check_xfer(py):
         raise SystemExit('selftest FAILED: MULTIS2 from the carried hints')
     out = run([py, os.path.join(TOOLS, 'xfer.py'), 'src/MULTISEG.hints', 'src/MULTIS2.hints',
                '--check'])
+    # hints carried from a folder below the target's are named from the
+    # target's folder, where check.py looks for them
+    os.makedirs(os.path.join(PROJ, 'build', 'xf', 'old'))
+    with open(os.path.join(HERE, 'multiseg', 'src', 'MULTISEG.hints')) as f:
+        text = f.read()
+    with open(os.path.join(PROJ, 'build', 'xf', 'old', 'MULTISEG.hints'), 'w') as f:
+        f.write(text)
+    with open(os.path.join(PROJ, 'build', 'xf', 'MULTIS2.hints'), 'w') as f:
+        f.write(carried.split(xfer_mark)[0])
+    for more in ([], ['--check']):
+        run([py, os.path.join(TOOLS, 'xfer.py'), 'build/xf/old/MULTISEG.hints',
+             'build/xf/MULTIS2.hints'] + more)
+    with open(os.path.join(PROJ, 'build', 'xf', 'MULTIS2.hints')) as f:
+        if xfer_mark + 'old/MULTISEG.hints by ' not in f.read():
+            raise SystemExit('selftest FAILED: xfer.py did not name its source from the target\'s folder')
     # a name of the file's own lines is not replaced by a carried one at the
     # same address, nor given again at another (the sibling may use that data
     # otherwise)
@@ -904,6 +926,84 @@ def check_xfer(py):
             print(names)
             raise SystemExit(f'selftest FAILED: symmap.py did not write {want!r} for the sibling')
     return len(exe)
+
+
+TWIN_ASM = """; a test program of the kit's own (tests/selftest.py, check_xfer_alike)
+.186
+CODE SEGMENT PARA PUBLIC 'CODE'
+	ASSUME CS:CODE
+start:
+	CALL one
+	CALL two
+	MOV AX,4C00H
+	INT 21H
+one:
+	PUSH AX
+	PUSH BX
+	PUSH CX
+	PUSH DX
+	XOR AX,AX
+	INC BX
+	DEC CX
+	MOV DX,AX
+	POP DX
+	POP CX
+	POP BX
+	POP AX
+	MOV AX,1
+	RET
+two:
+	PUSH AX
+	PUSH BX
+	PUSH CX
+	PUSH DX
+	XOR %s
+	INC BX
+	DEC CX
+	MOV DX,AX
+	POP DX
+	POP CX
+	POP BX
+	POP AX
+	MOV BX,2
+	ADD BX,BX
+	RET
+CODE ENDS
+STACK SEGMENT PARA STACK 'STACK'
+	DB 100H DUP (?)
+STACK ENDS
+	END start
+"""
+
+
+def check_xfer_alike(py):
+    """two routines that begin with the same twelve instructions, the
+    second's beginning changed in the sibling: xfer.py leaves the second's
+    hint not mapped instead of carrying it to the first, the one place in
+    the sibling that still looks like it"""
+    own = 'segment CODE 0000 CODE\nsegment STACK 0004 STACK stack size=100\n'
+    for name, fifth in (('TWINA', 'AX,AX'), ('TWINB', 'SI,SI')):
+        src = os.path.join(PROJ, 'build', name + '.ASM')
+        with open(src, 'w') as f:
+            f.write(TWIN_ASM % fifth)
+        a = tasm.Assembler(src)
+        a.assemble()
+        out = tlink.link([tlink.module_from_asm(a, name)])
+        os.makedirs(os.path.join(PROJ, 'game', name))
+        with open(os.path.join(PROJ, 'game', name, name + '.EXE'), 'wb') as f:
+            f.write(build.write_mz(out, None, [0]))
+        with open(os.path.join(PROJ, 'build', name + '.hints'), 'w') as f:
+            f.write(f'exe {name}/{name}.EXE\n' + own)
+            if name == 'TWINA':
+                f.write('code CODE:0000 start\ncomment CODE:000B the first\n'
+                        'comment CODE:001D the second\n')
+    run([py, os.path.join(TOOLS, 'xfer.py'), 'build/TWINA.hints', 'build/TWINB.hints'])
+    with open(os.path.join(PROJ, 'build', 'TWINB.hints')) as f:
+        carried = f.read()
+    if ('\ncomment CODE:000B the first\n' not in carried or 'CODE:000B the second' in carried
+            or '(not mapped) comment CODE:001D the second' not in carried):
+        print(carried)
+        raise SystemExit('selftest FAILED: xfer.py carried a routine\'s hint to another that begins alike')
 
 
 def check_segment_order(py):
@@ -1008,6 +1108,172 @@ def check_hdrpad(py):
             print(out)
             raise SystemExit(f'selftest FAILED: MULTIPAD with "linker tlink 30{opt}" not {want}')
     return len(d)
+
+
+class LzBits:
+    """the writer of unlzexe.py's stream: bits in 16-bit words, each word's
+    place taken when the one before is full, whole bytes in between"""
+    def __init__(self):
+        self.out = bytearray(2)
+        self.at, self.n = 0, 0
+
+    def bit(self, b):
+        self.out[self.at + self.n // 8] |= b << (self.n % 8)
+        self.n += 1
+        if self.n == 16:
+            self.at, self.n = len(self.out), 0
+            self.out += bytes(2)
+
+    def byte(self, b):
+        self.out.append(b)
+
+
+def lz_pack(img):
+    """img packed for unlzexe.py with a packer of our own (the longest copy
+    at each place): every form of the stream, a segment mark included"""
+    w = LzBits()
+    i, marked = 0, False
+    while i < len(img):
+        best, dist = 0, 0
+        for j in range(max(0, i - 8192), i):
+            n = 0
+            while n < 256 and i + n < len(img) and img[j + n] == img[i + n]:
+                n += 1
+            if n >= best:
+                best, dist = n, i - j
+        if 2 <= best <= 5 and dist <= 256:
+            for b in (0, 0, (best - 2) >> 1, (best - 2) & 1):
+                w.bit(b)
+            w.byte(256 - dist)
+        elif best >= 3:
+            w.bit(0)
+            w.bit(1)
+            far = 8192 - dist
+            w.byte(far & 255)
+            if best <= 9:
+                w.byte((far >> 8) << 3 | best - 2)
+            else:
+                w.byte((far >> 8) << 3)
+                w.byte(best - 1)
+            if not marked:              # a mark has no effect
+                marked = True
+                w.bit(0)
+                w.bit(1)
+                w.byte(0)
+                w.byte(0)
+                w.byte(1)
+        else:
+            best = 1
+            w.bit(1)
+            w.byte(img[i])
+        i += best
+    w.bit(0)
+    w.bit(1)
+    w.byte(0)
+    w.byte(0)
+    w.byte(0)
+    return bytes(w.out)
+
+
+def lz_relocs(rel):
+    """the relocations (linear addresses, ascending) as a packed file has them"""
+    out = bytearray()
+    seg, off = 0, 0
+    for a in rel:
+        while a - (seg * 16 + off) > 0xFFFF:
+            out += bytes(3)
+            seg += 0x0FFF
+        span = a - (seg * 16 + off)
+        out += bytes([span]) if 0 < span < 256 else struct.pack('<BH', 0, span)
+        off += span
+        seg, off = seg + (off >> 4), off & 15
+    return bytes(out) + struct.pack('<BH', 0, 1)
+
+
+def check_unlzexe(py):
+    """MULTISEG.EXE packed as LZEXE 0.91 lays a file out (by lz_pack, the
+    unpacker's place filled with zeros: no packer's code is here) and
+    unpacked by unlzexe.py: the image, the relocations, the entry and the
+    stack are MULTISEG's, and build.py makes the unpacked file again with
+    `linker unpacked` only; relocations far apart come back too"""
+    sys.path.insert(0, TOOLS)
+    import unlzexe
+    with open(os.path.join(PROJ, 'game', 'MULTISEG', 'MULTISEG.EXE'), 'rb') as f:
+        d = f.read()
+    nrel, hdr, minalloc = struct.unpack_from('<3H', d, 6)
+    ss, sp, _, ip, cs, relat = struct.unpack_from('<6H', d, 0x0E)
+    img = d[hdr * 16:]
+    rel = sorted(o + s * 16 for o, s in (struct.unpack_from('<HH', d, relat + 4 * i)
+                                         for i in range(nrel)))
+    packed = lz_pack(img)
+    packed += bytes(-len(packed) % 16)
+    stub = bytes(unlzexe.RELOCS_AT - 14) + lz_relocs(rel)
+    grows = (len(img) - len(packed) + 15) // 16
+    stub = struct.pack('<7H', ip, cs, sp, ss, len(packed) // 16, grows, 14 + len(stub)) + stub
+    size = 32 + len(packed) + len(stub)
+    h = struct.pack('<2s13H4s', b'MZ', size % 512, (size + 511) // 512, 0, 2,
+                    minalloc + grows + (len(stub) + 15) // 16 + 9, 0xFFFF, 0, 0x80, 0, 14,
+                    len(packed) // 16, 0x1C, 0, b'LZ91')
+    os.makedirs(os.path.join(PROJ, 'game', 'MULTILZ'))
+    with open(os.path.join(PROJ, 'game', 'MULTILZ', 'MULTILZ.EXE'), 'wb') as f:
+        f.write(h + packed + stub)
+    run([py, os.path.join(TOOLS, 'unlzexe.py'), 'MULTILZ/MULTILZ.EXE'])
+    with open(os.path.join(PROJ, 'build', 'unpacked', 'MULTILZ.EXE'), 'rb') as f:
+        u = f.read()
+    nrel2, hdr2, min2 = struct.unpack_from('<3H', u, 6)
+    rel2 = [o + s * 16 for o, s in (struct.unpack_from('<HH', u, 0x1E + 4 * i)
+                                    for i in range(nrel2))]
+    if (u[hdr2 * 16:] != img or rel2 != rel or min2 != minalloc
+            or struct.unpack_from('<5H', u, 0x0E) != (ss, sp, 0, ip, cs)):
+        raise SystemExit('selftest FAILED: unlzexe.py did not give MULTISEG.EXE back')
+    # and build.py makes the unpacked file again with `linker unpacked`
+    with open(os.path.join(HERE, 'multiseg', 'src', 'MULTISEG.hints')) as f:
+        text = f.read().replace('exe MULTISEG/MULTISEG.EXE', 'exe build/unpacked/MULTILZ.EXE')
+    for linker, want in (('linker unpacked', 'IDENTICAL'), ('', 'differs')):
+        hints = os.path.join(PROJ, 'build', 'MULTILZ.hints')
+        with open(hints, 'w') as f:
+            f.write(text.replace('linker tlink 30', linker))
+        out = run([py, os.path.join(TOOLS, 'build.py'), hints], check=False)
+        if want not in out:
+            print(out)
+            raise SystemExit(f'selftest FAILED: MULTILZ with "{linker}" not {want}')
+    # with the packed program named the unpacked file is made when it is
+    # not there, and run.py finds the hints for the packed program
+    unpacked = os.path.join(PROJ, 'build', 'unpacked', 'MULTILZ.EXE')
+    os.remove(unpacked)
+    with open(hints, 'w') as f:
+        f.write(text.replace('linker tlink 30', 'linker unpacked MULTILZ/MULTILZ.EXE'))
+    out = run([py, os.path.join(TOOLS, 'build.py'), hints], check=False)
+    with open(unpacked, 'rb') as f:
+        if 'IDENTICAL' not in out or f.read() != u:
+            print(out)
+            raise SystemExit('selftest FAILED: MULTILZ not unpacked by `linker unpacked PACKED`')
+    import disasm
+    if disasm.Hints(hints).packed != 'MULTILZ/MULTILZ.EXE':
+        raise SystemExit('selftest FAILED: the hints do not keep the packed program\'s name')
+    # the names header describes the packed file, the one a port loads
+    import hashlib
+    run([py, os.path.join(TOOLS, 'symmap.py'), 'build/multilz_names.h', 'MULTILZ',
+         'MULTILZ=build/MULTILZ.hints'])
+    with open(os.path.join(PROJ, 'build', 'multilz_names.h')) as f:
+        names = f.read()
+    for want in ('#define MULTILZ_EXE "MULTILZ/MULTILZ.EXE"', f'#define MULTILZ_SIZE {len(h + packed + stub)}u',
+                 '#define MULTILZ_SHA256 "%s"' % hashlib.sha256(h + packed + stub).hexdigest()):
+        if want not in names:
+            print(names)
+            raise SystemExit(f'selftest FAILED: symmap.py did not write {want!r} for a packed program')
+    os.remove(os.path.join(PROJ, 'build', 'multilz_names.h'))
+    far = [3, 0x20, 0x11F, 0x1234, 0x30000, 0x30002]
+    got = unlzexe.unpack_relocs(lz_relocs(far), 0, 1000)
+    if [o + s * 16 for o, s in got] != far:
+        raise SystemExit('selftest FAILED: unlzexe.py reads relocations far apart wrongly')
+    for bad in (d, h[:0x1C] + b'LZ09' + packed + stub):
+        try:
+            unlzexe.unpack(bad)
+        except ValueError:
+            continue
+        raise SystemExit('selftest FAILED: unlzexe.py took a file that is not LZEXE 0.91')
+    return len(packed), len(img)
 
 
 def check_update(b):
@@ -1525,6 +1791,7 @@ def main():
           f'LOL.EXE {make_exe("LOL")} bytes; '
           f'IVT.EXE {make_exe("IVT")} bytes; '
           f'STRREG.EXE {make_exe("STRREG")} bytes; '
+          f'LATCH.EXE {make_exe("LATCH")} bytes; '
           f'REQ.EXE {make_exe("REQ")} bytes; '
           f'MULTISEG.EXE {make_multiseg()} bytes'
           % make_relmod())
@@ -1597,12 +1864,15 @@ def main():
             raise SystemExit(f'selftest FAILED: MULTISEG.ASM has no {want!r} (ptr and words '
                              'hints into a code segment other than CODE)')
     print('MULTISEG: routines reached through pointers into FOUR, a segment not named CODE')
+    check_xfer_alike(py)
     print(f'MULTIS2.EXE ({check_xfer(py)} bytes): MULTISEG\'s hints carried by xfer.py '
           'into renamed and shifted code segments, IDENTICAL')
     print(f'interleaved code/data ({check_segment_order(py)} image bytes): IDENTICAL')
     print(f'compact TLINK header ({check_compact_tlink(py)} bytes): IDENTICAL')
     print(f'MULTIPAD.EXE ({check_hdrpad(py)} bytes, a longer header): IDENTICAL with '
           'header=original, differs without')
+    print('MULTILZ.EXE (%d bytes packed as LZEXE 0.91, %d unpacked by unlzexe.py): '
+          'MULTISEG\'s image and relocations, IDENTICAL with linker unpacked' % check_unlzexe(py))
     with open(os.path.join(PROJ, 'build', 'FLAT.ASM')) as f:
         text = f.read()
     for want in ('DW L00D5-C00D6', 'DW L00DE-C00D6', 'DW L00E5-C00D6', '[EDI+C00D6]'):
@@ -1963,6 +2233,11 @@ def main():
         print(out)
         raise SystemExit('selftest FAILED: the registers after REP STOS and REP MOVS')
     print('REP STOS leaves SI, REP MOVS moves it: block path, loop and backwards')
+    out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', 'LATCH/LATCH.EXE'])
+    if 'con: latch ok' not in out:
+        print(out)
+        raise SystemExit('selftest FAILED: a planar write takes its masked-out bits from the latches')
+    print('VGA latches: a write\'s masked-out bits are the last read\'s, bit mask 0 copies four planes')
     out = run([py, os.path.join(TOOLS, 'run.py'), '-until', '1', '-requirements', 'REQ/REQ.EXE'])
     want = ('requirements observed:', 'devices: VGA', 'memory: VGA read/write',
             'unknown ports: 123', 'unimplemented DOS: AH=66', 'unimplemented BIOS: INT 10h/AH=FF AL=00',
@@ -2064,7 +2339,7 @@ def main():
 
     step('4. the C port over the runtime, compared (memcmp.py)')
     srcs = [os.path.join(HERE, 'hello', 'port.c')] + [
-        os.path.join(RUNTIME, f) for f in ('rmem.c', 'vga.c', 'sys.c', 'sha256.c', 'shot.c',
+        os.path.join(RUNTIME, f) for f in ('rmem.c', 'unlzexe.c', 'vga.c', 'sys.c', 'sha256.c', 'shot.c',
                                            'plat_null.c')]
     exe = cc(os.path.join(b, 'port'), srcs, incs=[os.path.join(PROJ, 'port')])
     out = subprocess.run(
@@ -2076,6 +2351,15 @@ def main():
     if out.returncode or 'con: hello from doskit' not in out.stdout:
         print(out.stderr)
         raise SystemExit('selftest FAILED: the port')
+    # a packed program is loaded as the program it unpacks to
+    exe = cc(os.path.join(b, 'unlztest'), [os.path.join(HERE, 'unlzexe', 'unlztest.c')] + [
+        os.path.join(RUNTIME, f) for f in ('rmem.c', 'unlzexe.c', 'sys.c', 'sha256.c')])
+    print(run([exe, os.path.join(PROJ, 'game', 'MULTILZ', 'MULTILZ.EXE'),
+               os.path.join(PROJ, 'build', 'unpacked', 'MULTILZ.EXE')]))
+    # the DOS memory blocks: the program's own and those behind it
+    exe = cc(os.path.join(b, 'memtest'), [os.path.join(HERE, 'rmem', 'memtest.c')] + [
+        os.path.join(RUNTIME, f) for f in ('rmem.c', 'unlzexe.c', 'sys.c', 'sha256.c')])
+    print(run([exe, os.path.join(PROJ, 'game', 'HELLO', 'HELLO.EXE')]))
     w, h, rgb = read_png(os.path.join(b, 'port.png'))
     ppm = open(os.path.join(b, 'port.ppm'), 'rb').read()
     if ppm != b'P6\n%d %d\n255\n' % (w, h) + rgb:
@@ -2185,6 +2469,12 @@ def main():
     if 'hud ok' not in out:
         raise SystemExit('selftest FAILED: hud.c: ' + out)
     print(out.strip())
+    exe = cc(os.path.join(b, 'keytest'), [os.path.join(HERE, 'bioskey', 'keytest.c'),
+                                           os.path.join(RUNTIME, 'bioskey.c')])
+    out = run([exe])
+    if 'bioskey ok' not in out:
+        raise SystemExit('selftest FAILED: bioskey.c: ' + out)
+    print(out.strip())
     exe = cc(os.path.join(b, 'opltest'), [os.path.join(HERE, 'opl', 'opltest.c'),
                                            os.path.join(RUNTIME, 'opl.c')])
     out = run([exe])
@@ -2198,6 +2488,21 @@ def main():
     print(run([py, os.path.join(TOOLS, 'memcmp.py'), 'src/HELLO.hints',
                os.path.join(b, 'orig.ram'), os.path.join(b, 'port.ram'), '--skip', 'STACK',
                '--vram', os.path.join(b, 'orig.vram'), os.path.join(b, 'port.vram')]))
+    # DOS's memory ends at the same paragraph in the runner and the runtime
+    ends = []
+    for name, first in (('orig.ram', 0x60), ('port.ram', 0x66)):
+        with open(os.path.join(b, name), 'rb') as f:
+            ram = f.read()
+        mcb = first
+        while ram[mcb * 16] == ord('M'):
+            mcb += 1 + int.from_bytes(ram[mcb * 16 + 3:mcb * 16 + 5], 'little')
+        if ram[mcb * 16] != ord('Z'):
+            raise SystemExit('selftest FAILED: %s: no chain of memory blocks from %04X' % (name, first))
+        ends.append(mcb + 1 + int.from_bytes(ram[mcb * 16 + 3:mcb * 16 + 5], 'little'))
+    if ends[0] != ends[1]:
+        raise SystemExit('selftest FAILED: DOS memory ends at %04X in the runner, %04X in the runtime'
+                         % tuple(ends))
+    print('DOS memory ends at %04X in the runner and in the runtime' % ends[0])
     check_pmem(py, b)
 
     step('5. every runtime module compiles')

@@ -44,8 +44,17 @@ The hints' syntax is the docstring of tools/disasm.py.
 **The image.** `exe` (MZ), `pmax` (a pMAX flat image), `le` (an LE
 image, also inside a DOS/4GW MZ file) or `bin` (a raw image without a
 header, 32-bit or with `use16` 16-bit: a driver a program loads and
-calls). A program packed with EXEPACK/PKLITE is unpacked first; the
-runner runs it as it is.
+calls). A packed program is unpacked first; the runner runs it as it
+is. LZEXE 0.91 ("LZ91" at 1Ch; 0.90 is refused) is the kit's:
+`tools/unlzexe.py` writes the program to build/unpacked/, its hints
+name that file (`exe build/unpacked/...`) and say `linker unpacked
+GAME/GAME.EXE`, as the packer kept neither the header's layout nor the
+relocations' segments; build.py and check.py then unpack it themselves
+when the file is not there, run.py takes the hints' names for the
+packed program it runs, and the port loads the packed file as the
+program it unpacks to (`rmem.h`). Check the unpacked image against the
+packed program stopped at its own entry in the runner (`-break`,
+`-ram`). EXEPACK and PKLITE need an unpacker from elsewhere.
 
 **Segments.** One `segment` line per segment in image order. Where they
 are: the relocation table's values (each relocated word is a segment's
@@ -138,7 +147,10 @@ of them in image order; the segment names map by where the matched code
 lies and by the relocated words in it. B.hints keeps its own lines
 (exe, segment, linker, relocorder, asm, keeptail and its own names) above
 the carried block; the block is written by xfer.py only, and check.py
-tells when it is out of date.
+tells when it is out of date. A.hints may lie in a folder below
+B.hints' (`src/old/A.hints`, a build no longer worked on: check.py
+builds `src/*.hints` only); the block's first line names it from
+B.hints' folder.
 
 **Names for the C.** `tools/symmap.py port/src/gen/names.h PREFIX
 KEY=src/A.hints ...` writes where every name is in each program, the
@@ -314,6 +326,12 @@ callback makes each write at its sample, the same headless and in a
 window. CD audio (MSCDEX's plays) comes from the release's cue sheet
 through `cdaudio.c`, mixed in the audio callback (`cda_mix`). Other
 formats need their own player.
+
+**Keys through the BIOS.** A program with no INT 9 handler of its own
+asked INT 16h: `bioskey.c` is that keyboard (hand `bioskey_put` to
+`frame_set_keyboard`; `bioskey_peek` and `bioskey_read` are AH=1 and
+AH=0), with the characters the runner's BIOS gives, so a key script
+means the same in the port.
 
 **The platform.** `platform.h`: a window showing an indexed picture in
 the 4:3 of a VGA screen (Alt+Enter full screen; tear-free presents with

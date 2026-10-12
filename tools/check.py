@@ -48,11 +48,16 @@ def build_key(hints):
     """a hash of what a rebuild from these hints depends on"""
     from disasm import program_path
     h = hashlib.sha256()
-    files = [hints]
+    files, packed = [hints], None
     for line in open(hints, encoding='utf-8'):
         f = line.split(';', 1)[0].split()
         if len(f) > 1 and f[0] in ('exe', 'pmax', 'bin', 'le', 'offrel'):
             files.append(program_path(f[1]))
+        elif f[:2] == ['linker', 'unpacked'] and len(f) == 3:
+            packed = program_path(f[2])
+    if packed:
+        # the unpacked file is made from the packed one when needed
+        files[1] = packed
     files += sorted(glob.glob(os.path.join(HERE, '*.py')))
     for path in files:
         h.update(os.path.basename(path).encode() + b'\0')

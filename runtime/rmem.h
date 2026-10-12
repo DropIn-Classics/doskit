@@ -30,8 +30,10 @@ extern uint8_t mem[MEM_SIZE];
  * 0067h for the programs ported so far; `-log` of the entry point in
  * dosrun shows it for another. */
 #define RM_LOAD_PSP 0x0067u
-/* the end of conventional memory the arena reaches */
-#define RM_TOP 0xA000u
+/* the end of conventional memory the arena reaches: dosrun's (MEM_LAST
+ * in tools/run/dos.c), a kilobyte below A000h, so that the free block's
+ * length in its header is the original's too */
+#define RM_TOP 0x9FC0u
 
 /* the segment DS holds nearly always (rb, rw ...); the port sets it */
 extern uint16_t rm_ds;
@@ -44,7 +46,9 @@ extern uint16_t rm_psp, rm_arena;
  * `paras` paragraphs from its PSP on (what it keeps with INT 21h 4Ah), one
  * free block follows up to RM_TOP.  With want_size/want_sha256 (hex, lower
  * case; NULL: not checked) the file must be the one the hints describe
- * (symmap.py's KEY_SIZE, KEY_SHA256).  0, or -1 with a message in err. */
+ * (symmap.py's KEY_SIZE, KEY_SHA256).  A program packed with LZEXE 0.91
+ * is unpacked first (unlzexe.h; size and SHA-256 are the packed file's,
+ * the one the player has).  0, or -1 with a message in err. */
 int rm_load_exe(const char *path, size_t want_size, const char *want_sha256,
                 uint16_t psp, uint16_t paras, char *err, size_t n);
 
@@ -91,5 +95,10 @@ static inline void wd(uint16_t off, uint32_t v)
 uint16_t dos_alloc(uint16_t paras);
 /* 0 on success */
 int dos_free(uint16_t seg);
+/* INT 21h 4Ah: the block at `seg` (the program's own at rm_psp, or one of
+ * dos_alloc) made `paras` paragraphs long: shorter, the rest becomes a
+ * free block (joined with a free one behind it); longer, into a free
+ * block behind it.  0, or -1 with the most it can have in *most. */
+int dos_resize(uint16_t seg, uint16_t paras, uint16_t *most);
 
 #endif

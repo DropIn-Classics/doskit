@@ -63,6 +63,8 @@ agent session leads others working on it.
     game.gog); `inno.py`: lists and unpacks an Inno Setup installer (GOG's
     Windows setup_*.exe, with its .bin files; GOG Galaxy's parts put back
     together); `flifiles.py`: reads and checks Autodesk FLI animations.
+  - `unlzexe.py`: unpacks a program packed with LZEXE 0.91 into a plain
+    MZ program for the analysis (the hints then say `linker unpacked`).
   - `new_project.py`: a new port's repository from `template/`, for a
     game chosen from those installed from GOG (`goglist.py` lists them:
     name, product ID, folder, CD image).
@@ -84,7 +86,12 @@ agent session leads others working on it.
     program it (ports, planes, Mode X, mode 12h/13h, the picture scanned
     out); `frame.h`: pacing at the mode's refresh, keys to the program's
     INT 9 handler (through the player's keymap), a tick callback, a key
-    recorder.
+    recorder; `bioskey.h`: the BIOS's keyboard for a program that read
+    its keys through INT 16h (the scan codes turned into the words it
+    got, fifteen kept, the runner's characters).
+  - `unlzexe.h`: a program packed with LZEXE 0.91 unpacked, as
+    `tools/unlzexe.py` does it; `rm_load_exe` uses it, so a port
+    compiles it with `rmem.c`;
   - `modplay.h` (MOD playback, micromod), `cdaudio.h` (a CD's audio
     tracks from GOG's cue sheet, Ogg Vorbis through stb_vorbis: the table
     of contents, the plays an MSCDEX program asks for, mixed into the

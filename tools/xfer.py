@@ -182,6 +182,7 @@ def main():
     first = defaultdict(list)           # a shape in B -> where it stands
     for j, s in enumerate(sb):
         first[s].append(j)
+    aligned_from = {t: o for o, t in code.items()}
     codekeys = defaultdict(list)        # a code segment of A -> its mapped offsets
     for s, o in sorted(code):
         codekeys[s].append(o)
@@ -195,7 +196,12 @@ def main():
         if t is not None and ib.get(t) is not None and sb[ib[t]:ib[t] + K] == want:
             return t
         hits = [lb[j][0] for j in first.get(want[0], ()) if sb[j:j + K] == want]
-        return hits[0] if len(hits) == 1 else None
+        # not a place the alignment gives to another address of FROM: two
+        # routines that begin alike would both be carried to the one of
+        # them that kept its beginning
+        if len(hits) == 1 and aligned_from.get(hits[0], o) == o:
+            return hits[0]
+        return None
 
     cache = {}
 
@@ -247,7 +253,9 @@ def main():
                 return False
         return True
 
-    out = [MARK + os.path.basename(args.src) + ' by tools/xfer.py; check, then keep or edit']
+    # the source as check.py finds it again: from the target's folder
+    rel = os.path.relpath(args.src, os.path.dirname(args.dst) or '.').replace(os.sep, '/')
+    out = [MARK + rel + ' by tools/xfer.py; check, then keep or edit']
     skip = ('exe', 'segment', 'relocorder', 'asm', 'linker', 'keeptail')
     n_ok = n_bad = 0
     lines = []                  # (source line, its words mapped or None)
