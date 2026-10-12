@@ -128,7 +128,10 @@ In build/selftest (a project as a game's would be, see kit.py):
      files: the copy taken, declined, the two messages, the bar) says
      "dialog ok"; tests/hud/hudtest.c
      (hud.c: the box, a letter, the bar, the size at 800x600, the
-     pictures shown) says "hud ok"; tests/opl/opltest.c (opl.c: a
+     pictures shown) says "hud ok"; tests/bioskey/keytest.c (bioskey.c:
+     a letter plain and with Shift, keys without a character, an E0
+     key, fifteen keys of room, the shift states) says "bioskey ok";
+     tests/opl/opltest.c (opl.c: a
      note's frequency and level with the rhythm mode off and on, the
      tom-tom a sine, the cymbal a mixture of high frequencies at its
      envelope's level, the hi-hat noise, the snare tone and noise, each
@@ -2465,6 +2468,12 @@ def main():
     out = run([exe])
     if 'hud ok' not in out:
         raise SystemExit('selftest FAILED: hud.c: ' + out)
+    print(out.strip())
+    exe = cc(os.path.join(b, 'keytest'), [os.path.join(HERE, 'bioskey', 'keytest.c'),
+                                           os.path.join(RUNTIME, 'bioskey.c')])
+    out = run([exe])
+    if 'bioskey ok' not in out:
+        raise SystemExit('selftest FAILED: bioskey.c: ' + out)
     print(out.strip())
     exe = cc(os.path.join(b, 'opltest'), [os.path.join(HERE, 'opl', 'opltest.c'),
                                            os.path.join(RUNTIME, 'opl.c')])

@@ -344,6 +344,12 @@ CD audio (MSCDEX's plays) comes from the release's cue sheet through
 `cdaudio.c`; the port answers the program's requests from it and mixes
 it into its audio callback (cda_mix).
 
+**Keys through the BIOS.** A program with no INT 9 handler of its own
+asked INT 16h: `bioskey.c` is that keyboard (hand `bioskey_put` to
+`frame_set_keyboard`; `bioskey_peek` and `bioskey_read` are AH=1 and
+AH=0), with the characters the runner's BIOS gives, so a key script
+means the same in the port.
+
 **The platform.** `platform.h`: a window showing an indexed picture in
 the 4:3 of a VGA screen (Alt+Enter full screen; Print Screen writes the
 picture shown as screenshot_NNNN.png, `shot.h`; full screen on a Steam

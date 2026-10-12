@@ -86,7 +86,9 @@ agent session leads others working on it.
     program it (ports, planes, Mode X, mode 12h/13h, the picture scanned
     out); `frame.h`: pacing at the mode's refresh, keys to the program's
     INT 9 handler (through the player's keymap), a tick callback, a key
-    recorder.
+    recorder; `bioskey.h`: the BIOS's keyboard for a program that read
+    its keys through INT 16h (the scan codes turned into the words it
+    got, fifteen kept, the runner's characters).
   - `unlzexe.h`: a program packed with LZEXE 0.91 unpacked, as
     `tools/unlzexe.py` does it; `rm_load_exe` uses it, so a port
     compiles it with `rmem.c`;
