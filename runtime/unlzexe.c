@@ -136,8 +136,10 @@ int lzexe_packed(const uint8_t *data, size_t size)
 
 uint8_t *lzexe_unpack(const uint8_t *data, size_t size, size_t *out_size)
 {
-    size_t start, stub, stub_len, end = 0, hdr_len, total, i;
-    unsigned ip, cs, sp, ss, grows, minalloc, maxalloc, less;
+    /* hdr_len, total and the two allocations are set where out is; MSVC
+     * does not see that (C4701), hence the 0s */
+    size_t start, stub, stub_len, end = 0, hdr_len = 0, total = 0, i;
+    unsigned ip, cs, sp, ss, grows, minalloc = 0, maxalloc = 0, less;
     uint8_t *image, *rel, *out = NULL;
     long image_len, nrel = -1;
 
