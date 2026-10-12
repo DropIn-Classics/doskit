@@ -2479,6 +2479,21 @@ def main():
     print(run([py, os.path.join(TOOLS, 'memcmp.py'), 'src/HELLO.hints',
                os.path.join(b, 'orig.ram'), os.path.join(b, 'port.ram'), '--skip', 'STACK',
                '--vram', os.path.join(b, 'orig.vram'), os.path.join(b, 'port.vram')]))
+    # DOS's memory ends at the same paragraph in the runner and the runtime
+    ends = []
+    for name, first in (('orig.ram', 0x60), ('port.ram', 0x66)):
+        with open(os.path.join(b, name), 'rb') as f:
+            ram = f.read()
+        mcb = first
+        while ram[mcb * 16] == ord('M'):
+            mcb += 1 + int.from_bytes(ram[mcb * 16 + 3:mcb * 16 + 5], 'little')
+        if ram[mcb * 16] != ord('Z'):
+            raise SystemExit('selftest FAILED: %s: no chain of memory blocks from %04X' % (name, first))
+        ends.append(mcb + 1 + int.from_bytes(ram[mcb * 16 + 3:mcb * 16 + 5], 'little'))
+    if ends[0] != ends[1]:
+        raise SystemExit('selftest FAILED: DOS memory ends at %04X in the runner, %04X in the runtime'
+                         % tuple(ends))
+    print('DOS memory ends at %04X in the runner and in the runtime' % ends[0])
     check_pmem(py, b)
 
     step('5. every runtime module compiles')

@@ -30,8 +30,10 @@ extern uint8_t mem[MEM_SIZE];
  * 0067h for the programs ported so far; `-log` of the entry point in
  * dosrun shows it for another. */
 #define RM_LOAD_PSP 0x0067u
-/* the end of conventional memory the arena reaches */
-#define RM_TOP 0xA000u
+/* the end of conventional memory the arena reaches: dosrun's (MEM_LAST
+ * in tools/run/dos.c), a kilobyte below A000h, so that the free block's
+ * length in its header is the original's too */
+#define RM_TOP 0x9FC0u
 
 /* the segment DS holds nearly always (rb, rw ...); the port sets it */
 extern uint16_t rm_ds;
