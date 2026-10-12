@@ -10,7 +10,8 @@
     While none of them changed, the program is not built again (`ok ...
     (cached)`); --fresh builds every one;
   * every hints file with a block carried over by xfer.py has it up to
-    date;
+    date (remembered the same way, with both hints files and both
+    programs in the hash);
   * every header written by symmap.py (found by its first line, anywhere
     in the project but build/ and game/) is up to date;
   * PROVENANCE.md is there (from doskit's template/, which every project
@@ -64,6 +65,13 @@ def build_key(hints):
         with open(path, 'rb') as fh:
             h.update(hashlib.sha256(fh.read()).digest())
     return h.hexdigest()
+
+
+def carried_key(src, dst):
+    """a hash of what the block xfer.py carries from src to dst depends on:
+    both hints files whole (the target's own lines decide what is carried),
+    both programs and the kit's tools"""
+    return hashlib.sha256((build_key(src) + build_key(dst)).encode()).hexdigest()
 
 
 def cached(hints, key):
@@ -150,9 +158,19 @@ def main():
         why = provenance(root)
         report(bad, 'PROVENANCE.md', 1 if why else 0, why or 'PROVENANCE.md there and filled in')
         for src, dst in carried_blocks(hints):
+            # xfer.py aligns the two programs anew, which takes long for
+            # large ones: a block found up to date is remembered like a
+            # rebuild
+            name, key = os.path.basename(dst), carried_key(src, dst)
+            verdict = None if fresh else cached(dst + '.carried', key)
+            if verdict:
+                print(f'ok   {verdict} (cached)')
+                continue
             rc, out = run([os.path.join(HERE, 'xfer.py'), src, dst, '--check'])
-            report(bad, f'{os.path.basename(dst)} (carried block)', rc,
-                   out if rc else f'{os.path.basename(dst)} carried block up to date')
+            report(bad, f'{name} (carried block)', rc,
+                   out if rc else f'{name} carried block up to date')
+            if not rc:
+                remember(dst + '.carried', key, f'{name} carried block up to date')
         for args in symmap_headers(root):
             rc, out = run([os.path.join(HERE, 'symmap.py')] + args + ['--check'])
             report(bad, f'{args[0]} (symmap.py)', rc, out)

@@ -928,6 +928,41 @@ def check_xfer(py):
     return len(exe)
 
 
+def check_carried_cache(py):
+    """check.py remembers a carried block found up to date and looks again
+    when the target's hints changed, when asked with --fresh, and finds a
+    block gone stale since"""
+    target = os.path.join(PROJ, 'src', 'MULTIS2.hints')
+    line = 'MULTIS2.hints carried block up to date'
+    check = [py, os.path.join(TOOLS, 'check.py')]
+    first, again = run(check), run(check)
+    if line + ' (cached)' in first or line not in first or line + ' (cached)' not in again:
+        raise SystemExit('selftest FAILED: check.py did not remember a carried block\n' + again)
+    if line + ' (cached)' in run(check + ['--fresh']):
+        raise SystemExit('selftest FAILED: check.py --fresh took a remembered carried block')
+    with open(target) as f:
+        text = f.read()
+    try:
+        # a line of the target's own: looked at again, still up to date
+        with open(target, 'w') as f:
+            f.write('; a line of its own\n' + text)
+        out = run(check)
+        if line + ' (cached)' in out or line not in out:
+            raise SystemExit('selftest FAILED: check.py took a carried block remembered '
+                             'for other hints\n' + out)
+        # a carried line changed by hand: out of date, whatever was remembered
+        with open(target, 'w') as f:
+            f.write(text.rstrip('\n') + '\n; added by hand\n')
+        out = run(check, check=False)
+        if 'FAIL MULTIS2.hints (carried block)' not in out:
+            raise SystemExit('selftest FAILED: check.py passed a carried block changed by hand\n'
+                             + out)
+    finally:
+        with open(target, 'w') as f:
+            f.write(text)
+    print('MULTIS2: a carried block found up to date is remembered by check.py')
+
+
 TWIN_ASM = """; a test program of the kit's own (tests/selftest.py, check_xfer_alike)
 .186
 CODE SEGMENT PARA PUBLIC 'CODE'
@@ -1867,6 +1902,7 @@ def main():
     check_xfer_alike(py)
     print(f'MULTIS2.EXE ({check_xfer(py)} bytes): MULTISEG\'s hints carried by xfer.py '
           'into renamed and shifted code segments, IDENTICAL')
+    check_carried_cache(py)
     print(f'interleaved code/data ({check_segment_order(py)} image bytes): IDENTICAL')
     print(f'compact TLINK header ({check_compact_tlink(py)} bytes): IDENTICAL')
     print(f'MULTIPAD.EXE ({check_hdrpad(py)} bytes, a longer header): IDENTICAL with '
