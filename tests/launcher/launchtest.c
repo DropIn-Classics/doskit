@@ -2,7 +2,8 @@
  * (selftest step 4), headless on plat_null.c with keys by picture:
  * from the menu a page opened, a choice stepped, a key item given Right
  * Ctrl, Esc back to the menu, a second page opened and left, an action
- * picked; Esc in the menu goes to Quit, Enter quits; the settings saved and read back; then frame_wait
+ * picked; Esc in the menu goes to Quit, Enter quits; the settings saved and read back,
+ * a kept number on a page no item opens among them; then frame_wait
  * handing keys through a keymap (one key to another, an E0 key to a
  * plain one, a key dropped).  Prints "launcher ok", exit status 0, or
  * what went wrong.
@@ -18,7 +19,7 @@
 #include "platform.h"
 #include "vga.h"
 
-static int vol = 1, key = 0x2A, other;
+static int vol = 1, key = 0x2A, other, seen = 3;
 static const char *const levels[] = { "off", "low", "middle", "high", NULL };
 static const char *const yesno[] = { "no", "yes", NULL };
 
@@ -35,10 +36,15 @@ static LauncherItem second[] = {
     { LI_HEAD, "Others", NULL, NULL, NULL, 0, NULL },
     { LI_CHOICE, "Other", "other", yesno, &other, 0, NULL },
 };
+/* what the port keeps for itself: a page that no item opens */
+static LauncherItem kept[] = {
+    { LI_KEPT, NULL, "seen", NULL, &seen, 0, NULL },
+};
 static LauncherPage pages[] = {
     { "Test", menu, 3 },
     { "Sound", first, 2 },
     { "More", second, 2 },
+    { NULL, kept, 1 },
 };
 
 static unsigned char got[16];
@@ -87,20 +93,22 @@ int main(int argc, char **argv)
     setenv("DK_KEYS", keys, 1);
 #endif
     plat_init("launchtest");
-    r = launcher_run(&app, NULL, pages, 3, NULL);
+    r = launcher_run(&app, NULL, pages, 4, NULL);
     if (r != 7 || vol != 2 || key != 0x9D || other != 1)
         return fail("launcher_run");
-    if (launcher_run(&app, NULL, pages, 3, NULL) != LAUNCHER_QUIT)
+    if (launcher_run(&app, NULL, pages, 4, NULL) != LAUNCHER_QUIT)
         return fail("Esc, Enter in the menu did not quit");
-    if (launcher_run_hook(&app, NULL, pages, 3, NULL, tick, &tick_count) != 7 || tick_count < 3)
+    if (launcher_run_hook(&app, NULL, pages, 4, NULL, tick, &tick_count) != 7 || tick_count < 3)
         return fail("launcher_run_hook did not tick while active");
     if (strcmp(launcher_key_name(0x9D), "Right Ctrl") || strcmp(launcher_key_name(0), "none"))
         return fail("launcher_key_name");
-    if (launcher_save(argv[1], "test", pages, 3) != 0)
+    if (launcher_save(argv[1], "test", pages, 4) != 0)
         return fail("launcher_save");
-    vol = 0, key = 0, other = 0;
-    if (launcher_load(argv[1], pages, 3) != 0 || vol != 2 || key != 0x9D || other != 1)
+    vol = 0, key = 0, other = 0, seen = 0;
+    if (launcher_load(argv[1], pages, 4) != 0 || vol != 2 || key != 0x9D || other != 1)
         return fail("launcher_load");
+    if (seen != 3)
+        return fail("a kept number was not written and read");
 
     /* the keymap: Right Ctrl to Left Shift, Space to Left Ctrl, A none */
     for (i = 0; i < 256; i++)

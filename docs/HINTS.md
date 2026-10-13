@@ -81,6 +81,27 @@ that runs on `frame.h`'s tick stands still.  A port that counts time in
 another way (a thread, the audio's samples) stops that itself around
 `hint_run`.  Sound that is playing plays on.
 
+## Shown once
+
+That the player has read a note, or how far they are in a tutorial, is
+kept with the port's settings, not in the game's files: an item of kind
+`LI_KEPT` (`launcher.h`) on a page that no item of the menu opens, so
+it is read and written with the settings and never shown.
+
+```c
+static int note_seen;
+static LauncherItem kept[] = {
+    { LI_KEPT, NULL, "note_seen", NULL, &note_seen, 0, NULL },
+};
+/* the last of the pages: { NULL, kept, 1 } */
+```
+
+After `launcher_load`: when `note_seen` is 0, show the card, set it
+and `launcher_save` at once (not only at a clean exit).  A player who
+deletes the settings file sees the note again.  A tutorial also gets a
+choice on a page of the setup screen ("Tutorial": Off, On), so that it
+can be had again without deleting anything.
+
 ## Changes that are not port customisation
 
 A port must not draw a card of its own into the picture or the layer,

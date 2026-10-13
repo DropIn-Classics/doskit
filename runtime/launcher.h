@@ -18,6 +18,9 @@
  * (Esc comes back).  The launcher ends the menu with a gap and "Quit".
  * The settings are on the other pages, a page for a group; a page
  * holds at most about 15 items before it scrolls.  At most 16 pages.
+ * A page that no item opens is never shown; its items are still read
+ * and written, which is where what the port keeps for itself goes
+ * (LI_KEPT: that the player has read a note, how far a tutorial is).
  *
  * Keys: Up/Down an item, Home/End (Page Up/Down) the first and the last,
  * Left/Right a choice's value (or Enter, which steps it on), Enter on
@@ -41,7 +44,10 @@ enum {
     LI_CHOICE,      /* *value an index into values */
     LI_KEY,         /* *value a make code (E0 keys + 80h, as pad.h's), 0 none */
     LI_ACTION,      /* Enter returns action */
-    LI_PAGE         /* Enter opens the page numbered action (not 0) */
+    LI_PAGE,        /* Enter opens the page numbered action (not 0) */
+    LI_KEPT         /* *value a number the port keeps in the settings file
+                     * for itself (a note was read, a tutorial's step);
+                     * never shown: on a page of its own that no item opens */
 };
 
 typedef struct {
@@ -49,7 +55,7 @@ typedef struct {
     const char *label;
     const char *name;               /* in the settings file; NULL: not kept */
     const char *const *values;      /* LI_CHOICE: the values' texts, NULL-ended */
-    int *value;                     /* LI_CHOICE, LI_KEY */
+    int *value;                     /* LI_CHOICE, LI_KEY, LI_KEPT */
     int action;                     /* LI_ACTION */
     const char *help;               /* the line at the bottom; NULL: none */
 } LauncherItem;
@@ -83,12 +89,14 @@ int launcher_run_hook(const LauncherApp *app, const char *footer, LauncherPage *
                       void *ctx);
 
 /* The values of the items with a name from the file `path` (a choice by
- * its text or its index, a key by its make code in hex); lines that are
+ * its text or its index, a key by its make code in hex, a kept number
+ * in decimal); lines that are
  * not understood, or out of range, are passed over.  0, or -1 when the
  * file cannot be read (the values stay). */
 int launcher_load(const char *path, LauncherPage *pages, int npages);
 
-/* the named items' values into `path` (choices by index, keys in hex),
+/* the named items' values into `path` (choices and kept numbers by
+ * their number, keys in hex),
  * after `comment` lines starting "# " (may be NULL); 0, or -1 */
 int launcher_save(const char *path, const char *comment, LauncherPage *pages, int npages);
 

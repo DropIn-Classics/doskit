@@ -48,6 +48,10 @@ A port supplies only the information that differs between games:
 - the facts required by the common game-file dialogs, through the
   functions already provided by `launcher.h`.
 
+What the port keeps in the settings file for itself and never shows
+(a note was read, docs/HINTS.md) is an item of kind `LI_KEPT` on a page
+of its own that no item opens.
+
 Use the existing item kinds.  The menu holds the normal way to start the
 game first, then a gap and one `LI_PAGE` per group of settings; "Quit" is
 added by the launcher.  Group related settings on clearly named pages of

@@ -706,6 +706,10 @@ int launcher_load(const char *path, LauncherPage *pages, int npages)
             v = strtol(val, &end, 16);
             if (end != val && !*end && v >= 0 && v <= 0xFF)
                 *it->value = (int)v;
+        } else if (it->kind == LI_KEPT) {
+            v = strtol(val, &end, 10);
+            if (end != val && !*end && v >= -0x7FFFFFFFL && v <= 0x7FFFFFFFL)
+                *it->value = (int)v;
         } else if (it->kind == LI_CHOICE) {
             int n = count_values(it), i;
 
@@ -740,7 +744,7 @@ int launcher_save(const char *path, const char *comment, LauncherPage *pages, in
                 continue;
             if (it->kind == LI_KEY)
                 fprintf(f, "%s = %02X\n", it->name, (unsigned)*it->value);
-            else if (it->kind == LI_CHOICE)
+            else if (it->kind == LI_CHOICE || it->kind == LI_KEPT)
                 fprintf(f, "%s = %d\n", it->name, *it->value);
         }
     ok = !ferror(f);
