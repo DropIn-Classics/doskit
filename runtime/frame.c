@@ -215,6 +215,58 @@ int frame_wait_keys(void)
     return 1;
 }
 
+int frame_hold(int (*input)(int code, int clicks, void *user), void *user)
+{
+    unsigned char down[256] = {0};      /* keys pressed while held */
+    int result = 0, e0 = 0, ndown = 0, patience = 0;
+
+    while (!closed) {
+        int b, x, y, clicks = 0, buttons = 0;
+
+        pace();
+        if (!plat_pump()) {
+            closed = 1;
+            break;
+        }
+        while ((b = plat_read_scancode()) >= 0) {
+            int code;
+
+            if (b == 0xE0) {
+                e0 = 1;
+                continue;
+            }
+            code = (b & 0x7F) | (e0 ? 0x80 : 0);
+            if (!(b & 0x80)) {
+                if (!down[code])
+                    ndown++;
+                down[code] = 1;
+                if (!result)
+                    result = input(code, 0, user);
+            } else if (down[code]) {
+                down[code] = 0;
+                ndown--;
+            } else {
+                if (e0)
+                    hand_over_mapped(0xE0);
+                hand_over_mapped(b);
+            }
+            e0 = 0;
+        }
+        while ((b = plat_read_control()) >= 0)
+            if (hud_control)
+                hud_control(b);
+        plat_mouse(&x, &y, &clicks);
+        plat_mouse_motion(&x, &y, &buttons);
+        if (clicks && !result)
+            result = input(0, clicks, user);
+        if (result && ((!ndown && !buttons) || ++patience > 140))
+            return result;
+        show();
+        frames++;
+    }
+    return 0;
+}
+
 unsigned long frame_count(void)
 {
     return frames;

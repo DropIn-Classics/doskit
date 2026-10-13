@@ -128,7 +128,11 @@ In build/selftest (a project as a game's would be, see kit.py):
      files: the copy taken, declined, the two messages, the bar) says
      "dialog ok"; tests/hud/hudtest.c
      (hud.c: the box, a letter, the bar, the size at 800x600, the
-     pictures shown) says "hud ok"; tests/bioskey/keytest.c (bioskey.c:
+     pictures shown) says "hud ok"; tests/hint/hinttest.c (hint.c on
+     plat_null.c's layer: the card's place, frame, title, text and
+     German letters, the frame around a place; frame.c's frame_hold: no
+     tick, the answering key kept from the program; DK_LAYERDUMP's
+     picture) says "hint ok"; tests/bioskey/keytest.c (bioskey.c:
      a letter plain and with Shift, keys without a character, an E0
      key, fifteen keys of room, the shift states) says "bioskey ok";
      tests/opl/opltest.c (opl.c: a
@@ -2505,6 +2509,26 @@ def main():
     if 'hud ok' not in out:
         raise SystemExit('selftest FAILED: hud.c: ' + out)
     print(out.strip())
+    exe = cc(os.path.join(b, 'hinttest'), [os.path.join(HERE, 'hint', 'hinttest.c')] + [
+        os.path.join(RUNTIME, f) for f in ('hint.c', 'textmode.c', 'frame.c', 'vga.c',
+                                           'plat_null.c', 'shot.c', 'sys.c')])
+    dumped = os.path.join(b, 'hint.ppm')
+    out = subprocess.run(
+        [exe], cwd=PROJ, capture_output=True, text=True,
+        env=dict(os.environ, DK_LAYER='640x480', DK_LAYERDUMP=dumped,
+                 DK_KEYS='1:1E 4:9E 5:1C 7:9C 12:01 13:81'))
+    if out.returncode or 'hint ok' not in out.stdout:
+        print(out.stdout + out.stderr)
+        raise SystemExit('selftest FAILED: hint.c / frame.c\'s frame_hold / the platform\'s layer')
+    # the last picture with the card over it, at the layer's size: the
+    # card's blue where it was, the picture beside it
+    ppm = open(dumped, 'rb').read()
+    head = b'P6\n640 480\n255\n'
+    at = lambda x, y: ppm[len(head) + 3 * (640 * y + x):][:3]
+    if not ppm.startswith(head) or len(ppm) != len(head) + 640 * 480 * 3 \
+            or at(320, 370) != b'\x00\x00\xaa' or at(10, 10) == at(320, 370):
+        raise SystemExit('selftest FAILED: plat_null.c\'s DK_LAYERDUMP')
+    print(out.stdout.strip())
     exe = cc(os.path.join(b, 'keytest'), [os.path.join(HERE, 'bioskey', 'keytest.c'),
                                            os.path.join(RUNTIME, 'bioskey.c')])
     out = run([exe])

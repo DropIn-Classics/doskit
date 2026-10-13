@@ -36,6 +36,17 @@ void plat_set_vsync(int on);
  * 4:3 shape of a VGA screen; Alt+Enter switches to the whole monitor */
 void plat_present(const uint8_t *pixels, int width, int height, const uint32_t palette[256]);
 
+/* A layer over the picture in the window's own pixels, for what the port
+ * says to the player beside the game (hint.h): sharp at any window size,
+ * where the picture has the video mode's few pixels.  With a layer set,
+ * every plat_present calls `draw` with width x height pixels covering the
+ * picture as it is shown, all 0, to fill with 0xAARRGGBB (AA 0 leaves the
+ * picture, FF covers it, between them mixed); it returns 0 when it drew
+ * nothing.  The size is the window's and changes with it.  NULL: none.
+ * Not in the screenshots, which are the program's picture. */
+typedef int (*PlatLayer)(uint32_t *pixels, int width, int height, void *user);
+void plat_set_layer(PlatLayer draw, void *user);
+
 /* The keyboard as the PC's port 60h gave it (scan code set 1): make code,
  * break code = make | 80h, E0h before the extended keys.  -1 when none is
  * left. */

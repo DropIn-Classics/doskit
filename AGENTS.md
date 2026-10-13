@@ -30,6 +30,8 @@ from template/).
 7. docs/LAUNCHER.md is the binding design contract for every port's setup
    screen. The common launcher is changed in the kit, deliberately and
    with its tests; it is not redesigned or copied in a game project.
+   docs/HINTS.md is the same for the card a port says something to the
+   player with (hint.h).
 
 ## Provenance (permanent)
 

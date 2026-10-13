@@ -5,8 +5,9 @@
  *
  * The font is our own (textmode.c): printable ASCII drawn as bitmaps, and
  * the characters of code page 437 that a DOS setup screen uses (lines,
- * boxes, shades, arrows) drawn by rules, under code page 437's numbers.
- * Other codes are blank. */
+ * boxes, shades, arrows) drawn by rules, under code page 437's numbers,
+ * with the German letters (the umlauts and the sharp s) at theirs.  Other
+ * codes are blank. */
 #ifndef DK_TEXTMODE_H
 #define DK_TEXTMODE_H
 
@@ -36,6 +37,10 @@ enum {
     TM_BOTTOM_RIGHT = 0xD9, TM_TOP_LEFT = 0xDA, TM_BLOCK = 0xDB, TM_LOWER_HALF = 0xDC,
     TM_UPPER_HALF = 0xDF, TM_MIDDLE_DOT = 0xFA, TM_SQUARE = 0xFE
 };
+enum {
+    TM_U_UMLAUT = 0x81, TM_A_UMLAUT = 0x84, TM_CAP_A_UMLAUT = 0x8E, TM_O_UMLAUT = 0x94,
+    TM_CAP_O_UMLAUT = 0x99, TM_CAP_U_UMLAUT = 0x9A, TM_SHARP_S = 0xE1
+};
 
 /* every cell `ch` in `attr` */
 void tm_clear(uint8_t ch, uint8_t attr);
@@ -61,5 +66,9 @@ void tm_shadow(int x, int y, int w, int h);
 /* the screen as a picture (TM_WIDTH x TM_HEIGHT palette indexes, colours
  * 0-15 of `palette`, 0x00RRGGBB) */
 void tm_render(uint8_t *pixels, uint32_t palette[256]);
+
+/* a character's picture for a drawing of one's own (hint.c): 16 rows of
+ * 8 pixels, bit 7 the left one */
+const uint8_t *tm_glyph(uint8_t ch);
 
 #endif

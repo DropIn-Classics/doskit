@@ -269,6 +269,35 @@ static void make_shapes(void)
     font[TM_LEFT_ARROW][8] |= 0x1F;
 }
 
+/* the German letters: a, o, u with two dots above them (the small ones
+ * on rows 2-3, the capitals on row 0 alone, which is all the cell has
+ * above them) and a sharp s of its own, 10 rows from row 2 */
+static void make_umlauts(void)
+{
+    static const struct { uint8_t code, from; } dotted[] = {
+        { TM_A_UMLAUT, 'a' }, { TM_O_UMLAUT, 'o' }, { TM_U_UMLAUT, 'u' },
+        { TM_CAP_A_UMLAUT, 'A' }, { TM_CAP_O_UMLAUT, 'O' }, { TM_CAP_U_UMLAUT, 'U' },
+    };
+    static const char *const sharp_s[10] = {
+        ".####...", "##..##..", "##..##..", "##.##...", "##.###..",
+        "##...##.", "##...##.", "##...##.", "##...##.", "##.###..",
+    };
+    int i, y, c;
+
+    for (i = 0; i < (int)(sizeof dotted / sizeof dotted[0]); i++) {
+        uint8_t *g = font[dotted[i].code];
+        memcpy(g, font[dotted[i].from], 16);
+        if (dotted[i].from >= 'a')
+            g[2] = g[3] = 0x66;
+        else
+            g[0] = 0x66;
+    }
+    for (y = 0; y < 10; y++)
+        for (c = 0; c < 8; c++)
+            if (sharp_s[y][c] == '#')
+                font[TM_SHARP_S][2 + y] |= (uint8_t)(0x80 >> c);
+}
+
 static void make_font(void)
 {
     int band, row, g, c;
@@ -283,7 +312,15 @@ static void make_font(void)
             }
     make_lines();
     make_shapes();
+    make_umlauts();
     font_made = 1;
+}
+
+const uint8_t *tm_glyph(uint8_t ch)
+{
+    if (!font_made)
+        make_font();
+    return font[ch];
 }
 
 /* ---- the screen */

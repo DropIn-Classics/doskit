@@ -341,13 +341,16 @@ callback, the mouse (as a pointer on the picture, `plat_mouse`, or as a
 device with buttons held and movement, `plat_mouse_motion`, kept to the
 window by `plat_mouse_grab`). `plat_null.c` runs headless on a virtual
 clock for tests (`DK_FRAMES`, `DK_KEYS`, `DK_MOUSE`, `DK_MOUSEMOVE`,
-`DK_DUMP`, `DK_SHOTS`); with `DK_AUDIO=1` or `DK_WAV=file` it has a
+`DK_DUMP`, `DK_SHOTS`, `DK_LAYER`, `DK_LAYERDUMP`); with `DK_AUDIO=1` or `DK_WAV=file` it has a
 virtual audio device whose callback is asked for the clock's samples
 each time `plat_sleep_ms` moves it on. That clock moves only in
 `plat_sleep_ms`: what the program does between two sleeps takes no time.
 Controllers become keys (`pad.h`, a table per situation). `textmode.h`
 draws an 80x25 screen in the style of DOS's; `hud.h` a box at the top of
-the picture (the volume keys, docs/PLAYER-SETTINGS.md); `fli.h` plays
+the picture (the volume keys, docs/PLAYER-SETTINGS.md); `hint.h` a card
+of text and a frame around a place in the window's own pixels
+(`plat_set_layer`), with the program held if wanted (`frame_hold`), for
+a tutorial or a note (docs/HINTS.md); `fli.h` plays
 FLI/FLC. `cdimage.h` finds the GOG release and on the first start
 unpacks its CD image or copies its folder; `inno.h` reads a Windows
 installer; `update.h` offers a newer release when the player agrees.

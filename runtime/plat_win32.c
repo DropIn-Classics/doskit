@@ -242,6 +242,66 @@ int plat_fullscreen(void)
 static int shown_x, shown_y, shown_w, shown_h;    /* the picture, as last painted */
 
 /* the picture in the largest 4:3 rectangle of the client area, black around */
+/* ---- the layer over the picture (plat_set_layer) ---- */
+
+static PlatLayer layer_draw;
+static void *layer_user;
+static uint32_t *layer_pixels, *mixed;  /* the layer; the picture with it over it */
+static int layer_w, layer_h;
+
+void plat_set_layer(PlatLayer draw, void *user)
+{
+    layer_draw = draw;
+    layer_user = user;
+}
+
+/* The picture at w x h (the nearest pixel, as COLORONCOLOR stretches it)
+ * with the layer mixed over it, put at (x, y); 0 when there is no layer
+ * or it drew nothing, and the picture is still to be painted. */
+static int paint_with_layer(HDC dc, int x, int y, int w, int h)
+{
+    BITMAPINFOHEADER bh;
+    int i, j;
+
+    if (!layer_draw || w <= 0 || h <= 0)
+        return 0;
+    if (w != layer_w || h != layer_h || !layer_pixels || !mixed) {
+        free(layer_pixels);
+        free(mixed);
+        layer_w = layer_h = 0;
+        layer_pixels = (uint32_t *)malloc((size_t)w * (size_t)h * sizeof *layer_pixels);
+        mixed = (uint32_t *)malloc((size_t)w * (size_t)h * sizeof *mixed);
+        if (!layer_pixels || !mixed)
+            return 0;
+        layer_w = w;
+        layer_h = h;
+    }
+    memset(layer_pixels, 0, (size_t)w * (size_t)h * sizeof *layer_pixels);
+    if (!layer_draw(layer_pixels, w, h, layer_user))
+        return 0;
+    for (j = 0; j < h; j++) {
+        const uint8_t *row = pixels + (size_t)(j * pic_h / h) * (size_t)((pic_w + 3) & ~3);
+        for (i = 0; i < w; i++) {
+            RGBQUAD c = bmi.colors[row[i * pic_w / w]];
+            uint32_t over = layer_pixels[j * w + i], a = over >> 24;
+            uint32_t r = (c.rgbRed * (255 - a) + (over >> 16 & 0xFF) * a) / 255;
+            uint32_t g = (c.rgbGreen * (255 - a) + (over >> 8 & 0xFF) * a) / 255;
+            uint32_t b = (c.rgbBlue * (255 - a) + (over & 0xFF) * a) / 255;
+            mixed[j * w + i] = r << 16 | g << 8 | b;
+        }
+    }
+    memset(&bh, 0, sizeof bh);
+    bh.biSize = sizeof bh;
+    bh.biWidth = w;
+    bh.biHeight = -h;                   /* top-down */
+    bh.biPlanes = 1;
+    bh.biBitCount = 32;
+    bh.biCompression = BI_RGB;
+    SetDIBitsToDevice(dc, x, y, (DWORD)w, (DWORD)h, 0, 0, 0, (UINT)h, mixed, (BITMAPINFO *)&bh,
+                      DIB_RGB_COLORS);
+    return 1;
+}
+
 static void paint(HDC dc)
 {
     RECT r;
@@ -279,6 +339,8 @@ static void paint(HDC dc)
         FillRect(dc, &a, black);
         return;
     }
+    if (paint_with_layer(dc, x, y, w, h))
+        return;
     SetStretchBltMode(dc, COLORONCOLOR);
     StretchDIBits(dc, x, y, w, h, 0, 0, pic_w, pic_h, pixels, (BITMAPINFO *)&bmi,
                   DIB_RGB_COLORS, SRCCOPY);
@@ -490,6 +552,10 @@ void plat_shutdown(void)
     window = NULL;
     free(pixels);
     pixels = NULL;
+    free(layer_pixels);
+    free(mixed);
+    layer_pixels = mixed = NULL;
+    layer_w = layer_h = 0;
     timeEndPeriod(1);
 }
 

@@ -108,7 +108,11 @@ agent session leads others working on it.
     game's files every port shows on its first start: the copy from the
     GOG release offered, its progress, what to do when nothing was
     found), `hud.h` (a short box at the top of the picture: a word and a
-    bar of steps, for the volume keys in play), `pad.h` (controller
+    bar of steps, for the volume keys in play), `hint.h` (what a port
+    says to the player beside the game, specified by `docs/HINTS.md`: a
+    card of text in the setup screen's style and a frame around a place,
+    drawn in the window's own pixels, the program held meanwhile if
+    wanted; for a tutorial or a note before the game), `pad.h` (controller
     buttons to keys; `docs/PLAYER-SETTINGS.md` says how a port wires the
     volume keys, the headphone mix, the player's keys and the controller), `cdimage.h` (a GOG release found and its image
     unpacked, or its installed folder copied; a cue sheet's disc, image

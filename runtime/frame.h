@@ -56,6 +56,19 @@ int frame_wait(void);
  * went on at once).  0 once the window was closed. */
 int frame_wait_keys(void);
 
+/* The program held while the port says something to the player (hint.h):
+ * the picture goes on being shown at its rate, with the overlay and the
+ * hud, but the tick does not run and the program gets no input.  `input`
+ * is called for each key pressed (code: its make code, the E0 keys + 80h
+ * as pad.h's, not through the keymap; clicks 0) and for the mouse's
+ * buttons pressed (code 0; clicks 1 left, 2 right), until it returns
+ * something other than 0, which frame_hold returns once those keys and
+ * the mouse's buttons are let go again (at most two seconds later), so
+ * that the program sees nothing of them.  The release of a key that was
+ * down before goes to the program as always; the mouse's movement
+ * meanwhile is dropped.  0 once the window was closed. */
+int frame_hold(int (*input)(int code, int clicks, void *user), void *user);
+
 /* each keyboard byte handed to the program is written to the file `path`
  * as PICTURE:HEX (the picture count when it was handed over) */
 void frame_record(const char *path);

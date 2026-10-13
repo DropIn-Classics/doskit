@@ -22,6 +22,11 @@ static int tex_w, tex_h;
 static uint32_t *argb;
 static int closed;
 static SDL_Rect shown;                  /* the picture, in the renderer's pixels */
+static PlatLayer layer_draw;            /* plat_set_layer */
+static void *layer_user;
+static SDL_Texture *layer_tex;
+static uint32_t *layer_pixels;
+static int layer_w, layer_h;
 static int mouse_seen, mouse_x, mouse_y, mouse_clicks;  /* window points */
 static int move_seen, move_dx, move_dy, mouse_held, mouse_grabbed;
 
@@ -322,6 +327,12 @@ void plat_shutdown(void)
 {
     if (texture)
         SDL_DestroyTexture(texture);
+    if (layer_tex)
+        SDL_DestroyTexture(layer_tex);
+    layer_tex = NULL;
+    free(layer_pixels);
+    layer_pixels = NULL;
+    layer_w = layer_h = 0;
     if (renderer)
         SDL_DestroyRenderer(renderer);
     if (window)
@@ -426,6 +437,38 @@ int plat_pump(void)
     return !closed;
 }
 
+void plat_set_layer(PlatLayer draw, void *user)
+{
+    layer_draw = draw;
+    layer_user = user;
+}
+
+/* the layer drawn anew for a picture shown in dst, and put over it */
+static void show_layer(const SDL_Rect *dst)
+{
+    if (!layer_draw || dst->w <= 0 || dst->h <= 0)
+        return;
+    if (dst->w != layer_w || dst->h != layer_h || !layer_tex) {
+        if (layer_tex)
+            SDL_DestroyTexture(layer_tex);
+        free(layer_pixels);
+        layer_w = layer_h = 0;
+        layer_tex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
+                                      SDL_TEXTUREACCESS_STREAMING, dst->w, dst->h);
+        layer_pixels = (uint32_t *)malloc((size_t)dst->w * (size_t)dst->h * sizeof *layer_pixels);
+        if (!layer_tex || !layer_pixels)
+            return;
+        SDL_SetTextureBlendMode(layer_tex, SDL_BLENDMODE_BLEND);
+        layer_w = dst->w;
+        layer_h = dst->h;
+    }
+    memset(layer_pixels, 0, (size_t)layer_w * (size_t)layer_h * sizeof *layer_pixels);
+    if (!layer_draw(layer_pixels, layer_w, layer_h, layer_user))
+        return;
+    SDL_UpdateTexture(layer_tex, NULL, layer_pixels, layer_w * (int)sizeof *layer_pixels);
+    SDL_RenderCopy(renderer, layer_tex, NULL, dst);
+}
+
 /* the picture in the largest 4:3 rectangle of the window, black around */
 void plat_present(const uint8_t *src, int width, int height, const uint32_t palette[256])
 {
@@ -462,6 +505,7 @@ void plat_present(const uint8_t *src, int width, int height, const uint32_t pale
     shown = dst;
     SDL_RenderClear(renderer);
     SDL_RenderCopy(renderer, texture, NULL, &dst);
+    show_layer(&dst);
     SDL_RenderPresent(renderer);
 }
 

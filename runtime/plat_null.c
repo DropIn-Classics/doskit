@@ -18,6 +18,11 @@
  *   DK_SHOTS=...    screenshots by picture number: "120:a.png 300:b.png"
  *                   writes pictures 120 and 300 as PNG files (shot.h;
  *                   no spaces in the names)
+ *   DK_LAYER=WxH    the size plat_set_layer's layer is asked for, as a
+ *                   window of that size would (without it 1280x960)
+ *   DK_LAYERDUMP=file  the last picture at the layer's size with the
+ *                   layer over it, as a PPM file (nothing without a
+ *                   layer that drew)
  *   DK_AUDIO=1      a virtual audio device: plat_audio_start says 1, and
  *                   the callback is asked for the frames of the virtual
  *                   clock's time as plat_sleep_ms moves it on (the frames
@@ -50,6 +55,12 @@ static uint8_t last[VGA_MAX_W * VGA_MAX_H];
 static uint32_t last_pal[256];
 static int last_w, last_h;
 
+static PlatLayer layer_draw;            /* plat_set_layer */
+static void *layer_user;
+static const char *layer_dump_path;
+static uint32_t *layer_pixels;
+static int layer_w = 1280, layer_h = 960, layer_drew;
+
 int plat_init(const char *title)
 {
     const char *n = getenv("DK_FRAMES");
@@ -61,6 +72,12 @@ int plat_init(const char *title)
     mouse = getenv("DK_MOUSE");
     moves = getenv("DK_MOUSEMOVE");
     shots = getenv("DK_SHOTS");
+    layer_dump_path = getenv("DK_LAYERDUMP");
+    n = getenv("DK_LAYER");
+    if (n && sscanf(n, "%dx%d", &layer_w, &layer_h) != 2)
+        layer_w = 1280, layer_h = 960;
+    if (layer_w < 1 || layer_h < 1 || layer_w > 8192 || layer_h > 8192)
+        layer_w = 1280, layer_h = 960;
     return 1;
 }
 
@@ -80,6 +97,50 @@ static void dump(void)
         fputc((int)(c >> 8) & 0xFF, f);
         fputc((int)c & 0xFF, f);
     }
+    fclose(f);
+}
+
+/* ---- the layer over the picture (plat_set_layer, DK_LAYER) ---- */
+
+void plat_set_layer(PlatLayer draw, void *user)
+{
+    layer_draw = draw;
+    layer_user = user;
+}
+
+static void layer_for_picture(void)
+{
+    layer_drew = 0;
+    if (!layer_draw)
+        return;
+    if (!layer_pixels)
+        layer_pixels = (uint32_t *)malloc((size_t)layer_w * (size_t)layer_h * sizeof *layer_pixels);
+    if (!layer_pixels)
+        return;
+    memset(layer_pixels, 0, (size_t)layer_w * (size_t)layer_h * sizeof *layer_pixels);
+    layer_drew = layer_draw(layer_pixels, layer_w, layer_h, layer_user) != 0;
+}
+
+/* the picture stretched to the layer's size (the nearest pixel) and the
+ * layer mixed over it */
+static void layer_dump(void)
+{
+    FILE *f;
+    int i, j, k;
+
+    if (!layer_dump_path || !layer_drew || !last_w)
+        return;
+    f = fopen(layer_dump_path, "wb");
+    if (!f)
+        return;
+    fprintf(f, "P6\n%d %d\n255\n", layer_w, layer_h);
+    for (j = 0; j < layer_h; j++)
+        for (i = 0; i < layer_w; i++) {
+            uint32_t c = last_pal[last[(j * last_h / layer_h) * last_w + i * last_w / layer_w]];
+            uint32_t over = layer_pixels[j * layer_w + i], a = over >> 24;
+            for (k = 16; k >= 0; k -= 8)
+                fputc((int)(((c >> k & 0xFF) * (255 - a) + (over >> k & 0xFF) * a) / 255), f);
+        }
     fclose(f);
 }
 
@@ -143,6 +204,9 @@ static void audio_run(void)
 void plat_shutdown(void)
 {
     dump();
+    layer_dump();
+    free(layer_pixels);
+    layer_pixels = NULL;
     if (wav) {
         wav_header(audio_given);
         fclose(wav);
@@ -318,6 +382,7 @@ void plat_present(const uint8_t *pixels, int width, int height, const uint32_t p
         last_h = height;
     }
     shot_keep(pixels, width, height, palette);
+    layer_for_picture();
     shots_for_picture();
     picture++;
     if (frames_left > 0)
